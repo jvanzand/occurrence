@@ -137,7 +137,6 @@ def mcmc(nstars, comp_names, cell_dict, bin_lam_dict,
 
     return sampler
 
-@profile
 def loglik(lam, nstars, comp_names, bin_lam_dict, num_cells, all_binsizes, avg_cell_compls):
     """
     Log likelihood of a model histogram, given a 
