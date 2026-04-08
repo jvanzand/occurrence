@@ -1,0 +1,32 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore entire toy directory (example data / outputs)
+toy/
+
+# Saved products and large binary outputs
+saved_maps_*/
+saved_chains/
+saved_dicts/
+plots/
+*.npz
+*.npy
+*.pkl
+
+# Virtualenv / environment
+venv/
+env/
+.env
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

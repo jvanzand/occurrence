@@ -1,0 +1,154 @@
+## Utility functions related to sampling posteriors distributions 
+## and adding info like priors and completeness values
+import numpy as np
+import pandas as pd
+import os
+import pickle
+
+def post_sampler1(companion_post_dir, star_df, num_samples=1000):
+    """
+    Customizable function to sample from a set of companion posteriors.
+    """
+    post_sample_dict = {}
+
+    for i in range(len(star_df)):
+        comp_name_list = star_df.iloc[i]['comp_list']
+        
+        for comp_name in comp_name_list:
+            post_file = os.path.join(companion_post_dir, f"{comp_name}_post.csv")
+            post = pd.read_csv(post_file)
+
+            sampled_a = np.array(post.sma_au.sample(num_samples, replace=True))
+            sampled_m = np.array(post.mass_mearth.sample(num_samples, replace=True))
+
+            post_sample_dict[comp_name] = np.array([sampled_a, sampled_m])
+        
+    
+    return post_sample_dict
+    
+    
+def post_sampler2(companion_post_dir, sysname_list):
+    """
+    Function to sample from orvara posteriors in particular
+    Note that chains for individual companions are saved under
+    the host system, so we need the system names.
+    """
+
+    from astropy import constants as c
+    Ms2Mj = (c.M_sun/c.M_jup).value
+    
+    post_sample_dict = {}
+    
+    # CLS systems (in the pool of 128 that also have a planet/BD) with a trend
+    # Do not sample from these trend posteriors because I don't consider them very reliable
+    CLSI_trend_systems = ['HD145934', 'HD1326',
+	                      'HD183263', 'HD34445',
+	                      'HD195019', 'HD24040', 
+	                      'HD45184',  'HIP57050']
+    
+    for sys_name in sysname_list:
+
+        chain_file = os.path.join(chain_root, sys_name+'.h5')
+
+        with h5py.File(chain_file, 'r') as f:
+            cols = f["chains"].attrs["param_names"] # Use f['chains'].attrs.keys() to see that param_names is a key
+            last_chars = [s[-1] for s in cols] # Last char of every col name
+            max_comp_ind = max([int(lc) for lc in last_chars if lc.isdigit()]) # Determine last comp
+
+
+            # For trend systems, remove the trend comp so it's not sampled
+            if any([tr_name in sys_name for tr_name in CLSI_trend_systems]):
+                max_comp_ind -= 1
+
+
+            # Load chains
+            chain = f["chains"][:]  # Use f.keys() to see that "chains" is a key of f
+            nsteps, nwalkers, ndims = np.shape(chain)
+            new_nsteps = nsteps*nwalkers
+            chain_flat = np.reshape(chain, newshape=(new_nsteps, ndims)) # New shape
+
+            chain_dict = {cols[i]:chain_flat[:,i] for i in range(ndims)} # Assoc. each col name to its chain
+
+            for comp_ind in range(max_comp_ind+1):
+        
+                rand_inds = np.random.randint(0, new_nsteps, size=ndraws) # Inds to take random draws
+                a_chain = chain_dict[f'sau{comp_ind}'][rand_inds]
+                m_chain = chain_dict[f'msec{comp_ind}'][rand_inds]*Ms2Mj # Convert to M_Jup
+
+                comp_name = sysname+str(comp_ind)
+                post_sample_dict[comp_name] = [a_chain, m_chain]
+            
+    
+    return post_sample_dict
+    
+    
+    
+def interim_prior(post_sample_dict, prior_type='loguniform'):
+    """
+    Given a set of posterior samples,
+    calculate the interim prior associated with each
+    and update the input dictionary.
+    
+    Assumes the input dictionary has columns of
+    'comp_name', 'a_list', and 'm_list'
+    """
+
+    if prior_type=='loguniform':
+        
+        for comp_name in post_sample_dict.keys():
+            a_m_samples = post_sample_dict[comp_name]
+            prior_array = 1/a_m_samples[0] * 1/a_m_samples[1]
+            
+            post_sample_dict[comp_name] = np.vstack([a_m_samples, prior_array])
+
+    return post_sample_dict
+
+
+def include_post_completeness(sampled_post_dict, star_df,
+                              saved_maps_dir):
+    """
+    Given a dictionary with companion posterior
+    samples, calculate the completeness at each
+    sample. 
+    Calculate two completeness values:
+    the value for the system the sample is from
+    and the value for the average over all
+    stars in star_comp_dict
+    """
+
+    ## Load average interpolation function
+    avg_compl_interp_str = os.path.join(saved_maps_dir, 'avg_map/interp_fn.pkl')
+    avg_compl_interp = pickle.load(open(avg_compl_interp_str, 'rb'))
+    
+    for star_name in star_df.star_name:
+        
+        ## Load single-system interpolation function
+        single_compl_interp_str = os.path.join(saved_maps_dir, star_name, 'interp_fn.pkl')
+        single_compl_interp = pickle.load(open(single_compl_interp_str, 'rb'))
+        
+        comp_list = star_df.query(f"star_name=='{star_name}'").comp_list.iloc[0] # List of comp names
+        ## For every companion in the system, calculate the average compl over all stars AND the single-system compl
+        for comp_name in comp_list:
+            #import pdb; pdb.set_trace()
+            a_m_prior = sampled_post_dict[comp_name] # Already-saved values, which we will append to
+            
+            ## Compute average and single-system completeness
+            avg_compls = avg_compl_interp((a_m_prior[0], a_m_prior[1])) # interp_fn((a_list, m_list))
+            single_star_compls = single_compl_interp((a_m_prior[0], a_m_prior[1]))
+            
+            ## The likelihood later requires completeness/single_system_prior. So compute that now.
+            compl_over_prior_avg = avg_compls/a_m_prior[2]
+            compl_over_prior_single = single_star_compls/a_m_prior[2]
+            
+            # Updated array includes a_samples, m_samples, average completenesses, single star completenesses, compl_over_prior_avg, compl_over_prior_single.
+            # Probably the only compl array I'll use is compl_over_prior_single. compl_over_prior_avg is to test whether using avg completeness changes the answer. The two completeness arrays are for testing/sanity checks.
+            new_array = [a_m_prior[:2], avg_compls, single_star_compls,
+                         compl_over_prior_avg, compl_over_prior_single]
+            
+            sampled_post_dict[comp_name] = np.vstack(new_array)
+    
+    return sampled_post_dict
+    
+    
+    
+    
