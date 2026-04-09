@@ -340,11 +340,13 @@ def make_results_plots(path_to_chains, completeness_dir, path_to_summary):
     
     summary_dict = dict(np.load('saved_dicts/summary_dict.npz'))
     
-    pu.completeness_plotter(xgrid, ygrid, zgrid, 
-                            'plots/catalog_with_occurrence.png', 'Average completeness',
-                            save_plot=True,
-                            a_m_lims_pairs=cell_dict['a_m_lims_pairs'],
-                            summary_dict=summary_dict)
+    # pu.completeness_plotter(xgrid, ygrid, zgrid, 
+    #                         'plots/catalog_with_occurrence.png', 'Average completeness',
+    #                         save_plot=True,
+    #                         summary_dict=summary_dict)
+                            
+    pu.plot_occurrence_hist(summary_dict, stack_dim='m', savepath='plots/occurrence.png',
+                            figsize=(6, 4), dpi=300)
     
     return
     

@@ -327,6 +327,11 @@ def summary_stats(chain_path, cell_dict, bin_lam_dict):
     
     summary_dict['cell_weights'] = cell_weights
     summary_dict['cell_compls'] = cell_dict['avg_compls']
+    
+    ## Transfer these keys to summary_dict for plotting
+    summary_dict['a_m_lims_pairs'] = cell_dict['a_m_lims_pairs']
+    summary_dict['n_abins'] = cell_dict['n_abins']
+    summary_dict['n_mbins'] = cell_dict['n_mbins']
     # import pdb; pdb.set_trace()
     
     modes = summary_dict['mode']
@@ -334,20 +339,21 @@ def summary_stats(chain_path, cell_dict, bin_lam_dict):
     hdi_high = summary_dict['hdi_high']
     cell_weights = summary_dict['cell_weights']
     cell_compls = summary_dict['cell_compls']
+    a_m_lims_pairs = summary_dict['a_m_lims_pairs']
 
     for i in range(len(modes)):
         err_low = modes[i] - hdi_low[i]
         err_high = hdi_high[i] - modes[i]
         err = 0.5 * (err_low + err_high)
         
-        a_lims, m_lims = cell_dict['a_m_lims_pairs'][i]
+        a_lims, m_lims = a_m_lims_pairs[i]
         print(
             f"Cell {i}: {a_lims[0]}-{a_lims[1]} AU, {m_lims[0]:.1f}-{m_lims[1]:.1f} Mearth \n"
             f"    OR = {modes[i]:.3f} ± {err:.3f}, \n"
             f"    eff_planets = {cell_weights[i]:.2f}, \n"
             f"    average completeness = {cell_compls[i]:.3f}"
         )
-    # import pdb; pdb.set_trace()
+    #import pdb; pdb.set_trace()
     return summary_dict
 
 
