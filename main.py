@@ -151,7 +151,7 @@ def prep_post_draws(sample_posts=False,
         #### CUSTOMIZE your own sampler to match the posterior format ####
         ## The output of custom sampler should be a dict whose keys are companion names
         ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
-        post_sample_dict = su.post_sampler1(comp_post_dir, star_df, num_samples=1000) # First sample posteriors
+        post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=1000) # First sample posteriors
 
         ## If using mass ratio, convert masses to q
         if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
@@ -175,14 +175,13 @@ def prep_post_draws(sample_posts=False,
                                                                 star_df,
                                                                 saved_maps_dir)
 
-        
         ## Saves dict with companion names as key names
         ## Each value is a 6xN array of:
         ## [a_list, m_list, avg_compls, single_star_compls,
         ##  compl_over_prior_avg, compl_over_prior_single]
         ## Probably the only compl array I'll use is compl_over_prior_single. compl_over_prior_avg is to test whether using avg completeness changes the answer. The two completeness arrays are for testing/sanity checks.
         np.savez('saved_dicts/sampled_post_prior_compl.npz', **sampled_post_with_compls)
-    
+        
     return
     
     

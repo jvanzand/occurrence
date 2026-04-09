@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
+import h5py
 
 def post_sampler1(companion_post_dir, star_df, num_samples=1000):
     """
@@ -27,7 +28,7 @@ def post_sampler1(companion_post_dir, star_df, num_samples=1000):
     return post_sample_dict
     
     
-def post_sampler2(companion_post_dir, sysname_list):
+def post_sampler2(companion_post_dir, star_df, num_samples=1000):
     """
     Function to sample from orvara posteriors in particular
     Note that chains for individual companions are saved under
@@ -35,7 +36,7 @@ def post_sampler2(companion_post_dir, sysname_list):
     """
 
     from astropy import constants as c
-    Ms2Mj = (c.M_sun/c.M_jup).value
+    Ms2Me = (c.M_sun/c.M_earth).value
     
     post_sample_dict = {}
     
@@ -46,10 +47,12 @@ def post_sampler2(companion_post_dir, sysname_list):
 	                      'HD195019', 'HD24040', 
 	                      'HD45184',  'HIP57050']
     
+    sysname_list = star_df.star_name.to_list()
     for sys_name in sysname_list:
-
-        chain_file = os.path.join(chain_root, sys_name+'.h5')
-
+        chain_file = os.path.join(companion_post_dir, sys_name+'.h5')
+        if not os.path.exists(chain_file):
+            continue
+        # import pdb; pdb.set_trace()
         with h5py.File(chain_file, 'r') as f:
             cols = f["chains"].attrs["param_names"] # Use f['chains'].attrs.keys() to see that param_names is a key
             last_chars = [s[-1] for s in cols] # Last char of every col name
@@ -71,14 +74,14 @@ def post_sampler2(companion_post_dir, sysname_list):
 
             for comp_ind in range(max_comp_ind+1):
         
-                rand_inds = np.random.randint(0, new_nsteps, size=ndraws) # Inds to take random draws
+                rand_inds = np.random.randint(0, new_nsteps, size=num_samples) # Inds to take random draws
                 a_chain = chain_dict[f'sau{comp_ind}'][rand_inds]
-                m_chain = chain_dict[f'msec{comp_ind}'][rand_inds]*Ms2Mj # Convert to M_Jup
+                m_chain = chain_dict[f'msec{comp_ind}'][rand_inds]*Ms2Me # Convert to M_earth
 
-                comp_name = sysname+str(comp_ind)
+                comp_name = sys_name+'_'+str(comp_ind)
                 post_sample_dict[comp_name] = [a_chain, m_chain]
             
-    
+    # import pdb; pdb.set_trace()
     return post_sample_dict
     
     
@@ -119,7 +122,7 @@ def include_post_completeness(sampled_post_dict, star_df,
     ## Load average interpolation function
     avg_compl_interp_str = os.path.join(saved_maps_dir, 'avg_map/interp_fn.pkl')
     avg_compl_interp = pickle.load(open(avg_compl_interp_str, 'rb'))
-    
+    # import pdb; pdb.set_trace()
     for star_name in star_df.star_name:
         
         ## Load single-system interpolation function
@@ -128,8 +131,8 @@ def include_post_completeness(sampled_post_dict, star_df,
         
         comp_list = star_df.query(f"star_name=='{star_name}'").comp_list.iloc[0] # List of comp names
         ## For every companion in the system, calculate the average compl over all stars AND the single-system compl
+        #import pdb; pdb.set_trace()
         for comp_name in comp_list:
-            #import pdb; pdb.set_trace()
             a_m_prior = sampled_post_dict[comp_name] # Already-saved values, which we will append to
             
             ## Compute average and single-system completeness
@@ -146,6 +149,7 @@ def include_post_completeness(sampled_post_dict, star_df,
                          compl_over_prior_avg, compl_over_prior_single]
             
             sampled_post_dict[comp_name] = np.vstack(new_array)
+            #import pdb; pdb.set_trace()
     
     return sampled_post_dict
     
