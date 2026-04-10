@@ -7,6 +7,8 @@ import corner
 from matplotlib.ticker import FixedLocator, NullLocator, FormatStrFormatter
 import itertools as itt
 
+from pathlib import Path
+
 
 def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True, 
                          a_m_lims_pairs=None, summary_dict=None,
@@ -207,7 +209,9 @@ def plot_catalog(completeness_dir, catalog_path,
         # ax.scatter(post.sma_au, post.mass_mearth, s=2)
         ax.scatter(a_m_samples[0], a_m_samples[1], s=2)
         
-    os.makedirs('plots/', exist_ok=True)
+        
+    parent_dir = Path(fig_savename).parent.absolute()
+    os.makedirs(parent_dir, exist_ok=True)
     comp_fig.savefig(fig_savename, dpi=300)
         
     return

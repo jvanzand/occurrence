@@ -327,7 +327,6 @@ def recs_msini_converter(recoveries_path, save_file):
     vals = [m_true, au, ecc, recovered]
     mtrue_recs = pd.DataFrame({label:val for label, val in zip(labels,vals)})
 
-
     mtrue_recs.to_csv(save_file, index=False)
 
     return
