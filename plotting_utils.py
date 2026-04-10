@@ -253,7 +253,7 @@ def plot_corner_from_file(
 
     # Default parameter names
     if param_names is None:
-        param_names = [f"$\\lambda_{{{i}}}$" for i in range(ndim)]
+        param_names = [f"$OR_{{{i}}}$" for i in range(ndim)]
 
     # Make corner plot
     fig = corner.corner(
