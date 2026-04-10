@@ -1,9 +1,11 @@
 ## Utility functions for making plots related to occurrence
+import os
 import matplotlib.pyplot as plt
 import matplotlib.patches as ptch
 import numpy as np
 import corner
 from matplotlib.ticker import FixedLocator, NullLocator, FormatStrFormatter
+import itertools as itt
 
 
 def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True, 
@@ -113,11 +115,11 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
     m_label = '[M$_\oplus$]' if m_unit=='earth' else '[M$_{Jup}$]' if m_unit=='jupiter' else None
     
     if ycol=='inj_msini':
-        ylabel = r'M$\sin{i_p}$ '+m_label
+        ylabel = r'M$_p\sin{i}$ '+m_label
     elif ycol=='inj_mtrue':
         ylabel = r'M$_p$ '+m_label
     elif ycol == 'inj_qsini':
-        ylabel = r'M$\sin{i_p}$/M$_\star$'
+        ylabel = r'M$_p\sin{i}$/M$_\star$'
     elif ycol == 'inj_qtrue':
         ylabel = r'M$_p$/M$_\star$'
     #xlabel = '$P$ [days]'
@@ -142,6 +144,72 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
     
     return fig
 
+def plot_catalog(completeness_dir, catalog_path,
+                 a_edges=None, m_edges=None, 
+                 star_df=None, m_unit='earth',
+                 fig_savename='catalog_and_completeness.png'):
+    """
+    Plot the planet catalog over the avg. completeness map
+    
+    Arguments:
+        completeness_dir (str): Path to directory holding completeness
+                                completeness maps
+        catalog_path (str): Path to file holding companion samples
+    """
+    
+    ## Plot the completeness map first
+    xgrid = np.load(f"{completeness_dir}/avg_map/parent_xgrid.npy")
+    ygrid = np.load(f"{completeness_dir}/avg_map/parent_ygrid.npy")
+    zgrid = np.load(f"{completeness_dir}/avg_map/parent_zgrid.npy")
+    # import pdb; pdb.set_trace()
+    
+    #### Restructure a_edges and m_edges to make lims_pairs ####
+    if a_edges is not None and m_edges is not None:
+        a_lims_list = [[a_edges[i], a_edges[i+1]] for i in range(len(a_edges)-1)] # [[a0, a1], [a1, a2],...]
+        m_lims_list = [[m_edges[i], m_edges[i+1]] for i in range(len(m_edges)-1)]
+	
+        # First create the pairs in the region of interest (out of order for ease)
+        # Then reorder to look like [([a0,a1], [m0,m1]), ([a1,a2], [m0,m1]), ...]
+        a_m_lims_pairs_roi_disordered = list(itt.product(m_lims_list, a_lims_list))
+        a_m_lims_pairs = [pair[::-1] for pair in a_m_lims_pairs_roi_disordered]
+        
+        ## Companion posteriors should have already been converted to q in
+        ## main.prep_post_draws(). Here, just convert a_m_lims_pairs
+        if 'qtrue' in completeness_dir or 'qsini' in completeness_dir:
+            Ms2Mj = (c.M_sun/c.M_jup).value # 1 Msun --> 317.8 Mjup
+            Ms2Me = (c.M_sun/c.M_earth).value # 1 Msun --> ~300k Mearth
+            m_conversion = Ms2Mj if m_unit=='jup' else Ms2Me if m_unit=='earth' else None
+
+            mean_star_mass = star_df.mstar.mean()*m_conversion
+            
+            a_m_lims_pairs = [(pair[0], [pair[1][0]/mean_star_mass, pair[1][1]/mean_star_mass]) for pair in a_m_lims_pairs]
+
+            
+            
+    else:
+        a_m_lims_pairs = None
+
+    comp_fig = completeness_plotter(xgrid, ygrid, zgrid, 
+                            'avg_comp.png', 'Average completeness',
+                            save_plot=False,
+                            a_m_lims_pairs=a_m_lims_pairs)
+    
+
+    ax = plt.gca()
+    sampled_post_prior_compl_dict = dict(np.load(catalog_path))
+    comp_names = sampled_post_prior_compl_dict.keys()
+    for cn in comp_names:
+        #import pdb; pdb.set_trace()
+        a_m_samples = sampled_post_prior_compl_dict[cn]
+        
+        #post = pd.read_csv(f'planet_posts/{cn}_post.csv')
+        # ax.scatter(post.sma_au, post.mass_mearth, s=2)
+        ax.scatter(a_m_samples[0], a_m_samples[1], s=2)
+        
+    os.makedirs('plots/', exist_ok=True)
+    comp_fig.savefig(fig_savename, dpi=300)
+        
+    return
 
 def plot_corner_from_file(
     filepath,

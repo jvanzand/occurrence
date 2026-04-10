@@ -15,7 +15,7 @@ from occurrence import completeness_utils as cu
 from line_profiler import profile
 
 
-def mcmc(nstars, comp_names, cell_dict, bin_lam_dict,
+def mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
              nwalkers=50,
              nsteps=5000,
              burnin=1000,
@@ -29,8 +29,9 @@ def mcmc(nstars, comp_names, cell_dict, bin_lam_dict,
     
     Arguments:
         nstars (int): Number of host stars in sample
-        comp_names (list of str): List of companion names
-            Must correspond to keys in bin_lam_dict
+        comp_names_inROI (list of str): List of names of
+            companions that fall in the ROI. Must correspond 
+            to keys in bin_lam_dict
         cell_dict (dict): Dictionary containing useful info
             related to cell sizes, avg completeness, etc.
         bin_lam_dict (dict): Compressed representation of
@@ -70,21 +71,10 @@ def mcmc(nstars, comp_names, cell_dict, bin_lam_dict,
     # Enforce positivity (important for your likelihood)
     pos = np.clip(pos, 1e-6, None)
     
-    ## Remove any companions not at least partially in ROI
-    ## for increased speed
-    comp_names_in_roi = []
-    for comp_name in comp_names:
-        if bin_lam_dict[f'{comp_name}_weight_total']==0:
-            del bin_lam_dict[f'{comp_name}_weight_total']
-            for i in range(num_cells):
-                # del bin_lam_dict[f'{comp_name}_cell{i}_weight']
-                del bin_lam_dict[f'{comp_name}_cell{i}_compl_over_prior_avg_and_weight']
-        else:
-            comp_names_in_roi.append(comp_name)
-    
+
     loglik_args = (
         nstars,
-        comp_names_in_roi,
+        comp_names_inROI,
         bin_lam_dict,
         num_cells,
         all_binsizes,

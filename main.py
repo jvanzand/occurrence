@@ -169,12 +169,12 @@ def prep_post_draws(sample_posts=False,
                 
         #import pdb; pdb.set_trace()
         post_prior_sample_dict = su.interim_prior(post_sample_dict, prior_type='loguniform') # Then calculate prior at each draw. Each value is a 3xN array of SMA samples, mass samples, and prior values
-        
+        #import pdb; pdb.set_trace()
         # Now add on completeness values
         sampled_post_with_compls = su.include_post_completeness(post_prior_sample_dict,
                                                                 star_df,
                                                                 saved_maps_dir)
-
+                                                                
         ## Saves dict with companion names as key names
         ## Each value is a 6xN array of:
         ## [a_list, m_list, avg_compls, single_star_compls,
@@ -237,25 +237,35 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
         comp_samples[comp_name] = a_m_prior_compl_lam # Put updated array back into dictionary
     #import pdb; pdb.set_trace()
     
+    ## Drop companions that do not fall at least partially in the ROI
+    print("Total companions: ", len(comp_samples))
+    for comp_name in list(comp_samples.keys()):
+        samples_in_ROI = len(np.where(comp_samples[comp_name][-1]>-0.5)[0])
+        if samples_in_ROI==0:
+            print('ZERO', comp_name)
+            del comp_samples[comp_name]
+    print("Companions at least partially in ROI: ", len(comp_samples))
+    ##################################################################
+
     # 4th element of catalog_dict is average completeness/prior (most correct)
     # 5th element of catalog_dict is single system completeness/prior (for testing)
     compl_ind = 4 if compl_type=='avg' else 5 if compl_type=='single' else 5 # Default to 5 anyway
-    
-    bin_lam_dict = {} 
-	
+    bin_lam_dict = {}
     for comp_name in comp_samples.keys():
         a_samples = comp_samples[comp_name][0]
         m_samples = comp_samples[comp_name][1]
         compl_over_prior = comp_samples[comp_name][compl_ind]
         lam_inds = comp_samples[comp_name][6].astype(int) # Ensure lambda inds are ints, not floats
         
+        sysname = star_df[star_df["comp_list"].apply(lambda x: comp_name in x)].star_name.iloc[0]
+        
         ## Check for companions that have lots of NaN completeness values
         ## Should not be a problem for real companions
         lam_nancount = np.isnan(compl_over_prior).sum()
         if lam_nancount>10:
-            sysname = star_df[star_df["comp_list"].apply(lambda x: comp_name in x)].star_name.iloc[0]
             print(f'main.prep_occurrence_materials: \n'
-                  f'{comp_name} in system {sysname} has {lam_nancount} sample NaNs')
+                  f'{comp_name} in system {sysname} has {lam_nancount}/{len(compl_over_prior)} sample NaNs')
+            #import pdb; pdb.set_trace()
         
         # Frac. of inds that fall in at least 1 cell. This will be used
         # in MCMC prep. function to exclude comps outside ROI for efficiency
@@ -273,12 +283,11 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
             
             compl_over_prior_in_cell_avg_and_weight = [compl_over_prior_in_cell_avg, weight]
             bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"] = compl_over_prior_in_cell_avg_and_weight
-            # bin_lam_dict[f"{comp_name}_cell{bin_ind}_weight"] = weight
     
     np.savez('saved_dicts/cell_dict.npz', **cell_dict) ## Cell-specific info
-    np.savez('saved_dicts/sampled_post_prior_compl_lam.npz', **comp_samples) # Sample-specific info
+    np.savez('saved_dicts/sampled_post_prior_compl_lam_inROI.npz', **comp_samples) # Sample-specific info
     np.savez('saved_dicts/bin_lam_dict.npz', **bin_lam_dict) # Pre-computed info for likelihood func.
-    # import pdb; pdb.set_trace()
+    #import pdb; pdb.set_trace()
     return
     
     
@@ -300,7 +309,7 @@ def run_mcmc(nstars, comp_names, parallel=False,
     
     ou.mcmc(nstars, comp_names, cell_dict, bin_lam_dict,
             save_path='saved_chains/chains.npz', parallel=parallel,
-            nwalkers=50, nsteps=5000, burnin=1000,)
+            nwalkers=50, nsteps=500, burnin=100,)
     
     return
     

@@ -48,12 +48,20 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000):
 	                      'HD45184',  'HIP57050']
     
     sysname_list = star_df.star_name.to_list()
-    for sys_name in sysname_list:
+    cls_rename_fn = lambda name: 'HD'+name.upper() if name[0].isdigit() else name.upper()
+    #import pdb; pdb.set_trace()
+    #from pathlib import Path
+    #path = Path(companion_post_dir)
+    #burned_files = [str(p).split('/')[-1].replace('.h5', '') for p in path.iterdir() if p.is_file()]
+    #burned_and_checked = []
+    for sys_name_lowercase in sysname_list:
+        sys_name = cls_rename_fn(sys_name_lowercase)
         chain_file = os.path.join(companion_post_dir, sys_name+'.h5')
         if not os.path.exists(chain_file):
             continue
         # import pdb; pdb.set_trace()
         with h5py.File(chain_file, 'r') as f:
+            #burned_and_checked.append(sys_name)
             cols = f["chains"].attrs["param_names"] # Use f['chains'].attrs.keys() to see that param_names is a key
             last_chars = [s[-1] for s in cols] # Last char of every col name
             max_comp_ind = max([int(lc) for lc in last_chars if lc.isdigit()]) # Determine last comp
@@ -78,10 +86,10 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000):
                 a_chain = chain_dict[f'sau{comp_ind}'][rand_inds]
                 m_chain = chain_dict[f'msec{comp_ind}'][rand_inds]*Ms2Me # Convert to M_earth
 
-                comp_name = sys_name+'_'+str(comp_ind)
+                comp_name = sys_name_lowercase+'_'+str(comp_ind)
                 post_sample_dict[comp_name] = [a_chain, m_chain]
-            
-    # import pdb; pdb.set_trace()
+    #unchecked = [sysname for sysname in burned_files if sysname not in burned_and_checked]
+    #import pdb; pdb.set_trace()
     return post_sample_dict
     
     
@@ -133,6 +141,7 @@ def include_post_completeness(sampled_post_dict, star_df,
         ## For every companion in the system, calculate the average compl over all stars AND the single-system compl
         #import pdb; pdb.set_trace()
         for comp_name in comp_list:
+            
             a_m_prior = sampled_post_dict[comp_name] # Already-saved values, which we will append to
             
             ## Compute average and single-system completeness
