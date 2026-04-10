@@ -5,8 +5,10 @@ import numpy as np
 import pandas as pd
 import pylab as pl
 from scipy.interpolate import RegularGridInterpolator
-import occurrence.radvel_borrowed as rvb
+from astropy import constants as c
+Mj2Me = (c.M_jup/c.M_earth).value
 
+import occurrence.radvel_borrowed as rvb
 from occurrence import completeness_utils as cu
 
 class Completeness(object):
@@ -34,7 +36,7 @@ class Completeness(object):
 
 
         #########################################################################################
-        # Do the below only when inj_period is is in the columns
+        # Do the below only when inj_period is in the columns
         # Why? inj_period is only missing when inj_mtrue has already been added, and at that point, msini is not needed so skip the block below
         if 'inj_period' in self.recoveries.columns:
             if mstar is not None:
@@ -56,6 +58,11 @@ class Completeness(object):
 
         self.xcol = xcol
         self.ycol = ycol
+        
+        #import pdb; pdb.set_trace()
+        ## Convert recoveries file to correct y unit. Assume initial unit is m_earth
+        if y_unit=='jupiter':
+            self.recoveries[ycol] = self.recoveries[ycol]/Mj2Me # Convert Me to Mj
 
         self.grid = None
         self.interpolator = None
@@ -67,7 +74,6 @@ class Completeness(object):
         """Read recoveries and create Completeness object"""
         recoveries = pd.read_csv(recovery_file)
         
-
         return cls(recoveries, *args, **kwargs)
 
     def completeness_grid(self, xlim, ylim, resolution=30, xlogwin=0.5, ylogwin=0.5, 

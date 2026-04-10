@@ -178,7 +178,7 @@ def plot_catalog(completeness_dir, catalog_path,
         if 'qtrue' in completeness_dir or 'qsini' in completeness_dir:
             Ms2Mj = (c.M_sun/c.M_jup).value # 1 Msun --> 317.8 Mjup
             Ms2Me = (c.M_sun/c.M_earth).value # 1 Msun --> ~300k Mearth
-            m_conversion = Ms2Mj if m_unit=='jup' else Ms2Me if m_unit=='earth' else None
+            m_conversion = Ms2Mj if m_unit=='jupiter' else Ms2Me if m_unit=='earth' else None
 
             mean_star_mass = star_df.mstar.mean()*m_conversion
             
@@ -192,7 +192,8 @@ def plot_catalog(completeness_dir, catalog_path,
     comp_fig = completeness_plotter(xgrid, ygrid, zgrid, 
                             'avg_comp.png', 'Average completeness',
                             save_plot=False,
-                            a_m_lims_pairs=a_m_lims_pairs)
+                            a_m_lims_pairs=a_m_lims_pairs,
+                            m_unit=m_unit)
     
 
     ax = plt.gca()
@@ -272,8 +273,8 @@ def plot_corner_from_file(
 
 
 
-def plot_occurrence_hist(summary_dict, stack_dim='m', savepath='occurrence.png',
-                         figsize=(6, 4), dpi=300):
+def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth',
+                         savepath='occurrence.png', figsize=(6, 4), dpi=300):
     """
     Plot occurrence histograms and save to file.
 
@@ -323,6 +324,8 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', savepath='occurrence.png',
     # label/tick sizes for consistent styling
     label_size = 24
     tick_size = 18
+    
+    m_unit_label = r'$M_{\oplus}$' if m_unit=='earth' else r'$M_{Jup}$' if m_unit=='jupiter' else None
     # Single-axis figure for 1D cases; for multi (stacked) create multiple subplots
     # =========================
     # CASE 1: 1D histogram
@@ -363,7 +366,7 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', savepath='occurrence.png',
         ax.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
         ax.xaxis.set_minor_locator(NullLocator())
 
-        unit = 'AU' if xlabel == 'SMA' else r'$M_{\oplus}$'
+        unit = 'AU' if xlabel == 'SMA' else m_unit_label
         ax.set_xlabel(f"{xlabel} [{unit}]")
         ax.set_ylabel('Occurrence rate\n[Planets per star]', fontsize=label_size, labelpad=20)
 
@@ -420,7 +423,7 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', savepath='occurrence.png',
                 # Add left-side vertical label showing mass range for this subplot
                 m_lo = m_edges[i]
                 m_hi = m_edges[i+1]
-                lbl = rf"M={twin_axis_formatter(m_lo)}-{twin_axis_formatter(m_hi)} $M_{{\oplus}}$"
+                lbl = rf"M={twin_axis_formatter(m_lo)}-{twin_axis_formatter(m_hi)} {m_unit_label}"
                 ax2 = ax_i.twinx()
                 ax2.set_ylabel(lbl, size=label_size-6, rotation=90)
                 ax2.set_yticks([])
@@ -494,7 +497,7 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', savepath='occurrence.png',
             # Set the common y-label for the whole figure
             fig.supylabel('Occurrence rate\n[Planets per star]', fontsize=label_size)
             # Set x-label on bottom-most axis (after reversing it's index 0)
-            axs[0].set_xlabel("Mass [$M_{\oplus}$]", fontsize=label_size)
+            axs[0].set_xlabel(f"Mass [{m_unit_label}]", fontsize=label_size)
 
         else:
             raise ValueError("stack_dim must be 'm' or 'a'")

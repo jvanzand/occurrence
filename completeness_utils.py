@@ -219,7 +219,8 @@ def single_map_maker(system_name, recoveries_path, save_dir, mstar,
     #print("Plotting {} vs. {}".format(ycol, xcol))
 
     comp = rvsb.Completeness.from_csv(recoveries_path, xcol=xcol,
-                                      ycol=ycol, mstar=mstar)
+                                      ycol=ycol, mstar=mstar,
+                                      y_unit=m_unit)
 
     #############################################
 

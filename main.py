@@ -98,15 +98,7 @@ def prep_maps(make_maps=False,
     maps_save_path = 'saved_maps_'+maps_ycol.split('_')[1] # e.g. inj_mtrue --> mtrue
     
     if make_maps:
-        # for i in range(len(star_df)):
-        #     row = star_df.iloc[i]
-        #     starname = row.star_name
-        #     mstar = row.mstar
-        #     single_recoveries_path = os.path.join(path_to_recoveries, f'{starname}_recoveries.csv')
-        #     single_star_save_dir = os.path.join(maps_save_path, starname)
-        #
-        #     cu.single_map_maker(starname, single_recoveries_path, single_star_save_dir,
-        #                         mstar, ycol=maps_ycol, m_unit=m_unit, fill_nans=True)
+
         ncores = mp.cpu_count()
         args_list = [
             (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit)
@@ -157,7 +149,7 @@ def prep_post_draws(sample_posts=False,
         if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
             Ms2Mj = (c.M_sun/c.M_jup).value # 1 Msun --> 317.8 Mjup
             Ms2Me = (c.M_sun/c.M_earth).value # 1 Msun --> ~300k Mearth
-            m_conversion = Ms2Mj if m_unit=='jup' else Ms2Me if m_unit=='earth' else None
+            m_conversion = Ms2Mj if m_unit=='jupiter' else Ms2Me if m_unit=='earth' else None
             for comp_name in post_sample_dict.keys():
                 row = star_df[star_df['comp_list'].apply(lambda name_list: comp_name in name_list)]
                 mstar = row.mstar.values*m_conversion
@@ -326,7 +318,7 @@ def summary_stats(path_to_chains):
     
     return
     
-def make_results_plots(path_to_chains, completeness_dir, path_to_summary):
+def make_results_plots(path_to_chains, completeness_dir, path_to_summary, m_unit='earth'):
     """
     Load MCMC chains and make diagnostic
     plots of the results
@@ -353,8 +345,8 @@ def make_results_plots(path_to_chains, completeness_dir, path_to_summary):
     #                         save_plot=True,
     #                         summary_dict=summary_dict)
                             
-    pu.plot_occurrence_hist(summary_dict, stack_dim='m', savepath='plots/occurrence.png',
-                            figsize=(6, 4), dpi=300)
+    pu.plot_occurrence_hist(summary_dict, stack_dim='m', m_unit=m_unit,
+                            savepath='plots/occurrence.png', figsize=(6, 4), dpi=300)
     
     return
     
