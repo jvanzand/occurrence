@@ -6,7 +6,12 @@ import os
 import pickle
 import h5py
 
-def post_sampler1(companion_post_dir, star_df, num_samples=1000):
+from astropy import constants as c
+Mj2Me = (c.M_jup/c.M_earth).value
+Ms2Me = (c.M_sun/c.M_earth).value
+Ms2Mj = (c.M_sun/c.M_jup).value
+
+def post_sampler1(companion_post_dir, star_df, num_samples=1000, m_unit='earth'):
     """
     Customizable function to sample from a set of companion posteriors.
     """
@@ -21,6 +26,9 @@ def post_sampler1(companion_post_dir, star_df, num_samples=1000):
 
             sampled_a = np.array(post.sma_au.sample(num_samples, replace=True))
             sampled_m = np.array(post.mass_mearth.sample(num_samples, replace=True))
+            
+            if m_unit=='jupiter':
+                sampled_m = sampled_m/Mj2Me # Convert M_earth to M_jupiter
 
             post_sample_dict[comp_name] = np.array([sampled_a, sampled_m])
         
@@ -28,15 +36,14 @@ def post_sampler1(companion_post_dir, star_df, num_samples=1000):
     return post_sample_dict
     
     
-def post_sampler2(companion_post_dir, star_df, num_samples=1000):
+def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth'):
     """
     Function to sample from orvara posteriors in particular
     Note that chains for individual companions are saved under
     the host system, so we need the system names.
     """
 
-    from astropy import constants as c
-    Ms2Me = (c.M_sun/c.M_earth).value
+    m_conversion = Ms2Me if m_unit=='earth' else Ms2Mj if m_unit=='jupiter' else None
     
     post_sample_dict = {}
     
@@ -84,7 +91,7 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000):
         
                 rand_inds = np.random.randint(0, new_nsteps, size=num_samples) # Inds to take random draws
                 a_chain = chain_dict[f'sau{comp_ind}'][rand_inds]
-                m_chain = chain_dict[f'msec{comp_ind}'][rand_inds]*Ms2Me # Convert to M_earth
+                m_chain = chain_dict[f'msec{comp_ind}'][rand_inds]*m_conversion # Convert M_sun to Me or Mj
 
                 comp_name = sys_name_lowercase+'_'+str(comp_ind)
                 post_sample_dict[comp_name] = [a_chain, m_chain]

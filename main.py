@@ -143,7 +143,7 @@ def prep_post_draws(sample_posts=False,
         #### CUSTOMIZE your own sampler to match the posterior format ####
         ## The output of custom sampler should be a dict whose keys are companion names
         ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
-        post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=1000) # First sample posteriors
+        post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=1000, m_unit=m_unit) # First sample posteriors
 
         ## If using mass ratio, convert masses to q
         if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
