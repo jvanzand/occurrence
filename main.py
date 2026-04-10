@@ -234,7 +234,7 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
     for comp_name in list(comp_samples.keys()):
         samples_in_ROI = len(np.where(comp_samples[comp_name][-1]>-0.5)[0])
         if samples_in_ROI==0:
-            print('ZERO', comp_name)
+            print(f'{comp_name} falls fully outside the ROI; dropping.')
             del comp_samples[comp_name]
     print("Companions at least partially in ROI: ", len(comp_samples))
     ##################################################################
