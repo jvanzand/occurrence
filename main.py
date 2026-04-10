@@ -318,7 +318,8 @@ def summary_stats(path_to_chains):
     
     return
     
-def make_results_plots(path_to_chains, completeness_dir, path_to_summary, m_unit='earth'):
+def make_results_plots(path_to_chains, completeness_dir, path_to_summary, 
+                        stack_dim='m', m_unit='earth'):
     """
     Load MCMC chains and make diagnostic
     plots of the results
@@ -345,7 +346,7 @@ def make_results_plots(path_to_chains, completeness_dir, path_to_summary, m_unit
     #                         save_plot=True,
     #                         summary_dict=summary_dict)
                             
-    pu.plot_occurrence_hist(summary_dict, stack_dim='m', m_unit=m_unit,
+    pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit,
                             savepath='plots/occurrence.png', figsize=(6, 4), dpi=300)
     
     return
