@@ -285,7 +285,7 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
     
     
 def run_mcmc(nstars, comp_names, parallel=False,
-            ):
+             nwalkers=50, nsteps=5000, burnin=1000):
     """
     Entry point for MCMC occurrence calculation.
     Collects pre-computed materials to feed to MCMC.
@@ -301,7 +301,7 @@ def run_mcmc(nstars, comp_names, parallel=False,
     
     ou.mcmc(nstars, comp_names, cell_dict, bin_lam_dict,
             save_path='saved_chains/chains.npz', parallel=parallel,
-            nwalkers=50, nsteps=500, burnin=100,)
+            nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
     
     return
     
