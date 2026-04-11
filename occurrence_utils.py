@@ -221,6 +221,7 @@ def cell_values(a_edges, m_edges, avg_map_fn_path):
         try:
             cell_compl = cu.cell_completeness(a_lim, m_lim, avg_interp)
         except:
+            import pdb; pdb.set_trace()
             raise Exception(f"occurrence_utils.cell_values: "\
                                 f"Could not compute cell completeness between"\
                                 f"a={a_lim} and M={m_lim}. Check for NaNs.")

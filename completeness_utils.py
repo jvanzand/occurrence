@@ -204,11 +204,11 @@ def single_map_maker(system_name, recoveries_path, save_dir, mstar,
     m_label = '[M$_\oplus$]' if m_unit=='earth' else '[M$_{Jup}$]' if m_unit=='jupiter' else None
     
     if ycol=='inj_msini':
-        ylabel = r'M$\sin{i_p}$ '+m_label
+        ylabel = r'M$_p \sin{i}$ '+m_label
     elif ycol=='inj_mtrue':
         ylabel = r'M$_p$ '+m_label
     elif ycol == 'inj_qsini':
-        ylabel = r'M$\sin{i_p}$/M$_\star$'
+        ylabel = r'M$_p \sin{i}$/M$_\star$'
     elif ycol == 'inj_qtrue':
         ylabel = r'M$_p$/M$_\star$'
 

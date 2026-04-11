@@ -152,7 +152,7 @@ def prep_post_draws(sample_posts=False,
 
         ## If using mass ratio, convert masses to q
         if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
-            Ms2Mj = (c.M_sun/c.M_jup).value # 1 Msun --> 317.8 Mjup
+            Ms2Mj = (c.M_sun/c.M_jup).value # 1 Msun --> 1047 Mjup
             Ms2Me = (c.M_sun/c.M_earth).value # 1 Msun --> ~300k Mearth
             m_conversion = Ms2Mj if m_unit=='jupiter' else Ms2Me if m_unit=='earth' else None
             for comp_name in post_sample_dict.keys():
@@ -240,6 +240,8 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
         
         lam_inds = ou.assign_cells(a_list, m_list, cell_dict['a_m_lims_pairs']) # Calculate lambda inds
         
+        #if '8765' in comp_name:
+        #    import pdb; pdb.set_trace()
         a_m_prior_compl_lam = np.vstack([a_m_prior_compl, lam_inds]) # Append lambda inds to array
         # import pdb; pdb.set_trace()
         
@@ -256,8 +258,8 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
     print("Companions at least partially in ROI: ", len(comp_samples))
     ##################################################################
 
-    # 4th element of catalog_dict is average completeness/prior (most correct)
-    # 5th element of catalog_dict is single system completeness/prior (for testing)
+    # 4th element of catalog_dict is average completeness/prior (for testing)
+    # 5th element of catalog_dict is single system completeness/prior (most correct)
     compl_ind = 4 if compl_type=='avg' else 5 if compl_type=='single' else 5 # Default to 5 anyway
     bin_lam_dict = {}
     for comp_name in comp_samples.keys():
@@ -272,6 +274,7 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
         ## Should not be a problem for real companions
         lam_nancount = np.isnan(compl_over_prior).sum()
         if lam_nancount>10:
+            #import pdb; pdb.set_trace()
             print(f'main.prep_occurrence_materials: \n'
                   f'{comp_name} in system {sysname} has {lam_nancount}/{len(compl_over_prior)} sample NaNs')
             #import pdb; pdb.set_trace()
@@ -280,6 +283,9 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
         # in MCMC prep. function to exclude comps outside ROI for efficiency
         total_weight = (lam_inds>-1).sum()/len(lam_inds)
         bin_lam_dict[f"{comp_name}_weight_total"] = total_weight
+        
+        #if '8765' in comp_name:
+        #    import pdb; pdb.set_trace()
         
         for bin_ind in range(cell_dict['num_cells']):
             
@@ -376,7 +382,6 @@ def make_results_plots(completeness_dir, stack_dim='m',
                              param_names=None, thin=10, max_samples=50000)
     
     
-    completeness_dir = os.path.join(parent_dir, completeness_dir)
     ## Now plot completeness map + catalog + derived occurrence rates + eff pl. + avg. compl.
     xgrid = np.load(f"{completeness_dir}/avg_map/parent_xgrid.npy")
     ygrid = np.load(f"{completeness_dir}/avg_map/parent_ygrid.npy")

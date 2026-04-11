@@ -6,6 +6,7 @@ import numpy as np
 import corner
 from matplotlib.ticker import FixedLocator, NullLocator, FormatStrFormatter
 import itertools as itt
+from astropy import constants as c
 
 from pathlib import Path
 
@@ -177,24 +178,29 @@ def plot_catalog(completeness_dir, catalog_path,
         
         ## Companion posteriors should have already been converted to q in
         ## main.prep_post_draws(). Here, just convert a_m_lims_pairs
-        if 'qtrue' in completeness_dir or 'qsini' in completeness_dir:
-            Ms2Mj = (c.M_sun/c.M_jup).value # 1 Msun --> 317.8 Mjup
-            Ms2Me = (c.M_sun/c.M_earth).value # 1 Msun --> ~300k Mearth
-            m_conversion = Ms2Mj if m_unit=='jupiter' else Ms2Me if m_unit=='earth' else None
+        #if 'qtrue' in completeness_dir or 'qsini' in completeness_dir:
+        #    Ms2Mj = (c.M_sun/c.M_jup).value # 1 Msun --> 317.8 Mjup
+        #    Ms2Me = (c.M_sun/c.M_earth).value # 1 Msun --> ~300k Mearth
+        #    m_conversion = Ms2Mj if m_unit=='jupiter' else Ms2Me if m_unit=='earth' else None
 
-            mean_star_mass = star_df.mstar.mean()*m_conversion
+        #    mean_star_mass = star_df.mstar.mean()*m_conversion
             
-            a_m_lims_pairs = [(pair[0], [pair[1][0]/mean_star_mass, pair[1][1]/mean_star_mass]) for pair in a_m_lims_pairs]
+        #    a_m_lims_pairs = [(pair[0], [pair[1][0]/mean_star_mass, pair[1][1]/mean_star_mass]) for pair in a_m_lims_pairs]
 
             
             
     else:
         a_m_lims_pairs = None
 
+    #import pdb; pdb.set_trace()
+    ## Normally, you plot completeness using recoveries.csv, which has ycol in it
+    ## Here, we are plotting from the x/y/z grids, so we have to provide ycol 'manually'
+    ycol = 'inj_'+completeness_dir.split('_')[-1] # e.g. results/saved_maps_qsini --> inj_qsini
     comp_fig = completeness_plotter(xgrid, ygrid, zgrid, 
                             'avg_comp.png', 'Average completeness',
                             save_plot=False,
                             a_m_lims_pairs=a_m_lims_pairs,
+                            ycol=ycol,
                             m_unit=m_unit)
     
 

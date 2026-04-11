@@ -165,6 +165,7 @@ def include_post_completeness(sampled_post_dict, star_df,
                          compl_over_prior_avg, compl_over_prior_single]
             
             sampled_post_dict[comp_name] = np.vstack(new_array)
+            
             #import pdb; pdb.set_trace()
     
     return sampled_post_dict
