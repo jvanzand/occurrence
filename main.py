@@ -388,8 +388,9 @@ def make_results_plots(completeness_dir, stack_dim='m',
     zgrid = np.load(f"{completeness_dir}/avg_map/parent_zgrid.npy")
     
     summary_dict = dict(np.load(path_to_summary))
-                            
-    pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit,
+
+    y_type = completeness_dir.split('_')[-1] # e.g. 'mass_ratio/saved_maps_qtrue' --> qtrue
+    pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, ytype=y_type,
                             savepath=plots_dir+'occurrence.png', figsize=(6, 4), dpi=300)
     
     return

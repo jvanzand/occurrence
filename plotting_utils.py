@@ -283,7 +283,7 @@ def plot_corner_from_file(
 
 
 
-def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth',
+def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', ytype='mtrue',
                          savepath='occurrence.png', figsize=(6, 4), dpi=300):
     """
     Plot occurrence histograms and save to file.
