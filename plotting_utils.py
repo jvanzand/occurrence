@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as ptch
 import numpy as np
 import corner
-from matplotlib.ticker import FixedLocator, NullLocator, FormatStrFormatter
+from matplotlib.ticker import FixedLocator, NullLocator, FormatStrFormatter, FuncFormatter
 import itertools as itt
 from astropy import constants as c
 
@@ -67,6 +67,7 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
             
     if summary_dict is not None:
         a_m_lims_pairs = summary_dict['a_m_lims_pairs']
+        print(f"Occurrence-annotated completeness map saved to: {save_path}")
         for i, a_m_lims in enumerate(a_m_lims_pairs): 
             
             alims, mlims = a_m_lims
@@ -175,17 +176,6 @@ def plot_catalog(completeness_dir, catalog_path,
         # Then reorder to look like [([a0,a1], [m0,m1]), ([a1,a2], [m0,m1]), ...]
         a_m_lims_pairs_roi_disordered = list(itt.product(m_lims_list, a_lims_list))
         a_m_lims_pairs = [pair[::-1] for pair in a_m_lims_pairs_roi_disordered]
-        
-        ## Companion posteriors should have already been converted to q in
-        ## main.prep_post_draws(). Here, just convert a_m_lims_pairs
-        #if 'qtrue' in completeness_dir or 'qsini' in completeness_dir:
-        #    Ms2Mj = (c.M_sun/c.M_jup).value # 1 Msun --> 317.8 Mjup
-        #    Ms2Me = (c.M_sun/c.M_earth).value # 1 Msun --> ~300k Mearth
-        #    m_conversion = Ms2Mj if m_unit=='jupiter' else Ms2Me if m_unit=='earth' else None
-
-        #    mean_star_mass = star_df.mstar.mean()*m_conversion
-            
-        #    a_m_lims_pairs = [(pair[0], [pair[1][0]/mean_star_mass, pair[1][1]/mean_star_mass]) for pair in a_m_lims_pairs]
 
             
             
@@ -283,7 +273,7 @@ def plot_corner_from_file(
 
 
 
-def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', ytype='mtrue',
+def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtrue',
                          savepath='occurrence.png', figsize=(6, 4), dpi=300):
     """
     Plot occurrence histograms and save to file.
@@ -335,7 +325,18 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', ytype='mtr
     label_size = 24
     tick_size = 18
     
+    
+    ## Determine correct mass label
     m_unit_label = r'$M_{\oplus}$' if m_unit=='earth' else r'$M_{Jup}$' if m_unit=='jupiter' else None
+    if mtype=='msini':
+        mlabel = r'M$_p \sin{i}$ '+f'[{m_unit_label}]'
+    elif mtype=='mtrue':
+        mlabel = r'M$_p$ '+f'[{m_unit_label}]'
+    elif mtype == 'qsini':
+        mlabel = r'M$_p \sin{i}$/M$_\star$'
+    elif mtype == 'qtrue':
+        mlabel = r'M$_p$/M$_\star$'
+    
     # Single-axis figure for 1D cases; for multi (stacked) create multiple subplots
     # =========================
     # CASE 1: 1D histogram
@@ -348,12 +349,12 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', ytype='mtr
             x_edges = a_edges
             y = mode[0]
             err = get_err(mode[0], low[0], high[0])
-            xlabel = 'SMA'
+            xlabel = 'SMA [AU]'
         else:
             x_edges = m_edges
             y = mode[:, 0]
             err = get_err(mode[:, 0], low[:, 0], high[:, 0])
-            xlabel = 'Mass'
+            xlabel = mlabel
 
         # Use geometric centers for log bins
         centers = np.sqrt(x_edges[:-1] * x_edges[1:])
@@ -373,11 +374,10 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', ytype='mtr
         ax.set_xscale('log')
         # Set ticks at bin edges and format
         ax.xaxis.set_major_locator(FixedLocator(x_edges))
-        ax.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+        ax.xaxis.set_major_formatter(FuncFormatter(smart_tick_fmt))
         ax.xaxis.set_minor_locator(NullLocator())
 
-        unit = 'AU' if xlabel == 'SMA' else m_unit_label
-        ax.set_xlabel(f"{xlabel} [{unit}]")
+        ax.set_xlabel(xlabel)
         ax.set_ylabel('Occurrence rate\n[Planets per star]', fontsize=label_size, labelpad=20)
 
         # Ensure y-range includes highest error bar
@@ -433,7 +433,7 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', ytype='mtr
                 # Add left-side vertical label showing mass range for this subplot
                 m_lo = m_edges[i]
                 m_hi = m_edges[i+1]
-                lbl = rf"M={twin_axis_formatter(m_lo)}-{twin_axis_formatter(m_hi)} {m_unit_label}"
+                lbl = rf"{mlabel}={twin_axis_formatter(m_lo)}-{twin_axis_formatter(m_hi)} [{m_unit_label}]"
                 ax2 = ax_i.twinx()
                 ax2.set_ylabel(lbl, size=label_size-6, rotation=90)
                 ax2.set_yticks([])
@@ -507,7 +507,7 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', ytype='mtr
             # Set the common y-label for the whole figure
             fig.supylabel('Occurrence rate\n[Planets per star]', fontsize=label_size)
             # Set x-label on bottom-most axis (after reversing it's index 0)
-            axs[0].set_xlabel(f"Mass [{m_unit_label}]", fontsize=label_size)
+            axs[0].set_xlabel(f"{m_label} [{m_unit_label}]", fontsize=label_size)
 
         else:
             raise ValueError("stack_dim must be 'm' or 'a'")
@@ -554,6 +554,12 @@ def make_bar_vals(x_pairs, y_vals):
     return all_x_flat, all_y_flat
 
 
-
+def smart_tick_fmt(x, pos):
+    if x == 0:
+        return "0"
+    elif abs(x) < 0.1:
+        return f"{x:.0e}"   # scientific notation for small values
+    else:
+        return f"{x:.1f}"   # normal formatting otherwise
 
 
