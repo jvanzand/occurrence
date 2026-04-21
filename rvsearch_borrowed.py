@@ -38,7 +38,7 @@ class Completeness(object):
         #########################################################################################
         # Do the below only when inj_period is in the columns
         # Why? inj_period is only missing when inj_mtrue has already been added, and at that point, msini is not needed so skip the block below
-        if 'inj_period' in self.recoveries.columns:
+        if 'inj_period' in self.recoveries.columns and 'inj_msini' not in self.recoveries.columns:
             if mstar is not None:
 
                 self.mstar = np.zeros_like(self.recoveries['inj_period']) + mstar
@@ -46,20 +46,18 @@ class Completeness(object):
                 self.recoveries['inj_msini'] = rvb.Msini(self.recoveries['inj_k'],
                                                                   self.recoveries['inj_period'],
                                                                   self.mstar, self.recoveries['inj_e'],
-                                                                  Msini_units=y_unit)
+                                                                  Msini_units='earth')
                 self.recoveries['rec_msini'] = rvb.Msini(self.recoveries['rec_k'],
                                                                   self.recoveries['rec_period'],
                                                                   self.mstar, self.recoveries['rec_e'],
-                                                                  Msini_units=y_unit)
+                                                                  Msini_units='earth')
 
                 self.recoveries['inj_au'] = rvb.semi_major_axis(self.recoveries['inj_period'], mstar)
                 self.recoveries['rec_au'] = rvb.semi_major_axis(self.recoveries['rec_period'], mstar)
 
-
         self.xcol = xcol
         self.ycol = ycol
         
-        #import pdb; pdb.set_trace()
         ## Convert recoveries file to correct y unit. Assume initial unit is m_earth
         if y_unit=='jupiter':
             self.recoveries[ycol] = self.recoveries[ycol]/Mj2Me # Convert Me to Mj

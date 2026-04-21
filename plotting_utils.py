@@ -65,7 +65,7 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
                                                                ls='-', facecolor='None', zorder=101)
             plt.gca().add_patch(rect)
             
-    if summary_dict is not None:
+    if summary_dict is not None and a_m_lims_pairs is not None:
         a_m_lims_pairs = summary_dict['a_m_lims_pairs']
         print(f"Occurrence-annotated completeness map saved to: {save_path}")
         for i, a_m_lims in enumerate(a_m_lims_pairs): 
@@ -78,9 +78,9 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
                                                                ls='-', facecolor='None', zorder=101)
             plt.gca().add_patch(rect)
             
-            mode = summary_dict['mode'][i]
-            hdi_low = summary_dict['hdi_low'][i]
-            hdi_high = summary_dict['hdi_high'][i]
+            mode = summary_dict['mode_OR'][i]
+            hdi_low = summary_dict['hdi_low_OR'][i]
+            hdi_high = summary_dict['hdi_high_OR'][i]
             weight = summary_dict['cell_weights'][i]
             compl = summary_dict['cell_compls'][i]
 
@@ -104,7 +104,16 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
                 x_center,y_center,
                 text,
                 ha='center',va='center',
-                fontsize=3, zorder=102)
+                fontsize=11, zorder=102)
+
+        ## "zoom in" on occurrence region so annotations are clearer
+        min_a_cell = a_m_lims_pairs[0][0][0] # First cell, a pair, first element
+        min_m_cell = a_m_lims_pairs[0][1][0] # First cell, m pair, first element
+        max_a_cell = a_m_lims_pairs[-1][0][-1] # Last cell, a pair, second element
+        max_m_cell = a_m_lims_pairs[-1][1][-1] # Last cell, m pair, second element
+        plt.xlim([min_a_cell, max_a_cell])
+        plt.ylim([min_m_cell, max_m_cell])
+        #import pdb; pdb.set_trace()
 
     
     title_size = 22
@@ -148,10 +157,11 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
     
     return fig
 
-def plot_catalog(completeness_dir, catalog_path,
+def plot_catalog(tier1_dir, tier2_dir,
+                 catalog_path,
                  a_edges=None, m_edges=None, 
-                 star_df=None, m_unit='earth',
-                 fig_savename='catalog_and_completeness.png'):
+                 m_unit='earth', fig_title='Average Completeness',
+                 fig_savepath='catalog_and_completeness.png'):
     """
     Plot the planet catalog over the avg. completeness map
     
@@ -162,9 +172,10 @@ def plot_catalog(completeness_dir, catalog_path,
     """
     
     ## Plot the completeness map first
-    xgrid = np.load(f"{completeness_dir}/avg_map/parent_xgrid.npy")
-    ygrid = np.load(f"{completeness_dir}/avg_map/parent_ygrid.npy")
-    zgrid = np.load(f"{completeness_dir}/avg_map/parent_zgrid.npy")
+    avg_comp_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/')
+    xgrid = np.load(avg_comp_path+"parent_xgrid.npy")
+    ygrid = np.load(avg_comp_path+"parent_ygrid.npy")
+    zgrid = np.load(avg_comp_path+"parent_zgrid.npy")
     # import pdb; pdb.set_trace()
     
     #### Restructure a_edges and m_edges to make lims_pairs ####
@@ -185,18 +196,19 @@ def plot_catalog(completeness_dir, catalog_path,
     #import pdb; pdb.set_trace()
     ## Normally, you plot completeness using recoveries.csv, which has ycol in it
     ## Here, we are plotting from the x/y/z grids, so we have to provide ycol 'manually'
-    ycol = 'inj_'+completeness_dir.split('_')[-1] # e.g. results/saved_maps_qsini --> inj_qsini
+    ycol = 'inj_'+tier1_dir
     comp_fig = completeness_plotter(xgrid, ygrid, zgrid, 
-                            'avg_comp.png', 'Average completeness',
+                            'avg_comp.png', fig_title,
                             save_plot=False,
                             a_m_lims_pairs=a_m_lims_pairs,
                             ycol=ycol,
                             m_unit=m_unit)
     
 
-    ax = plt.gca()
     sampled_post_prior_compl_dict = dict(np.load(catalog_path))
     comp_names = sampled_post_prior_compl_dict.keys()
+    
+    ax = plt.gca()
     for cn in comp_names:
         #import pdb; pdb.set_trace()
         a_m_samples = sampled_post_prior_compl_dict[cn]
@@ -205,10 +217,10 @@ def plot_catalog(completeness_dir, catalog_path,
         # ax.scatter(post.sma_au, post.mass_mearth, s=2)
         ax.scatter(a_m_samples[0], a_m_samples[1], s=2)
         
-        
-    parent_dir = Path(fig_savename).parent.absolute()
+    parent_dir = Path(fig_savepath).parent.absolute()
     os.makedirs(parent_dir, exist_ok=True)
-    comp_fig.savefig(fig_savename, dpi=300)
+    comp_fig.savefig(fig_savepath, dpi=300)
+    plt.close()
         
     return
 
@@ -269,11 +281,13 @@ def plot_corner_from_file(
 
     print(f"Corner plot saved to: {outpath}")
     # import pdb; pdb.set_trace()
+    plt.close()
     return
 
 
 
 def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtrue',
+                         rate_type='OR', title='',
                          savepath='occurrence.png', figsize=(6, 4), dpi=300):
     """
     Plot occurrence histograms and save to file.
@@ -297,9 +311,15 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
     fig, ax
     """
 
-    mode = np.array(summary_dict['mode'])
-    low = np.array(summary_dict['hdi_low'])
-    high = np.array(summary_dict['hdi_high'])
+    mode = np.array(summary_dict[f'mode_{rate_type}'])
+    low = np.array(summary_dict[f'hdi_low_{rate_type}'])
+    high = np.array(summary_dict[f'hdi_high_{rate_type}'])
+    
+    if rate_type=='OR':
+        plot_ylabel = 'Occurrence rate\n[Planets per star]'
+    elif rate_type=='ORD':
+        #plot_ylabel = 'Occurrence rate density\n[Planets/star/$\Delta \log_{10}(a)$/$\Delta \log_{10}(M_c)$]'
+        plot_ylabel = 'Occurrence rate density\n[Planets/star/$\Delta \log_{10}(\omega)$]'
 
     n_a = int(summary_dict['n_abins'])
     n_m = int(summary_dict['n_mbins'])
@@ -322,20 +342,20 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
         return np.vstack([m - l, h - m])
 
     # label/tick sizes for consistent styling
-    label_size = 24
-    tick_size = 18
+    label_size = 22
+    tick_size = 14
     
     
     ## Determine correct mass label
     m_unit_label = r'$M_{\oplus}$' if m_unit=='earth' else r'$M_{Jup}$' if m_unit=='jupiter' else None
     if mtype=='msini':
-        mlabel = r'M$_p \sin{i}$ '+f'[{m_unit_label}]'
+        mlabel = r'M$_c \sin{i}$ '+f'[{m_unit_label}]'
     elif mtype=='mtrue':
-        mlabel = r'M$_p$ '+f'[{m_unit_label}]'
+        mlabel = r'M$_c$ '+f'[{m_unit_label}]'
     elif mtype == 'qsini':
-        mlabel = r'M$_p \sin{i}$/M$_\star$'
+        mlabel = r'M$_c \sin{i}$/M$_\star$'
     elif mtype == 'qtrue':
-        mlabel = r'M$_p$/M$_\star$'
+        mlabel = r'M$_c$/M$_\star$'
     
     # Single-axis figure for 1D cases; for multi (stacked) create multiple subplots
     # =========================
@@ -373,24 +393,32 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
 
         ax.set_xscale('log')
         # Set ticks at bin edges and format
+        tick_label_fmt_fn = int_or_one_decimal if mtype in ['mtrue', 'msini'] \
+                       else sci_no_leading_zero if mtype in ['qtrue', 'qsini'] \
+                       else None
         ax.xaxis.set_major_locator(FixedLocator(x_edges))
-        ax.xaxis.set_major_formatter(FuncFormatter(smart_tick_fmt))
+        ax.xaxis.set_major_formatter(FuncFormatter(tick_label_fmt_fn))
         ax.xaxis.set_minor_locator(NullLocator())
+        ax.tick_params(axis='both', which='major', labelsize=tick_size)
+        
+        if mtype in ['qtrue', 'qsini']:
+            plt.setp(ax.get_xticklabels(), rotation=-45, ha='left')
 
         ax.set_xlabel(xlabel)
-        ax.set_ylabel('Occurrence rate\n[Planets per star]', fontsize=label_size, labelpad=20)
+        ax.set_ylabel(plot_ylabel, fontsize=label_size, labelpad=20)
 
         # Ensure y-range includes highest error bar
         high_err = err[1]
         top = np.nanmax(y + high_err) if len(y) > 0 else None
         if top is not None and np.isfinite(top):
             ax.set_ylim(0, max(ax.get_ylim()[1], 1.1 * top))
+        
+        ax.set_title(title)
 
     # =========================
     # CASE 2: 2D histogram
     # =========================
     else:
-
         twin_axis_formatter = lambda value: str(int(value)) if value.is_integer() else f"{value:.1f}"
         # For stacked histograms: create individual subplots for each stack element
         if stack_dim == 'm':
@@ -429,6 +457,7 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
                 ax_i.xaxis.set_major_locator(FixedLocator(x_edges))
                 ax_i.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
                 ax_i.xaxis.set_minor_locator(NullLocator())
+                ax_i.tick_params(axis='both', which='major', labelsize=tick_size)
 
                 # Add left-side vertical label showing mass range for this subplot
                 m_lo = m_edges[i]
@@ -449,7 +478,7 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
                     ax_i.set_ylim(0, max(ax_i.get_ylim()[1], ytop))
 
             # Set the common y-label for the whole figure
-            fig.supylabel('Occurrence rate\n[Planets per star]', fontsize=label_size)
+            fig.supylabel(plot_ylabel, fontsize=label_size)
             # Set x-label on bottom-most axis (after reversing it's index 0)
             axs[0].set_xlabel('SMA [AU]', fontsize=label_size)
 
@@ -505,15 +534,19 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
                     ax_i.set_ylim(0, max(ax_i.get_ylim()[1], ytop))
 
             # Set the common y-label for the whole figure
-            fig.supylabel('Occurrence rate\n[Planets per star]', fontsize=label_size)
+            fig.supylabel(plot_ylabel, fontsize=label_size)
             # Set x-label on bottom-most axis (after reversing it's index 0)
-            axs[0].set_xlabel(f"{m_label} [{m_unit_label}]", fontsize=label_size)
+            axs[0].set_xlabel(f"{mlabel}", fontsize=label_size)
 
         else:
             raise ValueError("stack_dim must be 'm' or 'a'")
+        
+        fig.suptitle(title, fontsize=label_size)
 
-    fig.tight_layout()
+    
+    fig.tight_layout(rect=[0,0,1,0.95])
     fig.savefig(savepath, dpi=dpi)
+    plt.close()
     print(f"Occurrence histogram saved to: {savepath}")
 
     return
@@ -554,12 +587,28 @@ def make_bar_vals(x_pairs, y_vals):
     return all_x_flat, all_y_flat
 
 
-def smart_tick_fmt(x, pos):
+def sci_no_leading_zero(x, pos):
     if x == 0:
         return "0"
-    elif abs(x) < 0.1:
-        return f"{x:.0e}"   # scientific notation for small values
-    else:
-        return f"{x:.1f}"   # normal formatting otherwise
 
+    s = f"{x:.1e}"          # e.g. '2.0e-03'
+    mant, exp = s.split('e')
+
+    # remove trailing .0 if present
+    if mant.endswith('.0'):
+        mant = mant[:-2]
+
+    exp = int(exp)          # removes leading zero ? -3
+
+    return f"{mant}e{exp}"
+
+def int_or_one_decimal(x, pos):
+    if x == 0:
+        return "0"
+
+    # check if effectively an integer (robust to float precision)
+    if float(x).is_integer():
+        return str(int(x))
+    else:
+        return f"{x:.1f}"
 

@@ -43,7 +43,8 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
     the host system, so we need the system names.
     """
 
-    m_conversion = Ms2Me if m_unit=='earth' else Ms2Mj if m_unit=='jupiter' else None
+    # If using q instead of m, use m_conversion=1 (ie, leave m_samples in M_sun)
+    m_conversion = Ms2Me if m_unit=='earth' else Ms2Mj if m_unit=='jupiter' else 1
     
     post_sample_dict = {}
     
@@ -56,11 +57,7 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
     
     sysname_list = star_df.star_name.to_list()
     cls_rename_fn = lambda name: 'HD'+name.upper() if name[0].isdigit() else name.upper()
-    #import pdb; pdb.set_trace()
-    #from pathlib import Path
-    #path = Path(companion_post_dir)
-    #burned_files = [str(p).split('/')[-1].replace('.h5', '') for p in path.iterdir() if p.is_file()]
-    #burned_and_checked = []
+
     for sys_name_lowercase in sysname_list:
         sys_name = cls_rename_fn(sys_name_lowercase)
         chain_file = os.path.join(companion_post_dir, sys_name+'.h5')
@@ -123,7 +120,7 @@ def interim_prior(post_sample_dict, prior_type='loguniform'):
 
 
 def include_post_completeness(sampled_post_dict, star_df,
-                              saved_maps_dir):
+                              tier1_dir, tier2_dir):
     """
     Given a dictionary with companion posterior
     samples, calculate the completeness at each
@@ -135,8 +132,9 @@ def include_post_completeness(sampled_post_dict, star_df,
     """
 
     ## Load average interpolation function
-    avg_compl_interp_str = os.path.join(saved_maps_dir, 'avg_map/interp_fn.pkl')
+    avg_compl_interp_str = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
     avg_compl_interp = pickle.load(open(avg_compl_interp_str, 'rb'))
+    saved_maps_dir = os.path.join(tier1_dir, f"saved_maps_{tier1_dir}")
     # import pdb; pdb.set_trace()
     for star_name in star_df.star_name:
         

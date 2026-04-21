@@ -194,8 +194,113 @@ def loglik(lam, nstars, comp_names, bin_lam_dict, num_cells, all_binsizes, avg_c
     if np.isnan(loglik):
         import pdb; pdb.set_trace()
 		
-    #import pdb; pdb.set_trace()
     return loglik
+
+
+def loglik_PiecewisePowerM(theta, nstars, comp_names, bin_lam_dict, dM, fine_compl_grid):
+    """
+    Log likelihood of a 1D piecewise power law in
+    the M dimension, given a catalog of companion 
+    posterior draws in the form of a dictionary
+    
+    Arguments:
+        theta (array of floats): array of model parameters:
+            C1 - constant plateau value 1 (func. val between min_M and B1)            
+            C2 - constant plateau value 2 (func. val between B2 and max_M)
+            B1 - breakpoint 1 (connects first plateau to slope)
+            B2 - breakpoint 2 (connects slope to second plateau)
+            
+            
+        nstars (int): Number of host stars in the sample
+        comp_names (list of str): List of companion names
+            Must correspond to keys in bin_lam_dict
+        bin_lam_dict (dict): Compressed representation of
+            posterior samples
+        num_cells (int): Number of occurrence cells. Equal to len(lam)
+        all_binsizes (array of floats): Logarithmic size of each cell
+            in base 10. E.g. if a = 1-10 AU and M = 1-100 M_earth, then
+            binsize is 1*2 = 2
+            
+            
+        fine_compl_grid (array of floats): Compl value at each M value on
+            on a fine grid between min_M and max_M. Compls are from avg. map
+    """
+    
+    fine_compl_grid
+    
+
+    rate_map = lam*all_binsizes # Occurrence rate is rate density "integrated" over a/m space
+    if ((rate_map<0) | (rate_map>1)).any(): # If occurrence in any cell is <0 or >1, reject
+        return -np.inf
+
+
+    ## First get the pre-factor e^(-Lambda). We want log-likelihood, so just -Lambda
+    ## Lambda is Nstars * integral(lambda*completeness)
+    ## To integrate lambda*compl over the space, multiply by bin size. Then sum those integrals
+    integral = np.sum(all_binsizes*avg_cell_compls*lam)
+    Lambda = nstars*integral
+
+
+    ## Now the product term
+    ## For every bin, consider each planet
+    ## 	For every planet, retrieve a list of 2 values
+    ## 		The first is the averaged (completeness/prior), which can be pre-computed because it
+    ##      will be multiplied by a scalar, ie the ORD in that bin
+    ##		The second is the weight, which is just the fraction of samples that fall in that bin
+	
+    log_prod_term = 0 # AKA the sum of all single_bin_sum values
+    for bin_ind in range(num_cells):
+        lam_single = lam[bin_ind]
+	
+        single_bin_sum = 0
+        for comp_name in comp_names:
+             
+            # Both compl_over_prior and weight are stored in one entry to save retrieve time
+            cop_and_weight = bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"]
+
+            if cop_and_weight[1]==0: # Skip if weight=0 (companion does not overlap the bin)
+                # print(f'If weight is 0 then copica should be NaN: {comp_over_prior_avg}')
+                continue
+
+            mean = lam_single*cop_and_weight[0]
+            weighted_mean = mean**cop_and_weight[1] # Raise to power of weight
+            single_bin_sum += np.log(weighted_mean+1e-300) # Ensure non-zero for stability
+
+        log_prod_term += single_bin_sum
+
+    loglik = -Lambda + log_prod_term
+
+    if np.isnan(loglik):
+        import pdb; pdb.set_trace()
+		
+    return loglik
+
+
+def escarpment(M, M_min, M_max, C1, C2, B1, B2):
+    """
+    Piecewise function to fit
+    1D ORD in the mass dimension
+    
+    Arguments:
+        C1 - constant plateau value 1 (func. val between min_M and B1)            
+        C2 - constant plateau value 2 (func. val between B2 and max_M)
+        B1 - breakpoint 1 (connects first plateau to slope)
+        B2 - breakpoint 2 (connects slope to second plateau)
+    """
+    
+    slope_val = (C2-C1)/(np.log10(B2)-np.log10(B1))
+    
+    if M<M_min or M>M_max: # Any value out of bounds has ORD=0
+        f = 0
+    elif M<B1: # First plateau
+        f = C1
+    elif B1<= M <B2: # On slope
+        f = slope_val*(np.log10(M)-np.log10(B1))+C1 # y = m*(x-x0)+y0
+    elif M>=B2: # Second plateau
+        f = C2
+    return f
+    
+
 
 
 def cell_values(a_edges, m_edges, avg_map_fn_path):
@@ -278,7 +383,7 @@ def assign_cells(a_list, m_list, a_m_lims_pairs):
     return lam_inds
 
 
-def summary_stats(chain_path, cell_dict, bin_lam_dict):
+def summary_stats(chain_path, cell_dict, bin_lam_dict, m_unit='earth'):
     """
     Load chains and print out the occurrence rate,
     effective number of planets, and average
@@ -298,21 +403,26 @@ def summary_stats(chain_path, cell_dict, bin_lam_dict):
     
     # Thin samples
     thin=10
+    #import pdb; pdb.set_trace()
     ORD_samples = ORD_samples[::thin]
     OR_samples = ORD_samples*cell_dict['all_binsizes']
     
-    summary_dict = summarize_chains(OR_samples, hdi_frac=0.68, grid_size=1000)
-    
+    ORD_summary_dict = summarize_chains(ORD_samples, rate_type='ORD', hdi_frac=0.68, grid_size=1000)
+    OR_summary_dict = summarize_chains(OR_samples, rate_type='OR', hdi_frac=0.68, grid_size=1000)
+    summary_dict = {**ORD_summary_dict, **OR_summary_dict} # Combine to save both the OR and ORD
     #import pdb; pdb.set_trace()
     
 
     cell_weights = []
     for cell_ind in range(cell_dict['num_cells']):
+        #import pdb; pdb.set_trace()
         all_cop_and_weights = np.array([bin_lam_dict[key] for key in bin_lam_dict.keys() 
                                            if f'cell{cell_ind}_compl_over_prior_avg_and_weight' in key])
-        # import pdb; pdb.set_trace()
-        all_weights = all_cop_and_weights[:, 1] # Take the weights (ie, frac of each comp in that cell)
-        cell_weight = np.sum(all_weights)
+        if all_cop_and_weights.size==0: # No companions in cell
+            cell_weight=0
+        else:
+            all_weights = all_cop_and_weights[:, 1] # Take the weights (ie, frac of each comp in that cell)
+            cell_weight = np.sum(all_weights)
         cell_weights.append(cell_weight)
         # print(f"There are {cell_weight:.2f} effective planets in cell{cell_ind}")
     
@@ -325,13 +435,17 @@ def summary_stats(chain_path, cell_dict, bin_lam_dict):
     summary_dict['n_mbins'] = cell_dict['n_mbins']
     # import pdb; pdb.set_trace()
     
-    modes = summary_dict['mode']
-    hdi_low = summary_dict['hdi_low']
-    hdi_high = summary_dict['hdi_high']
+    ## Print the occurrence rates, which are easier to interpret than the ORDs
+    modes = summary_dict['mode_OR']
+    hdi_low = summary_dict['hdi_low_OR']
+    hdi_high = summary_dict['hdi_high_OR']
     cell_weights = summary_dict['cell_weights']
     cell_compls = summary_dict['cell_compls']
     a_m_lims_pairs = summary_dict['a_m_lims_pairs']
 
+
+    m_quant = "M_c" if m_unit in ['earth', 'jupiter'] else "M_c/M_{\star}" if m_unit==None else ''
+    m_unit_label = "Mearth" if m_unit=='earth' else "Mjup" if m_unit=='jupiter' else '' 
     for i in range(len(modes)):
         err_low = modes[i] - hdi_low[i]
         err_high = hdi_high[i] - modes[i]
@@ -339,7 +453,7 @@ def summary_stats(chain_path, cell_dict, bin_lam_dict):
         
         a_lims, m_lims = a_m_lims_pairs[i]
         print(
-            f"Cell {i}: {a_lims[0]}-{a_lims[1]} AU, {m_lims[0]:.1f}-{m_lims[1]:.1f} Mearth \n"
+            f"Cell {i}: a= {a_lims[0]}-{a_lims[1]} AU, {m_quant}={m_lims[0]:.1f}-{m_lims[1]:.1f} {m_unit_label} \n"
             f"    OR = {modes[i]:.3f} ± {err:.3f}, \n"
             f"    eff_planets = {cell_weights[i]:.2f}, \n"
             f"    average completeness = {cell_compls[i]:.3f}"
@@ -348,12 +462,13 @@ def summary_stats(chain_path, cell_dict, bin_lam_dict):
     return summary_dict
 
 
-def summarize_chains(samples, hdi_frac=0.68, grid_size=1000):
+def summarize_chains(samples, rate_type='ORD', hdi_frac=0.68, grid_size=1000):
     """
     Compute mode and HDI for each parameter in MCMC chains.
 
     Arguments:
         samples (ndarray): shape (Nsamples, Ndim)
+        rate_type (str): 'OR' or 'ORD' to label keys
         hdi_frac (float): fraction for HDI (default 0.68)
         grid_size (int): resolution for KDE mode estimation
 
@@ -393,9 +508,9 @@ def summarize_chains(samples, hdi_frac=0.68, grid_size=1000):
         hdi_low_list.append(hdi_low)
         hdi_high_list.append(hdi_high)
     
-    summaries = {'mode':mode_list,
-                 'hdi_low':hdi_low_list,
-                 'hdi_high':hdi_high_list}
+    summaries = {f'mode_{rate_type}':mode_list,
+                 f'hdi_low_{rate_type}':hdi_low_list,
+                 f'hdi_high_{rate_type}':hdi_high_list}
 
     return summaries
 

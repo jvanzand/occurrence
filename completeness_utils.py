@@ -12,7 +12,7 @@ import occurrence.plotting_utils as plot_utils
 import occurrence.rvsearch_borrowed as rvsb
 
 
-def map_interpolator(path, save_folder, star_subset, ycol='inj_msini', m_unit='earth'):
+def map_interpolator_old(path, avg_map_dir, star_subset, ycol='inj_msini', m_unit='earth'):
     """
     Function to average all computed completeness maps.
     - Also saves the interpolation function for each 
@@ -24,7 +24,7 @@ def map_interpolator(path, save_folder, star_subset, ycol='inj_msini', m_unit='e
                     The subdirs should include files named "XXXX_xgrid.npy",
                     "XXXX_ygrid.npy", and "XXXX_zgrid.npy", where "XXXX"
                     is the target name.
-        save_folder (str): Folder to save output arrays
+        avg_map_dir (str): Folder to save output arrays for avg map
         star_subset (list): List of stars to be included in average map
     
         ycol (str): Determines y-label of completeness plot
@@ -38,7 +38,7 @@ def map_interpolator(path, save_folder, star_subset, ycol='inj_msini', m_unit='e
         parent_zgrid (2D array): Completeness at each (x, y) pair
     """
     
-    os.makedirs(save_folder, exist_ok=True)
+    os.makedirs(avg_map_dir, exist_ok=True)
     # To average maps, we must line them up so we are averaging at the same (x,y) values.
     
     # First, find the global max/min y-values of all grids to define size of "parent" grid.
@@ -150,15 +150,15 @@ def map_interpolator(path, save_folder, star_subset, ycol='inj_msini', m_unit='e
     plt.imshow(parent_zgrid_tracker, origin="lower")
     plt.colorbar()
     plt.title("Number of maps used to calculate \n average in each cell")
-    plt.savefig("{}/map_contribution.png".format(save_folder), dpi=300)
+    plt.savefig("{}/map_contribution.png".format(avg_map_dir), dpi=300)
     plt.close()
 
     parent_zgrid = parent_zgrid / parent_zgrid_tracker # Average each point's completeness by dividing by number of maps that contributed only to that point
 
     ## Save completeness map
-    np.save(f'{save_folder}/parent_xgrid', parent_xgrid)
-    np.save(f'{save_folder}/parent_ygrid', parent_ygrid)
-    np.save(f'{save_folder}/parent_zgrid', parent_zgrid)
+    np.save(f'{avg_map_dir}/parent_xgrid', parent_xgrid)
+    np.save(f'{avg_map_dir}/parent_ygrid', parent_ygrid)
+    np.save(f'{avg_map_dir}/parent_zgrid', parent_zgrid)
     
     # Save average grid too
     z_T_avg = parent_zgrid.T
@@ -166,17 +166,167 @@ def map_interpolator(path, save_folder, star_subset, ycol='inj_msini', m_unit='e
                                                     bounds_error=False, fill_value=0)
 
     # Save the interpolation function for easy retrieval later
-    with open(save_folder+"/interp_fn.pkl", 'wb') as file_handle:
+    with open(avg_map_dir+"/interp_fn.pkl", 'wb') as file_handle:
         pickle.dump(avg_interpolator, file_handle)
     
     # import pdb; pdb.set_trace()
-    plot_save_path = os.path.join(save_folder, 'average_completeness.png')
+    plot_save_path = os.path.join(avg_map_dir, 'average_completeness.png')
     plot_utils.completeness_plotter(parent_xgrid, parent_ygrid, parent_zgrid, 
                                     plot_save_path, 'Average Completeness', save_plot=True,
                                     ycol=ycol, m_unit=m_unit)
     
 
     return parent_xgrid, parent_ygrid, parent_zgrid
+
+
+
+def build_interpolators(maps_dir, star_subset):
+    """
+    Build and save interpolation functions for each system.
+    """
+    for subdir in os.listdir(maps_dir):
+        if subdir not in star_subset:
+            continue
+
+        subdir_path = os.path.join(maps_dir, subdir)
+        if not os.path.isdir(subdir_path):
+            continue
+
+        try:
+            xgrid = np.load(os.path.join(subdir_path, "xgrid.npy"))
+            ygrid = np.load(os.path.join(subdir_path, "ygrid.npy"))
+            zgrid = np.load(os.path.join(subdir_path, "zgrid.npy"))
+        except FileNotFoundError:
+            continue
+
+        # Build interpolator
+        z_T = zgrid.T
+        interpolator = sci.RegularGridInterpolator(
+            (xgrid, ygrid), z_T,
+            bounds_error=False, fill_value=0
+        )
+
+        # Save interpolator
+        with open(os.path.join(subdir_path, "interp_fn.pkl"), "wb") as f:
+            pickle.dump(interpolator, f)
+            
+    return
+
+
+def average_map(maps_dir, avg_map_dir, star_subset, ycol='inj_msini', m_unit='earth'):
+    """
+    Load interpolators, compute average completeness map, and save outputs.
+    """
+    os.makedirs(avg_map_dir, exist_ok=True)
+
+    xmins, xmaxs, ymins, ymaxs = [], [], [], []
+
+    # --- Determine global bounds ---
+    for subdir in os.listdir(maps_dir):
+        if subdir not in star_subset:
+            continue
+
+        subdir_path = os.path.join(maps_dir, subdir)
+        if not os.path.isdir(subdir_path):
+            continue
+
+        try:
+            xgrid = np.load(os.path.join(subdir_path, "xgrid.npy"))
+            ygrid = np.load(os.path.join(subdir_path, "ygrid.npy"))
+        except FileNotFoundError:
+            continue
+
+        xmins.append(np.min(xgrid))
+        xmaxs.append(np.max(xgrid))
+        ymins.append(np.min(ygrid))
+        ymaxs.append(np.max(ygrid))
+
+    fac = 1.0001
+    xmin = np.log10(fac * np.min(xmins))
+    xmax = np.log10((1/fac) * np.max(xmaxs))
+    ymin = np.log10(fac * np.min(ymins))
+    ymax = np.log10((1/fac) * np.max(ymaxs))
+
+    grid_num = 50
+    parent_xgrid = np.logspace(xmin, xmax, grid_num)
+    parent_ygrid = np.logspace(ymin, ymax, grid_num)
+
+    parent_zgrid = np.zeros((grid_num, grid_num))
+    tracker = np.zeros((grid_num, grid_num))
+
+    # --- Loop over systems ---
+    for subdir in os.listdir(maps_dir):
+        if subdir not in star_subset:
+            continue
+
+        subdir_path = os.path.join(maps_dir, subdir)
+        interp_path = os.path.join(subdir_path, "interp_fn.pkl")
+
+        if not os.path.exists(interp_path):
+            continue
+
+        with open(interp_path, "rb") as f:
+            interpolator = pickle.load(f)
+
+        xgrid = np.load(os.path.join(subdir_path, "xgrid.npy"))
+        ygrid = np.load(os.path.join(subdir_path, "ygrid.npy"))
+        #import pdb; pdb.set_trace()
+        xinds = np.where((xgrid.min() < parent_xgrid) & (xgrid.max() > parent_xgrid))[0]
+        yinds = np.where((ygrid.min() < parent_ygrid) & (ygrid.max() > parent_ygrid))[0]
+
+        #for i, xi in enumerate(xinds):
+        #    for j, yj in enumerate(yinds):
+        #        val = interpolator((parent_xgrid[xi], parent_ygrid[yj]))
+        #        if not np.isnan(val):
+        #            parent_zgrid[yj, xi] += val
+        #            tracker[yj, xi] += 1
+        X, Y = np.meshgrid(parent_xgrid[xinds], parent_ygrid[yinds], indexing='xy')
+        points = np.column_stack([X.ravel(), Y.ravel()])
+        vals = interpolator(points).reshape(X.shape)
+        
+        tracker[np.ix_(yinds, xinds)] += ~np.isnan(vals) # Add +1 to grid for each non-nan
+        vals = np.nan_to_num(vals, nan=0.0) # Convert NaN vals to 0 so they don't affect the sum
+        parent_zgrid[np.ix_(yinds, xinds)] += vals # Add vals to parent_zgrid
+        
+
+    ## Make map contribution plot
+    fig, ax = plt.subplots()
+
+    im = ax.imshow(tracker, origin="lower")
+    fig.colorbar(im, ax=ax)
+    ax.set_title("Number of maps contributing\nto each cell")
+
+    fig.savefig(os.path.join(avg_map_dir, "map_contribution.png"), dpi=300)
+    plt.close(fig)
+    #############################
+
+
+    tracker[tracker < 1e-6] = np.nan
+    parent_zgrid /= tracker
+
+    # --- Save outputs ---
+    np.save(f'{avg_map_dir}/parent_xgrid', parent_xgrid)
+    np.save(f'{avg_map_dir}/parent_ygrid', parent_ygrid)
+    np.save(f'{avg_map_dir}/parent_zgrid', parent_zgrid)
+
+    # Save average interpolator
+    avg_interp = sci.RegularGridInterpolator(
+        (parent_xgrid, parent_ygrid), parent_zgrid.T,
+        bounds_error=False, fill_value=0
+    )
+
+    with open(os.path.join(avg_map_dir, "interp_fn.pkl"), "wb") as f:
+        pickle.dump(avg_interp, f)
+
+    # Plot
+    plot_save_path = os.path.join(avg_map_dir, 'average_completeness.png')
+    plot_utils.completeness_plotter(
+        parent_xgrid, parent_ygrid, parent_zgrid,
+        plot_save_path, 'Average Completeness',
+        save_plot=True, ycol=ycol, m_unit=m_unit
+    )
+
+    return
 
 
 
@@ -227,16 +377,23 @@ def single_map_maker(system_name, recoveries_path, save_dir, mstar,
 
     cplt = rvsb.CompletenessPlots(comp, fill_nans=fill_nans, trends_count=trends_count)
     cplt.save_comp_grids(save_dir)
-    fig = cplt.completeness_plot(title=system_name,
-                                 xlabel=xlabel,
-                                 ylabel=ylabel)
+    
 
-    #saveto = os.path.join(save_dir,'{}_recoveries.png'.format(system_name))
-    saveto = os.path.join(save_dir, f'{system_name}_recoveries.png')
+    
+    save_single_plots=True
+    if save_single_plots:
+        fig = cplt.completeness_plot(title=system_name,
+                                     xlabel=xlabel,
+                                     ylabel=ylabel)
 
-    fig.savefig(saveto, dpi=200)
-    print("Recovery plot saved to {}".format(
-           os.path.abspath(saveto)))
+        saveto = os.path.join(save_dir, f'{system_name}_recoveries.png')
+
+        fig.savefig(saveto, dpi=200)
+        print("Recovery plot saved to {}".format(
+               os.path.abspath(saveto)))
+        plt.close(fig)
+    else:
+        print(f"Saved grids for {system_name}")
 
     return
 
@@ -248,7 +405,8 @@ def _process_single_star(args):
     row, path_to_recoveries, maps_save_path, maps_ycol, m_unit = args
 
     starname = row.star_name
-    mstar = row.mstar
+    mstar = row.Mstar
+    
 
     single_recoveries_path = os.path.join(
         path_to_recoveries, f'{starname}_recoveries.csv'
@@ -348,7 +506,6 @@ def recs_mass_ratio_converter(recoveries_path, save_file, mstar, m_unit='earth')
     save_dir = Path(save_file).parent # Ensure save file location exists
     os.makedirs(save_dir, exist_ok=True)
 
-
     ## Get recoveries file with masses
     recs_orig = pd.read_csv(recoveries_path)
     
@@ -365,6 +522,8 @@ def recs_mass_ratio_converter(recoveries_path, save_file, mstar, m_unit='earth')
         mstar = mstar*c.M_sun.cgs.value/c.M_earth.cgs.value
     elif m_unit=='jupiter':
         mstar = mstar*c.M_sun.cgs.value/c.M_jup.cgs.value
+    else:
+        raise Exception('completeness_utils.recs_mass_ratio_converter: Specify a mass unit for recoveries.csv')
     
     
     recs_orig[qcol] = recs_orig[mass_col]/mstar

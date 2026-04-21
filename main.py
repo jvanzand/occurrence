@@ -17,13 +17,13 @@ from occurrence import plotting_utils as pu
 
 from occurrence.completeness_utils import _process_single_star
 
-def prep_recoveries_files(convert_recs_msini_mtrue=False,
-                          convert_recs_m_q=False,
-                          msini_rec_dir_to_make_mtrue=None,
-                          m_dir_to_make_q=None,
-                          star_df=None,
-                          m_unit='earth',
-                          parent_dir='results/'):
+def prep_recoveries_files(tier1_dir,
+                          star_df,
+                          #convert_recs_msini_mtrue=False,
+                          #convert_recs_m_q=False,
+                          msini_rec_dir_to_make_mtrue,
+                          m_dir_to_make_q,
+                          recoveries_m_unit='earth'):
     """
     Prepare recoveries.csv files for occurrence
     calculations.
@@ -42,34 +42,48 @@ def prep_recoveries_files(convert_recs_msini_mtrue=False,
         m_dir_to_make_q (str): Directory to find mass recoveries files, which
                           can be used to calculate mass ratio q
     """
-                          
-    if convert_recs_msini_mtrue:
+
+    #import pdb; pdb.set_trace()
+
+    if 'true' in tier1_dir: # If tier1_dir is mtrue or qtrue, then convert msini to mtrue
         for starname in star_df.star_name:
             recoveries_file = os.path.join(msini_rec_dir_to_make_mtrue, starname+'_recoveries.csv')
-            mtrue_recoveries_save_file = os.path.join(parent_dir, 'mtrue_recoveries/', starname+'_recoveries.csv')
+            mtrue_recoveries_save_file = os.path.join(tier1_dir, 'mtrue_recoveries/', starname+'_recoveries.csv')
             
             cu.recs_msini_converter(recoveries_file, mtrue_recoveries_save_file)
+            
+    else:
+        os.makedirs('msini/msini_recoveries/', exist_ok=True)
+        keep_cols = ['inj_msini', 'inj_au', 'inj_e', 'recovered']
+        for starname in star_df.star_name:
+            recoveries_file = os.path.join(msini_rec_dir_to_make_mtrue, starname+'_recoveries.csv')
+            msini_recoveries_save_file = os.path.join(tier1_dir, 'msini_recoveries/', starname+'_recoveries.csv')
+            
+            rec_file = pd.read_csv(recoveries_file)[keep_cols]
+            rec_file.to_csv(msini_recoveries_save_file, index=False)
+            #import pdb; pdb.set_trace()
     
-    if convert_recs_m_q:
+    #if convert_recs_m_q:
+    if 'q' in tier1_dir: # If tier1_dir is qsini or qtrue, then convert m to q
         for i in range(len(star_df)):
             row = star_df.iloc[i]
             starname = row.star_name
             mstar = row.mstar
-            recoveries_file = os.path.join(m_dir_to_make_q, starname+'_recoveries.csv')
-            dirname = 'qtrue_recoveries' if 'inj_mtrue' in pd.read_csv(recoveries_file) else 'qsini_recoveries'
-            q_recoveries_save_file = os.path.join(parent_dir, dirname, starname+'_recoveries.csv')
             
-            cu.recs_mass_ratio_converter(recoveries_file, q_recoveries_save_file, mstar, m_unit=m_unit)
+            #dirname = 'qtrue_recoveries' if 'inj_mtrue' in pd.read_csv(recoveries_file) else 'qsini_recoveries'
+            dirname = tier1_dir+'_recoveries'
+            
+            q_recoveries_save_file = os.path.join(tier1_dir, dirname, starname+'_recoveries.csv')
+            recoveries_file = os.path.join(m_dir_to_make_q, starname+'_recoveries.csv')
+            
+            cu.recs_mass_ratio_converter(recoveries_file, q_recoveries_save_file, mstar, m_unit=recoveries_m_unit)
             
     return
 
-def prep_maps(make_maps=False,
-              make_interps=False,
-              path_to_recoveries=None,
-              maps_ycol=None,
-              m_unit='earth',
-              star_df=None,
-              parent_dir='results/'):
+def prep_maps(tier1_dir,
+              star_df,
+              path_to_recoveries,
+              m_unit='earth'):
     """
     Prepare both single-system and average completeness 
     maps and calculate corresponding interpolation
@@ -94,35 +108,49 @@ def prep_maps(make_maps=False,
               companions orbiting that star. mstar is in solar masses
                    
     """
-    
-                  
-    maps_save_path = 'saved_maps_'+maps_ycol.split('_')[1] # e.g. inj_mtrue --> saved_maps_mtrue
-    maps_save_path = os.path.join(parent_dir, maps_save_path)
-    
-    if make_maps:
 
-        ncores = mp.cpu_count()
-        args_list = [
-            (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit)
-            for _, row in star_df.iterrows()
+    maps_save_label = 'saved_maps_'+tier1_dir
+    maps_save_path = os.path.join(tier1_dir, maps_save_label)
+    maps_ycol = f"inj_{tier1_dir}"
+    #_process_single_star([star_df.iloc[0], path_to_recoveries, maps_save_path, maps_ycol, m_unit])
+    #sfdsfs
+    
+    ncores = 30#mp.cpu_count()
+    args_list = [
+        (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit)
+        for _, row in star_df.iterrows()
         ]
 
-        with mp.Pool(ncores) as pool:
-            pool.map(_process_single_star, args_list)
+    with mp.Pool(ncores) as pool:
+        pool.map(_process_single_star, args_list)
     
-    if make_interps:
-        ## Makes and saves both idividual and average interp functions for sensitivity maps
-        avg_map_dir = os.path.join(maps_save_path, 'avg_map')
-        cu.map_interpolator(maps_save_path, avg_map_dir, star_df.star_name.to_list(), ycol=maps_ycol, m_unit=m_unit)
+    #if make_interps:
+    ## Make and save idividual interp functions for sensitivity maps
+    cu.build_interpolators(maps_save_path, star_df.star_name.to_list())
+    
+    return
+
+
+def make_average_map(tier1_dir, tier2_dir,
+                     star_df,
+                     ycol,
+                     m_unit='earth'):
+    """
+    Calculate average map from a subset of
+    pre-computed completeness maps
+    """
+    
+    path_to_maps = os.path.join(tier1_dir, f"saved_maps_{tier1_dir}")
+    avg_map_dir = os.path.join(tier1_dir, tier2_dir, 'avg_map/')
+    
+    cu.average_map(path_to_maps, avg_map_dir, star_df.star_name.to_list(), ycol=ycol, m_unit=m_unit)
     
     return
     
-    
-def prep_post_draws(sample_posts=False,
-                    star_df=None, comp_post_dir=None,
+def prep_post_draws(tier1_dir, tier2_dir,
+                    star_df, comp_post_dir,
                     saved_maps_dir=None, m_unit='earth',
-                    a_edges=None, m_edges=None,
-                    parent_dir='results/'):
+                    fig_title='Catalog Posteriors'):
 
     """
     Sample from companion posteriors according to user-specified
@@ -140,57 +168,50 @@ def prep_post_draws(sample_posts=False,
         comp_post_dir (str): Path to companion posteriors. Naming
             convention depends on custom post sampling function
     """
-    saved_dicts_dir = os.path.join(parent_dir, 'saved_dicts/')
-    os.makedirs(saved_dicts_dir, exist_ok=True)
-    
-    if sample_posts:
         
-        #### CUSTOMIZE your own sampler to match the posterior format ####
-        ## The output of custom sampler should be a dict whose keys are companion names
-        ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
-        post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=1000, m_unit=m_unit) # First sample posteriors
+    #### CUSTOMIZE your own sampler to match the posterior format ####
+    ## The output of custom sampler should be a dict whose keys are companion names
+    ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
+    post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=1000, m_unit=m_unit) # First sample posteriors
 
-        ## If using mass ratio, convert masses to q
-        if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
-            Ms2Mj = (c.M_sun/c.M_jup).value # 1 Msun --> 1047 Mjup
-            Ms2Me = (c.M_sun/c.M_earth).value # 1 Msun --> ~300k Mearth
-            m_conversion = Ms2Mj if m_unit=='jupiter' else Ms2Me if m_unit=='earth' else None
-            for comp_name in post_sample_dict.keys():
-                row = star_df[star_df['comp_list'].apply(lambda name_list: comp_name in name_list)]
-                mstar = row.mstar.values*m_conversion
+    ## If using mass ratio, convert masses to q
+    #if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
+    if 'q' in tier1_dir:
+
+        for comp_name in post_sample_dict.keys():
+            row = star_df[star_df['comp_list'].apply(lambda name_list: comp_name in name_list)]
+            mstar = row.mstar.values#*m_conversion
                 
-                old_samples = post_sample_dict[comp_name]
-                #import pdb; pdb.set_trace()
-                new_samples = np.array([old_samples[0], old_samples[1]/mstar])
-                post_sample_dict[comp_name] = new_samples
+            old_samples = post_sample_dict[comp_name]
+            #import pdb; pdb.set_trace()
+            new_samples = np.array([old_samples[0], old_samples[1]/mstar]) # Same a samples; m-->q
+            post_sample_dict[comp_name] = new_samples
                 
-        #import pdb; pdb.set_trace()
-        post_prior_sample_dict = su.interim_prior(post_sample_dict, prior_type='loguniform') # Then calculate prior at each draw. Each value is a 3xN array of SMA samples, mass samples, and prior values
-        #import pdb; pdb.set_trace()
-        # Now add on completeness values
-        sampled_post_with_compls = su.include_post_completeness(post_prior_sample_dict,
-                                                                star_df,
-                                                                saved_maps_dir)
+    #import pdb; pdb.set_trace()
+    post_prior_sample_dict = su.interim_prior(post_sample_dict, prior_type='loguniform') # Then calculate prior at each draw. Each value is a 3xN array of SMA samples, mass samples, and prior values
+    #import pdb; pdb.set_trace()
+    # Now add on completeness values
+    sampled_post_with_compls = su.include_post_completeness(post_prior_sample_dict,
+                                                            star_df,
+                                                            tier1_dir, tier2_dir)
                                                                 
-        ## Saves dict with companion names as key names
-        ## Each value is a 6xN array of:
-        ## [a_list, m_list, avg_compls, single_star_compls,
-        ##  compl_over_prior_avg, compl_over_prior_single]
-        ## Probably the only compl array I'll use is compl_over_prior_single. compl_over_prior_avg is to test whether using avg completeness changes the answer. The two completeness arrays are for testing/sanity checks.
-        np.savez(saved_dicts_dir+'sampled_post_prior_compl.npz', **sampled_post_with_compls)
+    ## Saves dict with companion names as key names
+    ## Each value is a 6xN array of:
+    ## [a_list, m_list, avg_compls, single_star_compls,
+    ##  compl_over_prior_avg, compl_over_prior_single]
+    ## Probably the only compl array I'll use is compl_over_prior_single. compl_over_prior_avg is to test whether using avg completeness changes the answer. The two completeness arrays are for testing/sanity checks.
+    saved_dict_dir = os.path.join(tier1_dir, tier2_dir, 'sampled_post_prior_compl.npz')
+    np.savez(saved_dict_dir, **sampled_post_with_compls)
         
-        pu.plot_catalog(saved_maps_dir, saved_dicts_dir+'sampled_post_prior_compl.npz', 
-                        a_edges, m_edges, star_df, m_unit=m_unit,
-                        fig_savename=parent_dir+'plots/catalog_and_completeness.png')
         
     return
     
     
-def prep_occurrence_materials(a_edges, m_edges, star_df, 
-                              saved_maps_dir,
+def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
+                              a_edges, m_or_q_edges, star_df, 
                               compl_type='single',
                               m_unit='earth',
-                              parent_dir='results/'):
+                              fig_title='Companions in Occurrence Region'):
     
     """
     Prepare inputs to occurrence calculation framework. Specifically:
@@ -205,8 +226,8 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
       pair
     
     Arguments:
-		a_edges/m_edges (np arrays): Arrays defining bin edges, like 
-		                             array([0.8, 1.6, 3.2])
+	a_edges/m_or_q_edges (np arrays): Arrays defining bin edges, like 
+		                     array([0.8, 1.6, 3.2])
         star_df (dataframe): Pandas df with columns 'star_name', 'mstar',
               and 'comp_list'. comp_list is a list of the names of all 
               companions orbiting that star. mstar is in solar masses
@@ -222,15 +243,13 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
                           it associates each draw with the completeness of its
                           original map. 'avg' is more for testing/comparison
     """
-    saved_dicts_dir = os.path.join(parent_dir, 'saved_dicts/')
-    os.makedirs(saved_dicts_dir, exist_ok=True)
     
     ## Define paths to companion samples and average map
-    comp_samples_path=os.path.join(saved_dicts_dir, 'sampled_post_prior_compl.npz')
-    avg_map_fn_path=os.path.join(saved_maps_dir, 'avg_map/interp_fn.pkl')
+    comp_samples_path=os.path.join(tier1_dir, tier2_dir, 'sampled_post_prior_compl.npz')
+    avg_map_fn_path=os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
                       
     # Make cell_dict, which contains useful cell info
-    cell_dict = ou.cell_values(a_edges, m_edges, avg_map_fn_path)
+    cell_dict = ou.cell_values(a_edges, m_or_q_edges, avg_map_fn_path)
     comp_samples = dict(np.load(comp_samples_path)) # Load companion samples
     
     ## In this loop, calculate the lambda index of every a/m sample for every companion
@@ -240,10 +259,7 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
         
         lam_inds = ou.assign_cells(a_list, m_list, cell_dict['a_m_lims_pairs']) # Calculate lambda inds
         
-        #if '8765' in comp_name:
-        #    import pdb; pdb.set_trace()
         a_m_prior_compl_lam = np.vstack([a_m_prior_compl, lam_inds]) # Append lambda inds to array
-        # import pdb; pdb.set_trace()
         
         comp_samples[comp_name] = a_m_prior_compl_lam # Put updated array back into dictionary
     #import pdb; pdb.set_trace()
@@ -251,7 +267,7 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
     ## Drop companions that do not fall at least partially in the ROI
     print("Total companions: ", len(comp_samples))
     for comp_name in list(comp_samples.keys()):
-        samples_in_ROI = len(np.where(comp_samples[comp_name][-1]>-0.5)[0])
+        samples_in_ROI = len(np.where(comp_samples[comp_name][-1]>-0.5)[0]) # Find how many inds are >-1
         if samples_in_ROI==0:
             print(f'{comp_name} falls fully outside the ROI; dropping.')
             del comp_samples[comp_name]
@@ -275,9 +291,14 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
         lam_nancount = np.isnan(compl_over_prior).sum()
         if lam_nancount>10:
             #import pdb; pdb.set_trace()
-            print(f'main.prep_occurrence_materials: \n'
-                  f'{comp_name} in system {sysname} has {lam_nancount}/{len(compl_over_prior)} sample NaNs')
-            #import pdb; pdb.set_trace()
+            if lam_nancount>999:
+                print(f'main.prep_occurrence_materials: \n'
+                      f'{comp_name} in system {sysname} has {lam_nancount}/{len(compl_over_prior)} sample NaNs. \n'
+                      f'    Likely it is mostly outside the ROI, with the few in-ROI samples in NaN regions of the \n'
+                      f'    host star map.')
+            else:
+                print(f'main.prep_occurrence_materials: \n'
+                      f'{comp_name} in system {sysname} has {lam_nancount}/{len(compl_over_prior)} sample NaNs')
         
         # Frac. of inds that fall in at least 1 cell. This will be used
         # in MCMC prep. function to exclude comps outside ROI for efficiency
@@ -299,23 +320,23 @@ def prep_occurrence_materials(a_edges, m_edges, star_df,
             compl_over_prior_in_cell_avg_and_weight = [compl_over_prior_in_cell_avg, weight]
             bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"] = compl_over_prior_in_cell_avg_and_weight
     
+    
+    saved_dicts_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir, 'saved_dicts/')
+    os.makedirs(saved_dicts_dir, exist_ok=True)
+    
     np.savez(saved_dicts_dir+'cell_dict.npz', **cell_dict) ## Cell-specific info
     np.savez(saved_dicts_dir+'sampled_post_prior_compl_lam_inROI.npz', **comp_samples) # Sample-specific info
     np.savez(saved_dicts_dir+'bin_lam_dict.npz', **bin_lam_dict) # Pre-computed info for likelihood func.
     #import pdb; pdb.set_trace()
     
-    
-    pu.plot_catalog(saved_maps_dir, saved_dicts_dir+'sampled_post_prior_compl_lam_inROI.npz', 
-                    a_edges, m_edges, star_df, m_unit=m_unit,
-                    fig_savename=parent_dir+'plots/catalog_inROI_and_completeness.png')
 
     return
     
     
     
-def run_mcmc(nstars, parallel=False,
-             nwalkers=50, nsteps=5000, burnin=1000,
-             parent_dir='results/'):
+def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
+             nstars, parallel=False,
+             nwalkers=50, nsteps=5000, burnin=1000):
     """
     Entry point for MCMC occurrence calculation.
     Collects pre-computed materials to feed to MCMC.
@@ -325,15 +346,16 @@ def run_mcmc(nstars, parallel=False,
     but it's nice to have all my primary functions in 
     the main.py module.
     """
-    saved_chains_dir = os.path.join(parent_dir, 'saved_chains/')
+    saved_chains_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir, 'saved_chains/')
     os.makedirs(saved_chains_dir, exist_ok=True)
     
-    samples_inROI_path = os.path.join(parent_dir, 'saved_dicts/sampled_post_prior_compl_lam_inROI.npz')
+    load_materials_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
+    samples_inROI_path = os.path.join(load_materials_dir, 'saved_dicts/sampled_post_prior_compl_lam_inROI.npz')
     samples_inROI = dict(np.load(samples_inROI_path))
     comp_names_inROI = list(samples_inROI.keys())
     
-    cell_dict_path = os.path.join(parent_dir, 'saved_dicts/cell_dict.npz')
-    bin_lam_dict_path = os.path.join(parent_dir, 'saved_dicts/bin_lam_dict.npz')
+    cell_dict_path = os.path.join(load_materials_dir, 'saved_dicts/cell_dict.npz')
+    bin_lam_dict_path = os.path.join(load_materials_dir, 'saved_dicts/bin_lam_dict.npz')
     
     cell_dict = dict(np.load(cell_dict_path)) # Includes bin sizes and avg_cell_compls
     bin_lam_dict = dict(np.load(bin_lam_dict_path)) # Contains, for every cell and for every companion, all (compl/prior) values that fall in that cell, AND the fraction (aka weight). This is equivalent to the info. stored in sampled_post_prior_compl_lam.npz, but compressed and sorted by lambda index.
@@ -344,16 +366,18 @@ def run_mcmc(nstars, parallel=False,
     
     return
     
-def summary_stats(parent_dir='results/'):
+def summary_stats(tier1_dir, tier2_dir, tier3_dir):
     """
     Load MCMC chains and make diagnostic
     plots of the results
     """
     
-    cell_dict_path = os.path.join(parent_dir, 'saved_dicts/cell_dict.npz')
-    bin_lam_dict_path = os.path.join(parent_dir, 'saved_dicts/bin_lam_dict.npz')
-    path_to_chains = os.path.join(parent_dir, 'saved_chains/chains.npz')
-    save_summary_dict_path = os.path.join(parent_dir, 'saved_dicts/summary_dict.npz')
+    load_save_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
+    
+    cell_dict_path = os.path.join(load_save_dir, 'saved_dicts/cell_dict.npz')
+    bin_lam_dict_path = os.path.join(load_save_dir, 'saved_dicts/bin_lam_dict.npz')
+    path_to_chains = os.path.join(load_save_dir, 'saved_chains/chains.npz')
+    save_summary_dict_path = os.path.join(load_save_dir, 'saved_dicts/summary_dict.npz')
     
     
     cell_dict = dict(np.load(cell_dict_path)) # Includes bin sizes and avg_cell_compls
@@ -363,42 +387,53 @@ def summary_stats(parent_dir='results/'):
     
     return
     
-def make_results_plots(completeness_dir, stack_dim='m', 
-                       m_unit='earth', parent_dir='results/'):
+def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
+                       nstars, stack_dim='m', 
+                       m_unit='earth', 
+                       hist_title=''):
     """
     Load MCMC chains and make diagnostic
     plots of the results
     """
-    plots_dir = os.path.join(parent_dir, 'plots/')
     
     
-    path_to_cell_dict = os.path.join(parent_dir, 'saved_dicts/cell_dict.npz')
-    path_to_chains = os.path.join(parent_dir, 'saved_chains/chains.npz') 
-    path_to_summary = os.path.join(parent_dir, 'saved_dicts/summary_dict.npz') 
+    load_save_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
+    path_to_cell_dict = os.path.join(load_save_dir, 'saved_dicts/cell_dict.npz')
+    path_to_chains = os.path.join(load_save_dir, 'saved_chains/chains.npz') 
+    path_to_summary = os.path.join(load_save_dir, 'saved_dicts/summary_dict.npz')
+    plot_save_dir = os.path.join(load_save_dir, 'plots/')
     
     ## Start with corner plot to gauge MCMC results ##
     cell_dict = dict(np.load(path_to_cell_dict)) # Includes bin sizes and avg_cell_compls
-    pu.plot_corner_from_file(path_to_chains, cell_dict, outpath=plots_dir+"corner.png",
+    save_corner_dir = os.path.join(plot_save_dir, 'corner.png')
+    pu.plot_corner_from_file(path_to_chains, cell_dict, outpath=save_corner_dir,
                              param_names=None, thin=10, max_samples=50000)
     
     
     ## Now plot completeness map + catalog + derived occurrence rates + eff pl. + avg. compl.
-    xgrid = np.load(f"{completeness_dir}/avg_map/parent_xgrid.npy")
-    ygrid = np.load(f"{completeness_dir}/avg_map/parent_ygrid.npy")
-    zgrid = np.load(f"{completeness_dir}/avg_map/parent_zgrid.npy")
+    avg_comp_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/')
+    xgrid = np.load(avg_comp_path+"parent_xgrid.npy")
+    ygrid = np.load(avg_comp_path+"parent_ygrid.npy")
+    zgrid = np.load(avg_comp_path+"parent_zgrid.npy")
     
     summary_dict = dict(np.load(path_to_summary))
-    m_type = completeness_dir.split('_')[-1] # e.g. 'mass_ratio/saved_maps_qtrue' --> qtrue
     
-    y_col = 'inj_'+m_type
-    pu.completeness_plotter(xgrid, ygrid, zgrid, plots_dir+"catalog_with_occurrence.png", 
-                            title='Occurrence Summary', save_plot=True, 
+    
+    ## Plot completeness map with grid cells and occurrence rate annotations
+    y_col = 'inj_'+tier1_dir # e.g. inj_mtrue
+    #import pdb; pdb.set_trace()
+    pu.completeness_plotter(xgrid, ygrid, zgrid, plot_save_dir+"ROI_with_occurrence.png", 
+                            title=f'Occurrence Summary for {nstars} Stars', save_plot=True, 
                             a_m_lims_pairs=cell_dict['a_m_lims_pairs'], summary_dict=summary_dict,
                             ycol=y_col, m_unit=m_unit)
 
-
-    pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=m_type,
-                            savepath=plots_dir+'occurrence.png', figsize=(6, 4), dpi=300)
+    ## Plot occurrence histogram in OR and ORD
+    pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
+                            rate_type='OR', title=hist_title,
+                            savepath=plot_save_dir+f'occurrence_OR.png', figsize=(6, 4), dpi=300)
+    pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
+                            rate_type='ORD', title=hist_title,
+                            savepath=plot_save_dir+f'occurrence_ORD.png', figsize=(6, 4), dpi=300)
                             
     
     return
