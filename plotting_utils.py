@@ -224,52 +224,63 @@ def plot_catalog(tier1_dir, tier2_dir,
         
     return
 
+
+
 def plot_corner_from_file(
-    filepath,
-    cell_dict,
+    path_to_chains,
+    plot_model,
     outpath="corner.png",
     param_names=None,
     thin=10,
     max_samples=50000):
     """
     Load MCMC chains from .npz file and generate a corner plot.
+    Handles both histogram and power law models.
 
     Arguments:
-        filepath (str): Path to saved .npz file
-        cell_dict (dict): Dictionary containing bin sizes
+        path_to_chains (str): Path to saved .npz file
+        plot_model (str): Model type ('hist' or power law model name like 'pp1')
+        plot_dim (str): Dimension being plotted ('a' or 'm'), used for power law models
         outpath (str): Output filename for plot
-        param_names (list of str): Labels for parameters
+        param_names (list of str): Labels for parameters (if None, auto-generate based on model)
         thin (int): Thinning factor
         max_samples (int): Max number of samples to plot
     """
 
-    data = np.load(filepath)
+    data = np.load(path_to_chains)
 
     # Prefer flat chains if available
     if "flat_chains" in data:
-        ORD_samples = data["flat_chains"]
+        samples = data["flat_chains"]
     else:
         chains = data["chains"]  # (nsteps, nwalkers, ndim)
-        ORD_samples = chains.reshape(-1, chains.shape[-1])
+        samples = chains.reshape(-1, chains.shape[-1])
 
     # Thin samples
-    ORD_samples = ORD_samples[::thin]
-    OR_samples = ORD_samples*cell_dict['all_binsizes']
+    samples = samples[::thin]
 
     # Subsample if too large
-    if OR_samples.shape[0] > max_samples:
-        inds = np.random.choice(OR_samples.shape[0], max_samples, replace=False)
-        OR_samples = OR_samples[inds]
+    if samples.shape[0] > max_samples:
+        inds = np.random.choice(samples.shape[0], max_samples, replace=False)
+        samples = samples[inds]
 
-    ndim = OR_samples.shape[1]
+    ndim = samples.shape[1]
 
-    # Default parameter names
+    # Determine parameter names based on model
     if param_names is None:
-        param_names = [f"$OR_{{{i}}}$" for i in range(ndim)]
+        if plot_model == 'hist':
+            # Histogram model: use ORD labels for each dimension
+            param_names = [f"$ORD_{{{i}}}$" for i in range(ndim)]
+        elif plot_model == 'pp1':
+            # pp1 model: C and dimension reference (a_0 or m_0)
+            param_names = ['slope', 'intercept']
+        else:
+            # Default fallback
+            param_names = [f"$\\theta_{{{i}}}$" for i in range(ndim)]
 
     # Make corner plot
     fig = corner.corner(
-        OR_samples,
+        samples,
         labels=param_names,
         show_titles=True,
         title_fmt=".3f",
@@ -280,15 +291,15 @@ def plot_corner_from_file(
     plt.close(fig)
 
     print(f"Corner plot saved to: {outpath}")
-    # import pdb; pdb.set_trace()
     plt.close()
     return
 
 
 
-def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtrue',
-                         rate_type='OR', title='',
-                         savepath='occurrence.png', figsize=(6, 4), dpi=300):
+
+def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
+                         rate_type='OR', title='', return_fig_ax=False,
+                         savepath='occurrence.png', figsize=(6, 4)):
     """
     Plot occurrence histograms and save to file.
 
@@ -430,13 +441,13 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
             # Make stacked subplots shorter and a bit wider
             stacked_fig_w = figsize[0] * 1.2
             stacked_fig_h = max(0.6 * figsize[1] * n_m, figsize[1])
-            fig, axs = plt.subplots(n_m, 1, figsize=(stacked_fig_w, stacked_fig_h), sharex=True)
+            fig, ax = plt.subplots(n_m, 1, figsize=(stacked_fig_w, stacked_fig_h), sharex=True)
             if n_m == 1:
-                axs = [axs]
+                ax = [ax]
             # Reverse axes so the smallest mass interval is plotted at the bottom
-            axs = axs[::-1]
+            ax = ax[::-1]
             for i in range(n_m):
-                ax_i = axs[i]
+                ax_i = ax[i]
                 y = mode[i]
                 err = get_err(mode[i], low[i], high[i])
 
@@ -474,13 +485,13 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
             global_top = np.nanmax(high)
             if np.isfinite(global_top):
                 ytop = 1.1 * global_top
-                for ax_i in axs:
+                for ax_i in ax:
                     ax_i.set_ylim(0, max(ax_i.get_ylim()[1], ytop))
 
             # Set the common y-label for the whole figure
             fig.supylabel(plot_ylabel, fontsize=label_size)
             # Set x-label on bottom-most axis (after reversing it's index 0)
-            axs[0].set_xlabel('SMA [AU]', fontsize=label_size)
+            ax[0].set_xlabel('SMA [AU]', fontsize=label_size)
 
         elif stack_dim == 'a':
             # One subplot per SMA bin (rows), x-axis is mass
@@ -491,13 +502,13 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
             # Make stacked subplots shorter and a bit wider
             stacked_fig_w = figsize[0] * 1.2
             stacked_fig_h = max(0.6 * figsize[1] * n_a, figsize[1])
-            fig, axs = plt.subplots(n_a, 1, figsize=(stacked_fig_w, stacked_fig_h), sharex=True)
+            fig, ax = plt.subplots(n_a, 1, figsize=(stacked_fig_w, stacked_fig_h), sharex=True)
             if n_a == 1:
-                axs = [axs]
+                ax = [ax]
             # Reverse axes so the smallest SMA interval is plotted at the bottom
-            axs = axs[::-1]
+            ax = ax[::-1]
             for i in range(n_a):
-                ax_i = axs[i]
+                ax_i = ax[i]
                 y = mode[:, i]
                 err = get_err(mode[:, i], low[:, i], high[:, i])
 
@@ -530,13 +541,13 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
             global_top = np.nanmax(high)
             if np.isfinite(global_top):
                 ytop = 1.1 * global_top
-                for ax_i in axs:
+                for ax_i in ax:
                     ax_i.set_ylim(0, max(ax_i.get_ylim()[1], ytop))
 
             # Set the common y-label for the whole figure
             fig.supylabel(plot_ylabel, fontsize=label_size)
             # Set x-label on bottom-most axis (after reversing it's index 0)
-            axs[0].set_xlabel(f"{mlabel}", fontsize=label_size)
+            ax[0].set_xlabel(f"{mlabel}", fontsize=label_size)
 
         else:
             raise ValueError("stack_dim must be 'm' or 'a'")
@@ -545,11 +556,15 @@ def plot_occurrence_hist(summary_dict, stack_dim='m', m_unit='earth', mtype='mtr
 
     
     fig.tight_layout(rect=[0,0,1,0.95])
-    fig.savefig(savepath, dpi=dpi)
-    plt.close()
-    print(f"Occurrence histogram saved to: {savepath}")
+    
+    if return_fig_ax:
+        return fig, ax
+    else:
+        fig.savefig(savepath, dpi=300)
+        plt.close()
+        print(f"Occurrence histogram saved to: {savepath}")
+        return
 
-    return
 
 
 def make_bar_vals(x_pairs, y_vals):
@@ -586,6 +601,72 @@ def make_bar_vals(x_pairs, y_vals):
 
     return all_x_flat, all_y_flat
 
+def plot_power(fig, ax, model_func_name, save_path):
+    """
+    Over-plot the given power law function on the
+    histogram figure provided, then save the result.
+    
+    Arguments:
+        fig : matplotlib figure object
+        ax : matplotlib axis object (or list of axes for stacked plots)
+        model_func_name (str): Name of model function (e.g., 'pp1')
+        save_path (str): Path where to save the modified figure
+    """
+    
+    # Need to import here to avoid circular imports
+    from occurrence import mcmc_powerlaw as mcmc_power
+    import os
+    
+    # Determine the chains file path - should be in same directory as save_path
+    # but with the appropriate chain filename
+    plot_dir = os.path.dirname(save_path)
+    load_dir = os.path.dirname(plot_dir)  # Go up one level from plots/ to main result dir
+    chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}.npz')
+    
+    # Load the chains
+    data = np.load(chain_file)
+    flat_chains = data['flat_chains']
+    flat_log_probs = data['flat_log_probs']
+    
+    # Find maximum likelihood parameters
+    ml_idx = np.argmax(flat_log_probs)
+    ml_params = flat_chains[ml_idx]
+    
+    # Assign parameter names based on model function
+    if model_func_name == 'pp1':
+        model_func = mcmc_power.PiecewisePower1
+    else:
+        raise NotImplementedError(f"Model {model_func_name} not yet implemented in plot_power()")
+    
+    # Get x-axis data from the histogram axes
+    # Handle both single axis (1D histogram) and multiple axes (stacked histograms)
+    if isinstance(ax, np.ndarray):
+        axs_list = ax.flatten().tolist()
+    elif isinstance(ax, list):
+        axs_list = ax
+    else:
+        axs_list = [ax]
+    
+    # Plot the power law on each subplot
+    for ax_i in axs_list:
+        # Get the x-axis scale and limits from the existing histogram
+        xlim = ax_i.get_xlim()
+        
+        # Create a fine grid of x values spanning the axis range
+        x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
+        
+        # Evaluate the power law model at these x values
+        y_model = model_func(ml_params, x_model)
+        
+        # Plot the power law curve
+        ax_i.plot(x_model, y_model, color='red', linewidth=2.5, label=f'{model_func_name} fit', zorder=100)
+        ax_i.legend(loc='upper right', fontsize=10)
+    
+    # Save the modified figure
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(save_path, dpi=300)
+    plt.close()
+    print(f"Occurrence histogram with {model_func_name} model saved to: {save_path}")
 
 def sci_no_leading_zero(x, pos):
     if x == 0:

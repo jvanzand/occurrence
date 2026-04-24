@@ -15,290 +15,261 @@ from occurrence import completeness_utils as cu
 from line_profiler import profile
 
 
-def mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
-             nwalkers=50,
-             nsteps=5000,
-             burnin=1000,
-             parallel=False,
-             save_path="chains.npz",
-             random_seed=None):
-    """
-    Run MCMC to compute occurrence rates
-    Start by extracting and manipulating ingredients 
-    to feed to log-likelihood
-    
-    Arguments:
-        nstars (int): Number of host stars in sample
-        comp_names_inROI (list of str): List of names of
-            companions that fall in the ROI. Must correspond 
-            to keys in bin_lam_dict
-        cell_dict (dict): Dictionary containing useful info
-            related to cell sizes, avg completeness, etc.
-        bin_lam_dict (dict): Compressed representation of
-            posterior samples, with completeness, priors,
-            and lambda indices accounted for. Keys look like
-            'planetXX_cellYY_compl_over_prior' and
-            'planetXX_cellYY_weight'. Thus, with Np companions
-            and Nc cells, there are 2*Np*Nc keys in the dict.
-            'compl_over_prior' is an array of floats, and 'weight'
-            is a single float.
-        
-        nwalkers (int): Number of walkers
-        nsteps (int): Number of production steps
-        burnin (int): Number of burn-in steps
-        parallel (bool): Use multiprocessing if True
-        save_path (str): Where to save chains
-        random_seed (int or None)
-            
-    """
-    os.makedirs(Path(save_path).parent, exist_ok=True)
-    # import pdb; pdb.set_trace()
 
-    ## Unpack params
-    lam = np.random.uniform(0.001, 0.05, size=cell_dict['num_cells'])
-    num_cells = cell_dict['num_cells']
-    all_binsizes = cell_dict['all_binsizes']
-    avg_cell_compls = cell_dict['avg_compls']
-    
-    ndim = num_cells
-    # ---- Initialize walkers ----
-    # Start near small positive values (your prior range)
-    lam_init = np.random.uniform(0.001, 0.05, size=ndim)
-
-    # Small Gaussian ball around initial guess
-    pos = lam_init + 1e-3 * np.random.randn(nwalkers, ndim)
-
-    # Enforce positivity (important for your likelihood)
-    pos = np.clip(pos, 1e-6, None)
-    
-
-    loglik_args = (
-        nstars,
-        comp_names_inROI,
-        bin_lam_dict,
-        num_cells,
-        all_binsizes,
-        avg_cell_compls
-    )
-    # import pdb; pdb.set_trace()
-    
-    # ---- Set up sampler ----
-    if parallel:
-        with mp.Pool() as pool:
-            sampler = emcee.EnsembleSampler(
-                nwalkers, ndim, loglik,
-                args=loglik_args, pool=pool
-            )
-
-            # Burn-in
-            pos, _, _ = sampler.run_mcmc(pos, burnin, progress=True)
-            sampler.reset()
-
-            # Production
-            sampler.run_mcmc(pos, nsteps, progress=True)
-
-    else:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, loglik,
-                                        args=loglik_args)
-
-        # Burn-in
-        pos, _, _ = sampler.run_mcmc(pos, burnin, progress=True)
-        sampler.reset()
-
-        # Production
-        sampler.run_mcmc(pos, nsteps, progress=True)
-
-    # ---- Extract chains ----
-    chains = sampler.get_chain()        # shape: (nsteps, nwalkers, ndim)
-    log_probs = sampler.get_log_prob()  # same shape
-
-    # Flattened version (often what you want)
-    flat_chains = sampler.get_chain(flat=True)
-    flat_log_probs = sampler.get_log_prob(flat=True)
-
-    # ---- Save safely (no pickle!) ----
-    np.savez_compressed(
-        save_path,
-        chains=chains,
-        log_probs=log_probs,
-        flat_chains=flat_chains,
-        flat_log_probs=flat_log_probs,
-    )
-
-    return sampler
-
-def loglik(lam, nstars, comp_names, bin_lam_dict, num_cells, all_binsizes, avg_cell_compls):
-    """
-    Log likelihood of a model histogram, given a 
-    catalog of companion posterior draws in the
-    form of a dictionary
-    
-    Arguments:
-        lam (array of floats): 1D representation of the 2D occurrence
-            rate density histogram
-        nstars (int): Number of host stars in the sample
-        comp_names (list of str): List of companion names
-            Must correspond to keys in bin_lam_dict
-        bin_lam_dict (dict): Compressed representation of
-            posterior samples
-        num_cells (int): Number of occurrence cells. Equal to len(lam)
-        all_binsizes (array of floats): Logarithmic size of each cell
-            in base 10. E.g. if a = 1-10 AU and M = 1-100 M_earth, then
-            binsize is 1*2 = 2
-        avg_cell_compls (array of floats): Average completeness over each
-            cell
-    """
-    
-
-    rate_map = lam*all_binsizes # Occurrence rate is rate density "integrated" over a/m space
-    if ((rate_map<0) | (rate_map>1)).any(): # If occurrence in any cell is <0 or >1, reject
-        return -np.inf
-
-
-    ## First get the pre-factor e^(-Lambda). We want log-likelihood, so just -Lambda
-    ## Lambda is Nstars * integral(lambda*completeness)
-    ## To integrate lambda*compl over the space, multiply by bin size. Then sum those integrals
-    integral = np.sum(all_binsizes*avg_cell_compls*lam)
-    Lambda = nstars*integral
-
-
-    ## Now the product term
-    ## For every bin, consider each planet
-    ## 	For every planet, retrieve a list of 2 values
-    ## 		The first is the averaged (completeness/prior), which can be pre-computed because it
-    ##      will be multiplied by a scalar, ie the ORD in that bin
-    ##		The second is the weight, which is just the fraction of samples that fall in that bin
-	
-    log_prod_term = 0 # AKA the sum of all single_bin_sum values
-    for bin_ind in range(num_cells):
-        lam_single = lam[bin_ind]
-	
-        single_bin_sum = 0
-        for comp_name in comp_names:
-             
-            # Both compl_over_prior and weight are stored in one entry to save retrieve time
-            cop_and_weight = bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"]
-
-            if cop_and_weight[1]==0: # Skip if weight=0 (companion does not overlap the bin)
-                # print(f'If weight is 0 then copica should be NaN: {comp_over_prior_avg}')
-                continue
-
-            mean = lam_single*cop_and_weight[0]
-            weighted_mean = mean**cop_and_weight[1] # Raise to power of weight
-            single_bin_sum += np.log(weighted_mean+1e-300) # Ensure non-zero for stability
-
-        log_prod_term += single_bin_sum
-
-    loglik = -Lambda + log_prod_term
-
-    if np.isnan(loglik):
-        import pdb; pdb.set_trace()
-		
-    return loglik
-
-
-def loglik_PiecewisePowerM(theta, nstars, comp_names, bin_lam_dict, dM, fine_compl_grid):
-    """
-    Log likelihood of a 1D piecewise power law in
-    the M dimension, given a catalog of companion 
-    posterior draws in the form of a dictionary
-    
-    Arguments:
-        theta (array of floats): array of model parameters:
-            C1 - constant plateau value 1 (func. val between min_M and B1)            
-            C2 - constant plateau value 2 (func. val between B2 and max_M)
-            B1 - breakpoint 1 (connects first plateau to slope)
-            B2 - breakpoint 2 (connects slope to second plateau)
-            
-            
-        nstars (int): Number of host stars in the sample
-        comp_names (list of str): List of companion names
-            Must correspond to keys in bin_lam_dict
-        bin_lam_dict (dict): Compressed representation of
-            posterior samples
-        num_cells (int): Number of occurrence cells. Equal to len(lam)
-        all_binsizes (array of floats): Logarithmic size of each cell
-            in base 10. E.g. if a = 1-10 AU and M = 1-100 M_earth, then
-            binsize is 1*2 = 2
-            
-            
-        fine_compl_grid (array of floats): Compl value at each M value on
-            on a fine grid between min_M and max_M. Compls are from avg. map
-    """
-    
-    fine_compl_grid
-    
-
-    rate_map = lam*all_binsizes # Occurrence rate is rate density "integrated" over a/m space
-    if ((rate_map<0) | (rate_map>1)).any(): # If occurrence in any cell is <0 or >1, reject
-        return -np.inf
+# def mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
+#              nwalkers=50,
+#              nsteps=5000,
+#              burnin=1000,
+#              parallel=False,
+#              save_path="chains.npz",
+#              random_seed=None):
+#     """
+#     Run MCMC to compute occurrence rates
+#     Start by extracting and manipulating ingredients
+#     to feed to log-likelihood
+#
+#     Arguments:
+#         nstars (int): Number of host stars in sample
+#         comp_names_inROI (list of str): List of names of
+#             companions that fall in the ROI. Must correspond
+#             to keys in bin_lam_dict
+#         cell_dict (dict): Dictionary containing useful info
+#             related to cell sizes, avg completeness, etc.
+#         bin_lam_dict (dict): Compressed representation of
+#             posterior samples, with completeness, priors,
+#             and lambda indices accounted for. Keys look like
+#             'planetXX_cellYY_compl_over_prior' and
+#             'planetXX_cellYY_weight'. Thus, with Np companions
+#             and Nc cells, there are 2*Np*Nc keys in the dict.
+#             'compl_over_prior' is an array of floats, and 'weight'
+#             is a single float.
+#
+#         nwalkers (int): Number of walkers
+#         nsteps (int): Number of production steps
+#         burnin (int): Number of burn-in steps
+#         parallel (bool): Use multiprocessing if True
+#         save_path (str): Where to save chains
+#         random_seed (int or None)
+#
+#     """
+#     os.makedirs(Path(save_path).parent, exist_ok=True)
+#     # import pdb; pdb.set_trace()
+#
+#     ## Unpack params
+#     lam = np.random.uniform(0.001, 0.05, size=cell_dict['num_cells'])
+#     num_cells = cell_dict['num_cells']
+#     all_binsizes = cell_dict['all_binsizes']
+#     avg_cell_compls = cell_dict['avg_compls']
+#
+#     ndim = num_cells
+#     # ---- Initialize walkers ----
+#     # Start near small positive values (your prior range)
+#     lam_init = np.random.uniform(0.001, 0.05, size=ndim)
+#
+#     # Small Gaussian ball around initial guess
+#     pos = lam_init + 1e-3 * np.random.randn(nwalkers, ndim)
+#
+#     # Enforce positivity (important for your likelihood)
+#     pos = np.clip(pos, 1e-6, None)
+#
+#
+#     loglik_args = (
+#         nstars,
+#         comp_names_inROI,
+#         bin_lam_dict,
+#         num_cells,
+#         all_binsizes,
+#         avg_cell_compls
+#     )
+#     # import pdb; pdb.set_trace()
+#
+#     # ---- Set up sampler ----
+#     if parallel:
+#         with mp.Pool() as pool:
+#             sampler = emcee.EnsembleSampler(
+#                 nwalkers, ndim, loglik,
+#                 args=loglik_args, pool=pool
+#             )
+#
+#             # Burn-in
+#             pos, _, _ = sampler.run_mcmc(pos, burnin, progress=True)
+#             sampler.reset()
+#
+#             # Production
+#             sampler.run_mcmc(pos, nsteps, progress=True)
+#
+#     else:
+#         sampler = emcee.EnsembleSampler(nwalkers, ndim, loglik,
+#                                         args=loglik_args)
+#
+#         # Burn-in
+#         pos, _, _ = sampler.run_mcmc(pos, burnin, progress=True)
+#         sampler.reset()
+#
+#         # Production
+#         sampler.run_mcmc(pos, nsteps, progress=True)
+#
+#     # ---- Extract chains ----
+#     chains = sampler.get_chain()        # shape: (nsteps, nwalkers, ndim)
+#     log_probs = sampler.get_log_prob()  # same shape
+#
+#     # Flattened version (often what you want)
+#     flat_chains = sampler.get_chain(flat=True)
+#     flat_log_probs = sampler.get_log_prob(flat=True)
+#
+#     # ---- Save safely (no pickle!) ----
+#     np.savez_compressed(
+#         save_path,
+#         chains=chains,
+#         log_probs=log_probs,
+#         flat_chains=flat_chains,
+#         flat_log_probs=flat_log_probs,
+#     )
+#
+#     return sampler
+#
+#
+# def loglik_hist(lam, nstars, comp_names, bin_lam_dict, num_cells, all_binsizes, avg_cell_compls):
+#     """
+#     Log likelihood of a model histogram, given a
+#     catalog of companion posterior draws in the
+#     form of a dictionary
+#
+#     Arguments:
+#         lam (array of floats): 1D representation of the 2D occurrence
+#             rate density histogram
+#         nstars (int): Number of host stars in the sample
+#         comp_names (list of str): List of companion names
+#             Must correspond to keys in bin_lam_dict
+#         bin_lam_dict (dict): Compressed representation of
+#             posterior samples
+#         num_cells (int): Number of occurrence cells. Equal to len(lam)
+#         all_binsizes (array of floats): Logarithmic size of each cell
+#             in base 10. E.g. if a = 1-10 AU and M = 1-100 M_earth, then
+#             binsize is 1*2 = 2
+#         avg_cell_compls (array of floats): Average completeness over each
+#             cell
+#     """
+#
+#
+#     rate_map = lam*all_binsizes # Occurrence rate is rate density "integrated" over a/m space
+#     if ((rate_map<0) | (rate_map>1)).any(): # If occurrence in any cell is <0 or >1, reject
+#         return -np.inf
+#
+#
+#     ## First get the pre-factor e^(-Lambda). We want log-likelihood, so just -Lambda
+#     ## Lambda is Nstars * integral(lambda*completeness)
+#     ## To integrate lambda*compl over the space, multiply by bin size. Then sum those integrals
+#     integral = np.sum(all_binsizes*avg_cell_compls*lam)
+#     Lambda = nstars*integral
+#
+#
+#     ## Now the product term
+#     ## For every bin, consider each planet
+#     ##     For every planet, retrieve a list of 2 values
+#     ##         The first is the averaged (completeness/prior), which can be pre-computed because it
+#     ##      will be multiplied by a scalar, ie the ORD in that bin
+#     ##        The second is the weight, which is just the fraction of samples that fall in that bin
+#
+#     log_prod_term = 0 # AKA the sum of all single_bin_sum values
+#     for bin_ind in range(num_cells):
+#         lam_single = lam[bin_ind]
+#
+#         single_bin_sum = 0
+#         for comp_name in comp_names:
+#
+#             # Both compl_over_prior and weight are stored in one entry to save retrieve time
+#             cop_and_weight = bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"]
+#
+#             if cop_and_weight[1]==0: # Skip if weight=0 (companion does not overlap the bin)
+#                 # print(f'If weight is 0 then copica should be NaN: {comp_over_prior_avg}')
+#                 continue
+#
+#             mean = lam_single*cop_and_weight[0]
+#             weighted_mean = mean**cop_and_weight[1] # Raise to power of weight
+#             single_bin_sum += np.log(weighted_mean+1e-300) # Ensure non-zero for stability
+#
+#         log_prod_term += single_bin_sum
+#
+#     loglik = -Lambda + log_prod_term
+#
+#     if np.isnan(loglik):
+#         import pdb; pdb.set_trace()
+#
+#     return loglik
 
 
-    ## First get the pre-factor e^(-Lambda). We want log-likelihood, so just -Lambda
-    ## Lambda is Nstars * integral(lambda*completeness)
-    ## To integrate lambda*compl over the space, multiply by bin size. Then sum those integrals
-    integral = np.sum(all_binsizes*avg_cell_compls*lam)
-    Lambda = nstars*integral
-
-
-    ## Now the product term
-    ## For every bin, consider each planet
-    ## 	For every planet, retrieve a list of 2 values
-    ## 		The first is the averaged (completeness/prior), which can be pre-computed because it
-    ##      will be multiplied by a scalar, ie the ORD in that bin
-    ##		The second is the weight, which is just the fraction of samples that fall in that bin
-	
-    log_prod_term = 0 # AKA the sum of all single_bin_sum values
-    for bin_ind in range(num_cells):
-        lam_single = lam[bin_ind]
-	
-        single_bin_sum = 0
-        for comp_name in comp_names:
-             
-            # Both compl_over_prior and weight are stored in one entry to save retrieve time
-            cop_and_weight = bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"]
-
-            if cop_and_weight[1]==0: # Skip if weight=0 (companion does not overlap the bin)
-                # print(f'If weight is 0 then copica should be NaN: {comp_over_prior_avg}')
-                continue
-
-            mean = lam_single*cop_and_weight[0]
-            weighted_mean = mean**cop_and_weight[1] # Raise to power of weight
-            single_bin_sum += np.log(weighted_mean+1e-300) # Ensure non-zero for stability
-
-        log_prod_term += single_bin_sum
-
-    loglik = -Lambda + log_prod_term
-
-    if np.isnan(loglik):
-        import pdb; pdb.set_trace()
-		
-    return loglik
-
-
-def escarpment(M, M_min, M_max, C1, C2, B1, B2):
-    """
-    Piecewise function to fit
-    1D ORD in the mass dimension
-    
-    Arguments:
-        C1 - constant plateau value 1 (func. val between min_M and B1)            
-        C2 - constant plateau value 2 (func. val between B2 and max_M)
-        B1 - breakpoint 1 (connects first plateau to slope)
-        B2 - breakpoint 2 (connects slope to second plateau)
-    """
-    
-    slope_val = (C2-C1)/(np.log10(B2)-np.log10(B1))
-    
-    if M<M_min or M>M_max: # Any value out of bounds has ORD=0
-        f = 0
-    elif M<B1: # First plateau
-        f = C1
-    elif B1<= M <B2: # On slope
-        f = slope_val*(np.log10(M)-np.log10(B1))+C1 # y = m*(x-x0)+y0
-    elif M>=B2: # Second plateau
-        f = C2
-    return f
+# def loglik_power(theta, model_func, nstars, comp_names,
+#            ROIsamples_dict, ROIweights_dict,
+#            M_min, M_max, dM, fine_M_list, fine_compl_grid):
+#     """
+#     Log likelihood of a 1D piecewise power law in
+#     the M dimension, given a catalog of companion
+#     posterior draws in the form of a dictionary
+#
+#     Arguments:
+#         theta (array of floats): array of model parameters for model_func
+#
+#
+#         nstars (int): Number of host stars in the sample
+#         comp_names (list of str): List of companion names
+#             Must correspond to keys in bin_lam_dict
+#         bin_lam_dict (dict): Compressed representation of
+#             posterior samples
+#         num_cells (int): Number of occurrence cells. Equal to len(lam)
+#         all_binsizes (array of floats): Logarithmic size of each cell
+#             in base 10. E.g. if a = 1-10 AU and M = 1-100 M_earth, then
+#             binsize is 1*2 = 2
+#
+#
+#         fine_compl_grid (array of floats): Compl value at each M value on
+#             on a fine grid between min_M and max_M. Compls are from avg. map
+#     """
+#     fine_lam_list = model_func(theta, fine_M_list)
+#     rate_map = np.sum(fine_lam_list*dM) # Occurrence rate is rate density "integrated" over M space
+#
+#     if (rate_map<0) | (rate_map>1): # If occurrence is <0 or >1, reject
+#         return -np.inf
+#
+#
+#     ## First get the pre-factor e^(-Lambda). We want log-likelihood, so just -Lambda
+#     ## Lambda is Nstars * integral(lambda*completeness)
+#     ## Basic Riemann integral of lambda*compl over M space: sum (lambda(M)*compl(M)*dM) over the fine grid
+#     integral = np.sum(lam_values*fine_compl_grid*dM)
+#     Lambda = nstars*integral
+#
+#     ## Now the product term
+#     ## For every companion, do three things:
+#     ##     First, determine the lambda value at that companion's M value using the escarpment function
+#     ##     Second, retrieve a list of the completeness/prior values for each of that companion's samples
+#     ##         (NOTE: these cannot be pre-averaged as in the histogram case because each one will
+#     ##                be multiplied by a different lambda value)
+#     ##     Third, retrieve the companion's weight (ie, fraction of samples that fall in the ROI)
+#
+#     log_prod_term = 0
+#     for comp_name in comp_names:
+#
+#         # First, unpack the companion posterior
+#         comp_sample_array = ROIsamples_dict[comp_name]
+#         m_list = comp_sample_array[1]
+#         cop_list = comp_sample_array[5] # completeness (from avg. map) over prior
+#
+#         ROIweight = ROIweights_dict[comp_name]
+#
+#         lam_list = model_func(theta, m_list)
+#
+#         ## Calculate this companion's contribution to the likelihood
+#         mean = np.mean(lam_list*cop_list)
+#         log_term = ROIweight * np.log(mean+1e-300) # Ensure non-zero for stability
+#         log_prod_term += log_term
+#
+#
+#     loglik = -Lambda + log_prod_term
+#
+#     if np.isnan(loglik):
+#         import pdb; pdb.set_trace()
+#
+#     return loglik
     
 
 
@@ -383,7 +354,7 @@ def assign_cells(a_list, m_list, a_m_lims_pairs):
     return lam_inds
 
 
-def summary_stats(chain_path, cell_dict, bin_lam_dict, m_unit='earth'):
+def summary_stats(chain_path, cell_dict, bin_lam_dict, m_unit='earth', verbose=False):
     """
     Load chains and print out the occurrence rate,
     effective number of planets, and average
@@ -435,29 +406,30 @@ def summary_stats(chain_path, cell_dict, bin_lam_dict, m_unit='earth'):
     summary_dict['n_mbins'] = cell_dict['n_mbins']
     # import pdb; pdb.set_trace()
     
-    ## Print the occurrence rates, which are easier to interpret than the ORDs
-    modes = summary_dict['mode_OR']
-    hdi_low = summary_dict['hdi_low_OR']
-    hdi_high = summary_dict['hdi_high_OR']
-    cell_weights = summary_dict['cell_weights']
-    cell_compls = summary_dict['cell_compls']
-    a_m_lims_pairs = summary_dict['a_m_lims_pairs']
+    if verbose:
+        ## Print the occurrence rates, which are easier to interpret than the ORDs
+        modes = summary_dict['mode_OR']
+        hdi_low = summary_dict['hdi_low_OR']
+        hdi_high = summary_dict['hdi_high_OR']
+        cell_weights = summary_dict['cell_weights']
+        cell_compls = summary_dict['cell_compls']
+        a_m_lims_pairs = summary_dict['a_m_lims_pairs']
 
 
-    m_quant = "M_c" if m_unit in ['earth', 'jupiter'] else "M_c/M_{\star}" if m_unit==None else ''
-    m_unit_label = "Mearth" if m_unit=='earth' else "Mjup" if m_unit=='jupiter' else '' 
-    for i in range(len(modes)):
-        err_low = modes[i] - hdi_low[i]
-        err_high = hdi_high[i] - modes[i]
-        err = 0.5 * (err_low + err_high)
+        m_quant = "M_c" if m_unit in ['earth', 'jupiter'] else "M_c/M_{\star}" if m_unit==None else ''
+        m_unit_label = "Mearth" if m_unit=='earth' else "Mjup" if m_unit=='jupiter' else '' 
+        for i in range(len(modes)):
+            err_low = modes[i] - hdi_low[i]
+            err_high = hdi_high[i] - modes[i]
+            err = 0.5 * (err_low + err_high)
         
-        a_lims, m_lims = a_m_lims_pairs[i]
-        print(
-            f"Cell {i}: a= {a_lims[0]}-{a_lims[1]} AU, {m_quant}={m_lims[0]:.1f}-{m_lims[1]:.1f} {m_unit_label} \n"
-            f"    OR = {modes[i]:.3f} ± {err:.3f}, \n"
-            f"    eff_planets = {cell_weights[i]:.2f}, \n"
-            f"    average completeness = {cell_compls[i]:.3f}"
-        )
+            a_lims, m_lims = a_m_lims_pairs[i]
+            print(
+                f"Cell {i}: a= {a_lims[0]}-{a_lims[1]} AU, {m_quant}={m_lims[0]:.1f}-{m_lims[1]:.1f} {m_unit_label} \n"
+                f"    OR = {modes[i]:.3f} ± {err:.3f}, \n"
+                f"    eff_planets = {cell_weights[i]:.2f}, \n"
+                f"    average completeness = {cell_compls[i]:.3f}"
+            )
     #import pdb; pdb.set_trace()
     return summary_dict
 
