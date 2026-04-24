@@ -192,7 +192,7 @@ def loglik_power(theta, nstars, comp_names, model_func,
     rate_map = np.sum(fine_lam_list*dlogAorM) # Occurrence rate is rate density "integrated" over a or m space
 
     if (rate_map<0) | (rate_map>1): # If occurrence is <0 or >1, reject
-        # print(f"Params are {theta[0]:.1f}, {theta[1]:.1f}, rate_map is {rate_map:.4f}, dw is {dlogAorM:.3f}")
+        print(f"Params are {theta[0]:.1f}, {theta[1]:.1f}, rate_map is {rate_map:.4f}, dw is {dlogAorM:.3f}")
         return -np.inf
 
     ## First get the pre-factor e^(-Lambda). We want log-likelihood, so just -Lambda
@@ -215,7 +215,7 @@ def loglik_power(theta, nstars, comp_names, model_func,
         # First, unpack the companion posterior
         comp_sample_array = ROIsamples_dict[comp_name]
         AorM_list = comp_sample_array[AorM_ind]
-        cop_list = comp_sample_array[5] # completeness (from avg. map) over prior
+        cop_list = comp_sample_array[5] # completeness (from single map) over prior
         
         ROIweight = ROIweights_dict[comp_name]
         

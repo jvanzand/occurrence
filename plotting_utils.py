@@ -601,72 +601,91 @@ def make_bar_vals(x_pairs, y_vals):
 
     return all_x_flat, all_y_flat
 
-def plot_power(fig, ax, model_func_name, save_path):
+
+
+import numpy as np
+import os
+import matplotlib.pyplot as plt
+
+def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
     """
-    Over-plot the given power law function on the
-    histogram figure provided, then save the result.
-    
-    Arguments:
-        fig : matplotlib figure object
-        ax : matplotlib axis object (or list of axes for stacked plots)
-        model_func_name (str): Name of model function (e.g., 'pp1')
-        save_path (str): Path where to save the modified figure
+    Over-plot the max-likelihood model AND random posterior draws.
+
+    Parameters
+    ----------
+    n_draws : int
+        Number of posterior samples to plot (low-opacity)
     """
-    
-    # Need to import here to avoid circular imports
+
     from occurrence import mcmc_powerlaw as mcmc_power
-    import os
-    
-    # Determine the chains file path - should be in same directory as save_path
-    # but with the appropriate chain filename
+
     plot_dir = os.path.dirname(save_path)
-    load_dir = os.path.dirname(plot_dir)  # Go up one level from plots/ to main result dir
+    load_dir = os.path.dirname(plot_dir)
     chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}.npz')
-    
-    # Load the chains
+
     data = np.load(chain_file)
     flat_chains = data['flat_chains']
     flat_log_probs = data['flat_log_probs']
-    
-    # Find maximum likelihood parameters
+
+    # --- Max likelihood ---
     ml_idx = np.argmax(flat_log_probs)
     ml_params = flat_chains[ml_idx]
-    
-    # Assign parameter names based on model function
+    print(f"MAX LIKE: {ml_params[0]:.3f}, {ml_params[1]:.3f}")
+
+    # --- Model selection ---
     if model_func_name == 'pp1':
         model_func = mcmc_power.PiecewisePower1
     else:
-        raise NotImplementedError(f"Model {model_func_name} not yet implemented in plot_power()")
-    
-    # Get x-axis data from the histogram axes
-    # Handle both single axis (1D histogram) and multiple axes (stacked histograms)
+        raise NotImplementedError
+
+    # --- Random posterior draws ---
+    rng = np.random.default_rng()
+    draw_indices = rng.choice(len(flat_chains), size=n_draws, replace=False)
+    posterior_draws = flat_chains[draw_indices]
+
+    # --- Handle axes ---
     if isinstance(ax, np.ndarray):
         axs_list = ax.flatten().tolist()
     elif isinstance(ax, list):
         axs_list = ax
     else:
         axs_list = [ax]
-    
-    # Plot the power law on each subplot
+
+    # --- Plot ---
     for ax_i in axs_list:
-        # Get the x-axis scale and limits from the existing histogram
         xlim = ax_i.get_xlim()
-        
-        # Create a fine grid of x values spanning the axis range
         x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
-        
-        # Evaluate the power law model at these x values
+
+        # Plot posterior draws (underneath)
+        for theta in posterior_draws:
+            y_draw = model_func(theta, x_model)
+            ax_i.plot(
+                x_model, y_draw,
+                color='red',
+                alpha=0.08,        # low opacity
+                linewidth=1.0,
+                zorder=10
+            )
+
+        # Plot max-likelihood (on top)
         y_model = model_func(ml_params, x_model)
-        
-        # Plot the power law curve
-        ax_i.plot(x_model, y_model, color='red', linewidth=2.5, label=f'{model_func_name} fit', zorder=100)
+        ax_i.plot(
+            x_model, y_model,
+            color='red',
+            linewidth=2.5,
+            label=f'{model_func_name} ML',
+            zorder=100
+        )
+
         ax_i.legend(loc='upper right', fontsize=10)
-    
-    # Save the modified figure
+
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(save_path, dpi=300)
-    plt.close()
-    print(f"Occurrence histogram with {model_func_name} model saved to: {save_path}")
+    plt.close(fig)
+
+    print(f"Saved with posterior draws to: {save_path}")
+
+
 
 def sci_no_leading_zero(x, pos):
     if x == 0:

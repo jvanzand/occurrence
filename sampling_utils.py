@@ -157,12 +157,15 @@ def include_post_completeness(sampled_post_dict, star_df,
             compl_over_prior_avg = avg_compls/a_m_prior[2]
             compl_over_prior_single = single_star_compls/a_m_prior[2]
             
+            nan_mask = (~np.isnan(compl_over_prior_avg)) & (~np.isnan(compl_over_prior_single))
+            
             # Updated array includes a_samples, m_samples, average completenesses, single star completenesses, compl_over_prior_avg, compl_over_prior_single.
             # Probably the only compl array I'll use is compl_over_prior_single. compl_over_prior_avg is to test whether using avg completeness changes the answer. The two completeness arrays are for testing/sanity checks.
             new_array = [a_m_prior[:2], avg_compls, single_star_compls,
                          compl_over_prior_avg, compl_over_prior_single]
-            
-            sampled_post_dict[comp_name] = np.vstack(new_array)
+            masked_array = np.vstack(new_array)[:,nan_mask]
+            sampled_post_dict[comp_name] = masked_array
+
             
             #import pdb; pdb.set_trace()
     
