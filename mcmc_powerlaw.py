@@ -222,12 +222,12 @@ def loglik_power(theta, nstars, comp_names, model_func,
         lam_list = model_func(theta, AorM_list)
         if any(lam_list<0):
             #print(comp_name, theta[0], theta[1])
-            #return -np.inf
-            log_term=0
-        else:
+            return -np.inf
+            #log_term=0
+        #else:
             ## Calculate this companion's contribution to the likelihood
-            mean = np.mean(lam_list*cop_list)
-            log_term = ROIweight * np.log(mean+1e-300) # Ensure non-zero for stability
+        mean = np.mean(lam_list*cop_list)
+        log_term = ROIweight * np.log(mean+1e-300) # Ensure non-zero for stability
             
         log_prod_term += log_term
         if np.isnan(log_term):
