@@ -603,10 +603,6 @@ def make_bar_vals(x_pairs, y_vals):
 
 
 
-import numpy as np
-import os
-import matplotlib.pyplot as plt
-
 def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
     """
     Over-plot the max-likelihood model AND random posterior draws.
@@ -684,6 +680,7 @@ def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
     plt.close(fig)
 
     print(f"Saved with posterior draws to: {save_path}")
+
 
 
 

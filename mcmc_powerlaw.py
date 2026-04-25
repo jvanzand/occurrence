@@ -65,9 +65,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     
     fine_alist = np.logspace(np.log10(fine_amin), np.log10(fine_amax), fine_grid_num-1) # a values, log-spaced
     fine_mlist = np.logspace(np.log10(fine_mmin), np.log10(fine_mmax), fine_grid_num-1) # m values, log-spaced
-    #import pdb; pdb.set_trace()
-    # fine_alist = np.logspace(np.log10(a_lims[0]), np.log10(a_lims[1]), 100) # a values, log-spaced
-    # fine_mlist = np.logspace(np.log10(m_lims[0]), np.log10(m_lims[1]), 100) # m values, log-spaced
+
     A, M = np.meshgrid(fine_alist, fine_mlist, indexing='xy')
     fine_compl_grid = interp_fn_avg((A, M)) # Completeness grid w/ shape (len(fine_mlist), len(fine_alist))
     
@@ -85,10 +83,21 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     
     #import pdb; pdb.set_trace()
     dlogAorM = np.log10(fine_list_AorM[1]/fine_list_AorM[0]) # log-spacing of a or m grid
-    # fine_list_AorM = (fine_list_AorM * 10**(dlogAorM/2))[:-1] # Shift values to bin centers; remove the last
     
+    plot_power_hard_coded(nstars, comp_names_inROI, model_func, 
+                        ROIsamples_dict, ROIweights_dict, dlogAorM, 
+                        fine_list_AorM, fine_compl_AorM, AorM_ind)
     
-
+    tier1_dir='mtrue'
+    tier2_dir='allstars'
+    tier3_dir='1_10AU'
+    plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir, 
+                                     nstars, comp_names_inROI, model_func,
+                                     ROIsamples_dict, ROIweights_dict,
+                                     dlogAorM, fine_list_AorM, fine_compl_AorM,
+                                     AorM_ind, stack_dim, m_unit='jupiter')
+    import pdb; pdb.set_trace()    
+    ##############################################################################
     loglik_args = (
         nstars,
         comp_names_inROI,
@@ -303,6 +312,153 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
         print(f"Initial params: slope={slope:.3f} and b={b:.3f} from {min_b:.2f}-{max_b:.2f} ")
     
     return p0
+
+
+def plot_power_hard_coded(nstars, comp_names_inROI, model_func,
+                          ROIsamples_dict, ROIweights_dict,
+                          dlogAorM, fine_list_AorM, fine_compl_AorM,
+                          AorM_ind):
+    """
+    Plot hard-coded power law parameter sets with their likelihoods.
+    
+    Arguments:
+        nstars (int): Number of host stars
+        comp_names_inROI (list of str): Companion names in region of interest
+        model_func : The model function (e.g., PiecewisePower1)
+        ROIsamples_dict (dict): ROI sample data for companions
+        ROIweights_dict (dict): ROI weights for companions
+        dlogAorM (float): Log spacing of parameter grid
+        fine_list_AorM (array): Fine grid of parameter values
+        fine_compl_AorM (array): Fine grid of completeness values
+        AorM_ind (int): Index indicating dimension (0 for 'a', 1 for 'm')
+    """
+    
+    # Hard-coded parameter sets: (slope, intercept)
+    parameter_sets = [
+        (0.05, 0.10),
+        (-0.05, 0.15),
+        (0.0, 0.12),
+        (0.08, 0.08),
+        (-0.03, 0.18),
+    ]
+    
+    print("\n" + "="*60)
+    print("Hard-coded Power Law Parameter Likelihoods")
+    print("="*60)
+    
+    # Calculate likelihood for each parameter set
+    for i, theta in enumerate(parameter_sets):
+        loglik = loglik_power(theta, nstars, comp_names_inROI, model_func,
+                              ROIsamples_dict, ROIweights_dict,
+                              dlogAorM, fine_list_AorM, fine_compl_AorM,
+                              AorM_ind)
+        print(f"Set {i+1}: slope={theta[0]:7.3f}, intercept={theta[1]:7.3f}  →  lnL = {loglik:10.2f}")
+    
+    print("="*60 + "\n")
+    
+    return
+
+
+def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir, 
+                                 nstars, comp_names_inROI, model_func,
+                                 ROIsamples_dict, ROIweights_dict,
+                                 dlogAorM, fine_list_AorM, fine_compl_AorM,
+                                 AorM_ind, stack_dim, m_unit='earth'):
+    """
+    Plot hard-coded power law parameter sets overlaid on the ORD histogram.
+    
+    Arguments:
+        tier1_dir, tier2_dir, tier3_dir (str): Directory paths for loading data
+        nstars (int): Number of host stars
+        comp_names_inROI (list of str): Companion names in region of interest
+        model_func : The model function (e.g., PiecewisePower1)
+        ROIsamples_dict (dict): ROI sample data for companions
+        ROIweights_dict (dict): ROI weights for companions
+        dlogAorM (float): Log spacing of parameter grid
+        fine_list_AorM (array): Fine grid of parameter values
+        fine_compl_AorM (array): Fine grid of completeness values
+        AorM_ind (int): Index indicating dimension (0 for 'a', 1 for 'm')
+        stack_dim (str): Stack dimension ('a' or 'm')
+        m_unit (str): Mass unit ('earth' or 'jupiter')
+    """
+    
+    from occurrence import plotting_utils as pu
+    
+    # Hard-coded parameter sets: (slope, intercept, label_suffix)
+    parameter_sets = [
+        (0.05, 0.10),
+        (-0.05, 0.15),
+        (0.0, 0.12),
+        (0.08, 0.08),
+        (-0.03, 0.18),
+    ]
+    
+    # Color palette for distinct colors
+    colors = ['red', 'blue', 'green', 'orange', 'purple']
+    
+    # Load summary dict for histogram
+    load_save_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
+    path_to_summary = os.path.join(load_save_dir, 'saved_dicts/summary_dict.npz')
+    summary_dict = dict(np.load(path_to_summary))
+    
+    # Get the ORD histogram with fig/ax objects
+    plot_save_dir = os.path.join(load_save_dir, 'plots/')
+    os.makedirs(plot_save_dir, exist_ok=True)
+    
+    fig, ax = pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
+                                      rate_type='ORD', title='', return_fig_ax=True,
+                                      savepath=None, figsize=(6, 4))
+    
+    # Handle both single and stacked axes
+    if isinstance(ax, np.ndarray):
+        axs_list = ax.flatten().tolist()
+    elif isinstance(ax, list):
+        axs_list = ax
+    else:
+        axs_list = [ax]
+    
+    # Calculate likelihoods and prepare labels for each parameter set
+    param_info = []
+    for theta in parameter_sets:
+        loglik = loglik_power(theta, nstars, comp_names_inROI, model_func,
+                              ROIsamples_dict, ROIweights_dict,
+                              dlogAorM, fine_list_AorM, fine_compl_AorM,
+                              AorM_ind)
+        param_info.append((theta, loglik))
+    
+    # Plot each parameter set on the histogram
+    for ax_i in axs_list:
+        xlim = ax_i.get_xlim()
+        x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
+        
+        for (theta, loglik), color in zip(param_info, colors):
+            y_model = model_func(theta, x_model)
+            
+            # Label with parameters and likelihood
+            label = f'slope={theta[0]:.2f}, int={theta[1]:.2f}, lnL={loglik:.1f}'
+            
+            ax_i.plot(
+                x_model, y_model,
+                color=color,
+                linewidth=2.0,
+                label=label,
+                zorder=90
+            )
+        
+        ax_i.legend(loc='upper right', fontsize=8)
+    
+    # Save the figure
+    save_path = os.path.join(plot_save_dir, 'occurrence_ORD_hard_coded.png')
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(save_path, dpi=300)
+    plt.close(fig)
+    
+    print(f"\nHard-coded parameter sets plotted on histogram:")
+    print(f"Saved to: {save_path}\n")
+    
+    return
+
+
 
 
 
