@@ -100,7 +100,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
         fine_compl_AorM,
         AorM_ind,
     )
-    # import pdb; pdb.set_trace()
+    #import pdb; pdb.set_trace()
     
     
     # ---- Initialize walkers ----
@@ -192,7 +192,7 @@ def loglik_power(theta, nstars, comp_names, model_func,
     rate_map = np.sum(fine_lam_list*dlogAorM) # Occurrence rate is rate density "integrated" over a or m space
 
     if (rate_map<0) | (rate_map>1): # If occurrence is <0 or >1, reject
-        print(f"Params are {theta[0]:.1f}, {theta[1]:.1f}, rate_map is {rate_map:.4f}, dw is {dlogAorM:.3f}")
+        #print(f"Params are {theta[0]:.1f}, {theta[1]:.1f}, rate_map is {rate_map:.4f}, dw is {dlogAorM:.3f}")
         return -np.inf
 
     ## First get the pre-factor e^(-Lambda). We want log-likelihood, so just -Lambda
@@ -221,11 +221,14 @@ def loglik_power(theta, nstars, comp_names, model_func,
         
         lam_list = model_func(theta, AorM_list)
         if any(lam_list<0):
-            return -np.inf
-        
-        ## Calculate this companion's contribution to the likelihood
-        mean = np.mean(lam_list*cop_list)
-        log_term = ROIweight * np.log(mean+1e-300) # Ensure non-zero for stability
+            #print(comp_name, theta[0], theta[1])
+            #return -np.inf
+            log_term=0
+        else:
+            ## Calculate this companion's contribution to the likelihood
+            mean = np.mean(lam_list*cop_list)
+            log_term = ROIweight * np.log(mean+1e-300) # Ensure non-zero for stability
+            
         log_prod_term += log_term
         if np.isnan(log_term):
             import pdb; pdb.set_trace()
@@ -295,6 +298,8 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
         b = np.random.uniform(min_b, max_b)
         
         p0 = [slope, b]
+        #p0 = [-0.1, 0.23]
+        #import pdb; pdb.set_trace()
         print(f"Initial params: slope={slope:.3f} and b={b:.3f} from {min_b:.2f}-{max_b:.2f} ")
     
     return p0

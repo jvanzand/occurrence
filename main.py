@@ -174,7 +174,7 @@ def prep_post_draws(tier1_dir, tier2_dir,
     #### CUSTOMIZE your own sampler to match the posterior format ####
     ## The output of custom sampler should be a dict whose keys are companion names
     ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
-    post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=1000, m_unit=m_unit) # First sample posteriors
+    post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=200, m_unit=m_unit) # First sample posteriors
     
     ## DELETEEEEE ##
     # # Add 30 synthetic companions based on gl317_0 with scaled parameters
