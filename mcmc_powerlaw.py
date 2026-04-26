@@ -57,6 +57,9 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     if model_func_name=='pp1':
         model_func = PiecewisePower1
         ndim = 2
+    elif model_func_name='pp2':
+        model_func = BrokenLineSoftplus
+        ndim = 4
         
     
     ## Need a 2D grid to calculate e^-Lambda integral
@@ -287,6 +290,37 @@ def PiecewisePower1(theta, AorM):
     return slope * np.log10(AorM) + y_intercept
 
 
+def softplus(z):
+    return np.log1p(np.exp(z))   # stable version
+
+def BrokenLineSoftplus(theta, AorM):
+    """
+    Broken-line model in log-x space with guaranteed positivity.
+
+    Parameters
+    ----------
+    theta : (m1, m2, b, log_xt)
+        m1 : slope below transition
+        m2 : slope above transition
+        b  : intercept at log10(x)=0
+        log_xt : log10 transition point
+
+    AorM : array-like (>0)
+
+    Returns
+    -------
+    lam : array (>=0)
+    """
+    m1, m2, b, log_xt = theta
+
+    logx = np.log10(AorM)
+
+    # hinge function → broken line
+    f = b + m1 * logx + (m2 - m1) * np.maximum(0, logx - log_xt)
+
+    return softplus(f)
+
+
 def initial_params(model_func_name, AorM_list, dlogAorM):
     """
     Generate initial parameter guesses
@@ -324,6 +358,33 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
         #p0 = [-0.1, 0.23]
         #import pdb; pdb.set_trace()
         print(f"Initial params: slope={slope:.3f} and b={b:.3f} from {min_b:.2f}-{max_b:.2f} ")
+    
+    elif model_func_name=='pp2':
+        logA = np.log10(AorM_list)
+        minL, maxL = np.min(logA), np.max(logA)
+
+        for _ in range(1000):
+
+            # slopes: modest range
+            m1 = np.random.uniform(-1.0, 1.0)
+            m2 = np.random.uniform(-1.0, 1.0)
+
+            # transition in log space
+            log_xt = np.random.uniform(minL, maxL)
+
+            # intercept: start near small values
+            b = np.random.uniform(-4.0, 0.0)
+
+            theta = [m1, m2, b, log_xt]
+
+            lam = BrokenLineSoftplus(theta, AorM_list)
+
+            rate_map = np.sum(lam * dlogAorM)
+
+            if 0 < rate_map < 1:
+                return theta
+
+        raise RuntimeError("Failed to find valid initial params")
     
     return p0
 

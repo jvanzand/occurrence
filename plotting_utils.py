@@ -274,6 +274,8 @@ def plot_corner_from_file(
         elif plot_model == 'pp1':
             # pp1 model: C and dimension reference (a_0 or m_0)
             param_names = ['slope', 'intercept']
+        elif plot_model == 'pp2':
+            param_names = ['slope1', 'slope2', 'intercept1', 'break_point']
         else:
             # Default fallback
             param_names = [f"$\\theta_{{{i}}}$" for i in range(ndim)]
@@ -631,6 +633,8 @@ def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
     # --- Model selection ---
     if model_func_name == 'pp1':
         model_func = mcmc_power.PiecewisePower1
+    elif model_func_name == 'pp2':
+        model_func = mcmc_power.BrokenLineSoftplus
     else:
         raise NotImplementedError
 
