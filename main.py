@@ -394,7 +394,7 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
                 nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
     
     ## Handle piecewise power models together because they follow the same pattern
-    pp_model_names = [model_name for model_name in run_models if 'pp' in model_name]
+    pp_model_names = [model_name for model_name in run_models if 'hist' not in model_name]
     for model_name in pp_model_names:
         # pp_chain_save_path = saved_chains_dir+f'chains_{model_name}.npz'
         # if os.path.exists(pp_chain_save_path):
