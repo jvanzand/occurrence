@@ -105,7 +105,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
         elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
             # BrokenLineSoftplus: (m1, m2, b, log_xt)
             parameter_sets = [
-                (-0.1, 0.1, 0.15, 0.5),
+                (-0.15, 0.0, 0.20, 1.2),
                 (-0.1, 0.05, 0.15, 0.7),
                 (-0.15, 0.1, 0.12, 0.5),
                 (-0.05, 0.15, 0.18, 0.6),
@@ -114,7 +114,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
         else:
             # Fallback - should not reach here in normal usage
             parameter_sets = []
-    
+        #BrokenLineSoftplus([-1, 0.0, 0.15, 1.5], fine_list_AorM)
         plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
                             ROIsamples_dict, ROIweights_dict, dlogAorM, 
                             fine_list_AorM, fine_compl_AorM, AorM_ind, parameter_sets)
@@ -304,8 +304,9 @@ def PiecewisePower1(theta, AorM):
     return slope * np.log10(AorM) + y_intercept
 
 
-def softplus(z):
-    return np.log1p(np.exp(z))   # stable version
+#def softplus(z):
+    #return np.log1p(np.exp(z))   # stable version
+ #   return np.log(1+1e3*np.exp(z))-np.log(1e3)
 
 def BrokenLineSoftplus(theta, AorM):
     """
@@ -332,7 +333,7 @@ def BrokenLineSoftplus(theta, AorM):
     # hinge function → broken line
     f = b + m1 * logx + (m2 - m1) * np.maximum(0, logx - log_xt)
 
-    return softplus(f)
+    return f
 
 
 def initial_params(model_func_name, AorM_list, dlogAorM):
@@ -380,22 +381,27 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
         for _ in range(1000):
 
             # slopes: modest range
-            m1 = np.random.uniform(-1.0, 1.0)
-            m2 = np.random.uniform(-1.0, 1.0)
+            m1 = np.random.uniform(-1.0, 0)
+            m2 = np.random.uniform(-1.0, 0)
 
             # transition in log space
             log_xt = np.random.uniform(minL, maxL)
 
             # intercept: start near small values
-            b = np.random.uniform(-4.0, 0.0)
+            b = np.random.uniform(0.0, 0.4)
 
             theta = [m1, m2, b, log_xt]
 
             lam = BrokenLineSoftplus(theta, AorM_list)
 
             rate_map = np.sum(lam * dlogAorM)
-
-            if 0 < rate_map < 1:
+            
+            cond1 = 0 < rate_map < 1
+            cond2 = m1<=0
+            cond3 = m2<=0
+            cond4 = 0 < b < 1
+            if cond1 and cond2 and cond3:
+                print(f"Initial params: m1={m1:.3f}, m2={m2:.3f}, b={b:.3f}, log_xt={log_xt:.3f},")
                 return theta
 
         raise RuntimeError("Failed to find valid initial params")
