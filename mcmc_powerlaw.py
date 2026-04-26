@@ -145,6 +145,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
         nstars,
         comp_names_inROI,
         model_func,
+        model_func_name,
         ROIsamples_dict,
         ROIweights_dict,
         dlogAorM,
@@ -214,6 +215,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
 
 
 def loglik_power(theta, nstars, comp_names, model_func,
+           model_func_name,
            ROIsamples_dict, ROIweights_dict, 
            dlogAorM, fine_list_AorM, fine_compl_AorM,
            AorM_ind):
@@ -240,6 +242,11 @@ def loglik_power(theta, nstars, comp_names, model_func,
         fine_compl_grid (array of floats): Compl value at each M value on
             on a fine grid between min_M and max_M. Compls are from avg. map
     """
+    
+    log_prior = log_prior(model_func_name, theta, fine_list_AorM)
+    if np.isinf(log_prior):
+        return -np.inf      
+    
     fine_lam_list = model_func(theta, fine_list_AorM)
     rate_map = np.sum(fine_lam_list*dlogAorM) # Occurrence rate is rate density "integrated" over a or m space
 
@@ -475,16 +482,16 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
         
         for _ in range(1000):
             # C1 and C2: occurrence rates (should be positive and their integral < 1)
-            C1 = np.random.uniform(0.1, 0.4)
-            C2 = np.random.uniform(0.05, 0.3)
+            C1 = np.random.uniform(0.0, 1.0)
+            C2 = np.random.uniform(0.0, C1) # C2<C1
             
             # Breakpoints in linear space
-            bp1 = np.random.uniform(minA, maxA*0.5)
-            bp2 = np.random.uniform(maxA*0.5, maxA)
+            bp1 = np.random.uniform(minA, maxA)
+            bp2 = np.random.uniform(bp1, maxA) # bp2>bp1
             
             # Ensure bp1 < bp2
-            if bp1 >= bp2:
-                continue
+            #if bp1 >= bp2:
+            #    continue
             
             theta = [C1, C2, bp1, bp2]
             lam = escarpment(theta, AorM_list)
@@ -502,6 +509,72 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
         raise RuntimeError("Failed to find valid initial params for escarpment")
     
     return p0
+
+
+def log_prior(model_func_name, theta, AorM_list):
+    """
+    Calculate the log-prior for model parameters.
+    
+    Uses uniform priors within allowed bounds (log-prior = 0 if valid, 
+    -inf if invalid). Constraints are determined by the same logic as 
+    initial_params().
+    
+    Arguments:
+        model_func_name (str): Name of model function ('pp1', 'pp2', 'escarpment')
+        theta (array-like): Model parameters
+        AorM_list (array-like): Fine grid of a or m values (for determining bounds)
+        dlogAorM (float): Log spacing of grid
+    
+    Returns:
+        log_prior (float): Log of prior probability (0 for uniform within bounds, 
+                          -inf for parameters outside allowed bounds)
+    """
+    
+    if model_func_name == 'pp1':
+        
+        # Check if parameters are within bounds
+        if b < 0 or b > 10:
+            return -np.inf
+        if slope<-10 or slope>10:
+            return -np.inf
+        
+        return 0.0
+    
+    elif model_func_name == 'pp2':
+        m1, m2, b, log_xt = theta
+        log_AorM = np.log10(AorM_list)
+        minL, maxL = np.min(log_AorM), np.max(log_AorM)
+            
+        if b < 0 or b > 10:
+            return -np.inf
+        if m1<-10 or m2>10:
+            return -np.inf
+        if m2<-10 or m2>10:
+            return -np.inf
+        if log_xt<minL or log_xt>maxL:
+            return -np.inf
+        
+        return 0.0
+    
+    elif model_func_name == 'escarpment':
+        C1, C2, bp1, bp2 = theta
+        minA, maxA = np.min(AorM_list), np.max(AorM_list)
+        
+        if C1<0 or C2<0:
+            return -np.inf
+        # Check that bp1 < bp2
+        if bp1 >= bp2:
+            return -np.inf
+        if bp1<minA or bp1>maxA:
+            return -np.inf
+        if bp2<minA or bp2>maxA:
+            return -np.inf
+        
+        
+        return 0.0
+    
+    else:
+        raise ValueError(f"Unknown model: {model_func_name}")
 
 
 def plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
