@@ -60,6 +60,9 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     elif model_func_name=='pp2':
         model_func = BrokenLineSoftplus
         ndim = 4
+    elif model_func_name=='escarpment':
+        model_func = escarpment
+        ndim = 4
         
     
     ## Need a 2D grid to calculate e^-Lambda integral
@@ -110,6 +113,15 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
                 (-0.15, 0.1, 0.12, 0.5),
                 (-0.05, 0.15, 0.18, 0.6),
                 (-0.2, 0.05, 0.10, 0.4),
+            ]
+        elif model_func_name == 'escarpment':
+            # escarpment: (C1, C2, bp1, bp2)
+            parameter_sets = [
+                (0.25, 0.05, 3.0, 10.0),
+                (0.20, 0.08, 2.5, 8.0),
+                (0.30, 0.10, 3.5, 12.0),
+                (0.22, 0.06, 3.2, 9.0),
+                (0.28, 0.09, 2.8, 11.0),
             ]
         else:
             # Fallback - should not reach here in normal usage
@@ -336,6 +348,58 @@ def BrokenLineSoftplus(theta, AorM):
     return f
 
 
+def escarpment(theta, AorM):
+    """
+    Escarpment model in log-x space: two horizontal lines connected by a sloped line.
+    
+    The model consists of three segments in semi-log space:
+    - Horizontal line at C1 for x < breakpoint1
+    - Sloped line from C1 to C2 for breakpoint1 <= x <= breakpoint2
+    - Horizontal line at C2 for x > breakpoint2
+    
+    Parameters
+    ----------
+    theta : (C1, C2, bp1, bp2)
+        C1 : occurrence rate at low x values
+        C2 : occurrence rate at high x values
+        bp1 : first breakpoint (x value)
+        bp2 : second breakpoint (x value)
+    
+    AorM : array-like (>0)
+        Input values (must be > 0)
+    
+    Returns
+    -------
+    lam : array
+        Occurrence rate at each input value
+    """
+    C1, C2, bp1, bp2 = theta
+    AorM = np.asarray(AorM)
+    
+    logx = np.log10(AorM)
+    log_bp1 = np.log10(bp1)
+    log_bp2 = np.log10(bp2)
+    
+    # Initialize output
+    lam = np.zeros_like(logx, dtype=float)
+    
+    # Region 1: x < bp1 → y = C1
+    mask1 = logx < log_bp1
+    lam[mask1] = C1
+    
+    # Region 2: bp1 <= x <= bp2 → linear interpolation in log space
+    mask2 = (logx >= log_bp1) & (logx <= log_bp2)
+    if np.any(mask2):
+        t = (logx[mask2] - log_bp1) / (log_bp2 - log_bp1)
+        lam[mask2] = C1 + (C2 - C1) * t
+    
+    # Region 3: x > bp2 → y = C2
+    mask3 = logx > log_bp2
+    lam[mask3] = C2
+    
+    return lam
+
+
 def initial_params(model_func_name, AorM_list, dlogAorM):
     """
     Generate initial parameter guesses
@@ -406,6 +470,37 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
 
         raise RuntimeError("Failed to find valid initial params")
     
+    elif model_func_name=='escarpment':
+        minA, maxA = np.min(AorM_list), np.max(AorM_list)
+        
+        for _ in range(1000):
+            # C1 and C2: occurrence rates (should be positive and their integral < 1)
+            C1 = np.random.uniform(0.1, 0.4)
+            C2 = np.random.uniform(0.05, 0.3)
+            
+            # Breakpoints in linear space
+            bp1 = np.random.uniform(minA, maxA*0.5)
+            bp2 = np.random.uniform(maxA*0.5, maxA)
+            
+            # Ensure bp1 < bp2
+            if bp1 >= bp2:
+                continue
+            
+            theta = [C1, C2, bp1, bp2]
+            lam = escarpment(theta, AorM_list)
+            
+            rate_map = np.sum(lam * dlogAorM)
+            
+            # Check conditions
+            cond1 = 0 < rate_map < 1
+            cond2 = C1 > 0
+            cond3 = C2 > 0
+            if cond1 and cond2 and cond3:
+                print(f"Initial params: C1={C1:.3f}, C2={C2:.3f}, bp1={bp1:.3f}, bp2={bp2:.3f}")
+                return theta
+        
+        raise RuntimeError("Failed to find valid initial params for escarpment")
+    
     return p0
 
 
@@ -439,6 +534,8 @@ def plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
         param_names = ['slope', 'intercept']
     elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
         param_names = ['m1', 'm2', 'b', 'log_xt']
+    elif model_func_name == 'escarpment':
+        param_names = ['C1', 'C2', 'bp1', 'bp2']
     else:
         # Generic fallback
         param_names = [f'p{i}' for i in range(len(parameter_sets[0]))]
@@ -494,6 +591,8 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
         param_names = ['slope', 'int']
     elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
         param_names = ['m1', 'm2', 'b', 'log_xt']
+    elif model_func_name == 'escarpment':
+        param_names = ['C1', 'C2', 'bp1', 'bp2']
     else:
         param_names = [f'p{i}' for i in range(len(parameter_sets[0]))]
     
