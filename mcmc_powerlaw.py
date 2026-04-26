@@ -8,6 +8,9 @@ import emcee
 import multiprocessing as mp
 
 
+## Delete
+import matplotlib.pyplot as plt
+
 def mcmc(nstars, comp_names_inROI, model_func_name,
          ROIsamples_dict, ROIweights_dict,
          a_lims, m_lims, stack_dim,
@@ -84,19 +87,30 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     #import pdb; pdb.set_trace()
     dlogAorM = np.log10(fine_list_AorM[1]/fine_list_AorM[0]) # log-spacing of a or m grid
     
-    plot_power_hard_coded(nstars, comp_names_inROI, model_func, 
-                        ROIsamples_dict, ROIweights_dict, dlogAorM, 
-                        fine_list_AorM, fine_compl_AorM, AorM_ind)
+    ############################################################################
+    diagnostic=False
+    if diagnostic:
+        parameter_sets = [
+            (-0.13, 0.22),
+            (-0.14, 0.21),
+            (-0.15, 0.20),
+            (-0.16, 0.19),
+            (-0.17, 0.18),
+        ]
     
-    tier1_dir='mtrue'
-    tier2_dir='allstars'
-    tier3_dir='1_10AU'
-    plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir, 
-                                     nstars, comp_names_inROI, model_func,
-                                     ROIsamples_dict, ROIweights_dict,
-                                     dlogAorM, fine_list_AorM, fine_compl_AorM,
-                                     AorM_ind, stack_dim, m_unit='jupiter')
-    import pdb; pdb.set_trace()    
+        plot_power_hard_coded(nstars, comp_names_inROI, model_func, 
+                            ROIsamples_dict, ROIweights_dict, dlogAorM, 
+                            fine_list_AorM, fine_compl_AorM, AorM_ind, parameter_sets)
+    
+        tier1_dir='mtrue'
+        tier2_dir='allstars'
+        tier3_dir='1_10AU'
+        plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir, 
+                                         nstars, comp_names_inROI, model_func,
+                                         ROIsamples_dict, ROIweights_dict,
+                                         dlogAorM, fine_list_AorM, fine_compl_AorM,
+                                         AorM_ind, stack_dim, parameter_sets, m_unit='jupiter')
+        import pdb; pdb.set_trace()    
     ##############################################################################
     loglik_args = (
         nstars,
@@ -201,7 +215,7 @@ def loglik_power(theta, nstars, comp_names, model_func,
     rate_map = np.sum(fine_lam_list*dlogAorM) # Occurrence rate is rate density "integrated" over a or m space
 
     if (rate_map<0) | (rate_map>1): # If occurrence is <0 or >1, reject
-        #print(f"Params are {theta[0]:.1f}, {theta[1]:.1f}, rate_map is {rate_map:.4f}, dw is {dlogAorM:.3f}")
+        print(f"Params are {theta[0]:.1f}, {theta[1]:.1f}, rate_map is {rate_map:.4f}, dw is {dlogAorM:.3f}")
         return -np.inf
 
     ## First get the pre-factor e^(-Lambda). We want log-likelihood, so just -Lambda
@@ -230,7 +244,7 @@ def loglik_power(theta, nstars, comp_names, model_func,
         
         lam_list = model_func(theta, AorM_list)
         if any(lam_list<0):
-            #print(comp_name, theta[0], theta[1])
+            print(comp_name, theta[0], theta[1])
             return -np.inf
             #log_term=0
         #else:
@@ -317,7 +331,7 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
 def plot_power_hard_coded(nstars, comp_names_inROI, model_func,
                           ROIsamples_dict, ROIweights_dict,
                           dlogAorM, fine_list_AorM, fine_compl_AorM,
-                          AorM_ind):
+                          AorM_ind, parameter_sets):
     """
     Plot hard-coded power law parameter sets with their likelihoods.
     
@@ -334,13 +348,6 @@ def plot_power_hard_coded(nstars, comp_names_inROI, model_func,
     """
     
     # Hard-coded parameter sets: (slope, intercept)
-    parameter_sets = [
-        (0.05, 0.10),
-        (-0.05, 0.15),
-        (0.0, 0.12),
-        (0.08, 0.08),
-        (-0.03, 0.18),
-    ]
     
     print("\n" + "="*60)
     print("Hard-coded Power Law Parameter Likelihoods")
@@ -363,7 +370,7 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
                                  nstars, comp_names_inROI, model_func,
                                  ROIsamples_dict, ROIweights_dict,
                                  dlogAorM, fine_list_AorM, fine_compl_AorM,
-                                 AorM_ind, stack_dim, m_unit='earth'):
+                                 AorM_ind, stack_dim, parameter_sets, m_unit='earth'):
     """
     Plot hard-coded power law parameter sets overlaid on the ORD histogram.
     
@@ -385,13 +392,6 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
     from occurrence import plotting_utils as pu
     
     # Hard-coded parameter sets: (slope, intercept, label_suffix)
-    parameter_sets = [
-        (0.05, 0.10),
-        (-0.05, 0.15),
-        (0.0, 0.12),
-        (0.08, 0.08),
-        (-0.03, 0.18),
-    ]
     
     # Color palette for distinct colors
     colors = ['red', 'blue', 'green', 'orange', 'purple']
