@@ -57,7 +57,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     if model_func_name=='pp1':
         model_func = PiecewisePower1
         ndim = 2
-    elif model_func_name='pp2':
+    elif model_func_name=='pp2':
         model_func = BrokenLineSoftplus
         ndim = 4
         
@@ -93,15 +93,29 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     ############################################################################
     diagnostic=False
     if diagnostic:
-        parameter_sets = [
-            (-0.13, 0.22),
-            (-0.14, 0.21),
-            (-0.15, 0.20),
-            (-0.16, 0.19),
-            (-0.17, 0.18),
-        ]
+        if model_func_name == 'pp1':
+            # PiecewisePower1: (slope, intercept)
+            parameter_sets = [
+                (-0.13, 0.22),
+                (-0.14, 0.21),
+                (-0.15, 0.20),
+                (-0.16, 0.19),
+                (-0.17, 0.18),
+            ]
+        elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
+            # BrokenLineSoftplus: (m1, m2, b, log_xt)
+            parameter_sets = [
+                (-0.1, 0.1, 0.15, 0.5),
+                (-0.1, 0.05, 0.15, 0.7),
+                (-0.15, 0.1, 0.12, 0.5),
+                (-0.05, 0.15, 0.18, 0.6),
+                (-0.2, 0.05, 0.10, 0.4),
+            ]
+        else:
+            # Fallback - should not reach here in normal usage
+            parameter_sets = []
     
-        plot_power_hard_coded(nstars, comp_names_inROI, model_func, 
+        plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
                             ROIsamples_dict, ROIweights_dict, dlogAorM, 
                             fine_list_AorM, fine_compl_AorM, AorM_ind, parameter_sets)
     
@@ -109,7 +123,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
         tier2_dir='allstars'
         tier3_dir='1_10AU'
         plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir, 
-                                         nstars, comp_names_inROI, model_func,
+                                         nstars, comp_names_inROI, model_func, model_func_name,
                                          ROIsamples_dict, ROIweights_dict,
                                          dlogAorM, fine_list_AorM, fine_compl_AorM,
                                          AorM_ind, stack_dim, parameter_sets, m_unit='jupiter')
@@ -389,7 +403,7 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
     return p0
 
 
-def plot_power_hard_coded(nstars, comp_names_inROI, model_func,
+def plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
                           ROIsamples_dict, ROIweights_dict,
                           dlogAorM, fine_list_AorM, fine_compl_AorM,
                           AorM_ind, parameter_sets):
@@ -399,20 +413,29 @@ def plot_power_hard_coded(nstars, comp_names_inROI, model_func,
     Arguments:
         nstars (int): Number of host stars
         comp_names_inROI (list of str): Companion names in region of interest
-        model_func : The model function (e.g., PiecewisePower1)
+        model_func : The model function (e.g., PiecewisePower1, BrokenLineSoftplus)
+        model_func_name (str): Name of model function for label formatting
         ROIsamples_dict (dict): ROI sample data for companions
         ROIweights_dict (dict): ROI weights for companions
         dlogAorM (float): Log spacing of parameter grid
         fine_list_AorM (array): Fine grid of parameter values
         fine_compl_AorM (array): Fine grid of completeness values
         AorM_ind (int): Index indicating dimension (0 for 'a', 1 for 'm')
+        parameter_sets (list): List of parameter tuples to evaluate
     """
     
-    # Hard-coded parameter sets: (slope, intercept)
-    
     print("\n" + "="*60)
-    print("Hard-coded Power Law Parameter Likelihoods")
+    print(f"Hard-coded {model_func_name} Parameter Likelihoods")
     print("="*60)
+    
+    # For label formatting, determine parameter names based on model function
+    if model_func_name == 'pp1':
+        param_names = ['slope', 'intercept']
+    elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
+        param_names = ['m1', 'm2', 'b', 'log_xt']
+    else:
+        # Generic fallback
+        param_names = [f'p{i}' for i in range(len(parameter_sets[0]))]
     
     # Calculate likelihood for each parameter set
     for i, theta in enumerate(parameter_sets):
@@ -420,7 +443,10 @@ def plot_power_hard_coded(nstars, comp_names_inROI, model_func,
                               ROIsamples_dict, ROIweights_dict,
                               dlogAorM, fine_list_AorM, fine_compl_AorM,
                               AorM_ind)
-        print(f"Set {i+1}: slope={theta[0]:7.3f}, intercept={theta[1]:7.3f}  →  lnL = {loglik:10.2f}")
+        
+        # Format parameter string
+        param_str = ', '.join([f"{name}={val:7.3f}" for name, val in zip(param_names, theta)])
+        print(f"Set {i+1}: {param_str}  →  lnL = {loglik:10.2f}")
     
     print("="*60 + "\n")
     
@@ -428,7 +454,7 @@ def plot_power_hard_coded(nstars, comp_names_inROI, model_func,
 
 
 def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir, 
-                                 nstars, comp_names_inROI, model_func,
+                                 nstars, comp_names_inROI, model_func, model_func_name,
                                  ROIsamples_dict, ROIweights_dict,
                                  dlogAorM, fine_list_AorM, fine_compl_AorM,
                                  AorM_ind, stack_dim, parameter_sets, m_unit='earth'):
@@ -439,7 +465,8 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
         tier1_dir, tier2_dir, tier3_dir (str): Directory paths for loading data
         nstars (int): Number of host stars
         comp_names_inROI (list of str): Companion names in region of interest
-        model_func : The model function (e.g., PiecewisePower1)
+        model_func : The model function (e.g., PiecewisePower1, BrokenLineSoftplus)
+        model_func_name (str): Name of model function for label formatting
         ROIsamples_dict (dict): ROI sample data for companions
         ROIweights_dict (dict): ROI weights for companions
         dlogAorM (float): Log spacing of parameter grid
@@ -447,15 +474,22 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
         fine_compl_AorM (array): Fine grid of completeness values
         AorM_ind (int): Index indicating dimension (0 for 'a', 1 for 'm')
         stack_dim (str): Stack dimension ('a' or 'm')
+        parameter_sets (list): List of parameter tuples to evaluate
         m_unit (str): Mass unit ('earth' or 'jupiter')
     """
     
     from occurrence import plotting_utils as pu
     
-    # Hard-coded parameter sets: (slope, intercept, label_suffix)
-    
     # Color palette for distinct colors
     colors = ['red', 'blue', 'green', 'orange', 'purple']
+    
+    # Determine parameter names for labels
+    if model_func_name == 'pp1':
+        param_names = ['slope', 'int']
+    elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
+        param_names = ['m1', 'm2', 'b', 'log_xt']
+    else:
+        param_names = [f'p{i}' for i in range(len(parameter_sets[0]))]
     
     # Load summary dict for histogram
     load_save_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
@@ -495,8 +529,9 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
         for (theta, loglik), color in zip(param_info, colors):
             y_model = model_func(theta, x_model)
             
-            # Label with parameters and likelihood
-            label = f'slope={theta[0]:.2f}, int={theta[1]:.2f}, lnL={loglik:.1f}'
+            # Build label with parameter values and likelihood
+            param_str = ', '.join([f"{name}={val:.2f}" for name, val in zip(param_names, theta)])
+            label = f'{param_str}, lnL={loglik:.1f}'
             
             ax_i.plot(
                 x_model, y_model,
@@ -507,6 +542,7 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
             )
         
         ax_i.legend(loc='upper right', fontsize=8)
+
     
     # Save the figure
     save_path = os.path.join(plot_save_dir, 'occurrence_ORD_hard_coded.png')
