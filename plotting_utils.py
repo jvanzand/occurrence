@@ -628,13 +628,15 @@ def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
     # --- Max likelihood ---
     ml_idx = np.argmax(flat_log_probs)
     ml_params = flat_chains[ml_idx]
-    print(f"MAX LIKE: {ml_params[0]:.3f}, {ml_params[1]:.3f}")
+    print("MAX LIKE:", ", ".join(f"{p:.3f}" for p in ml_params))
 
     # --- Model selection ---
     if model_func_name == 'pp1':
         model_func = mcmc_power.PiecewisePower1
     elif model_func_name == 'pp2':
-        model_func = mcmc_power.BrokenLineSoftplus
+        model_func = mcmc_power.PiecewisePower2
+    elif model_func_name == 'escarpment':
+        model_func = mcmc_power.escarpment
     else:
         raise NotImplementedError
 

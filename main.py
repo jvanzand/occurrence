@@ -273,6 +273,9 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
     # Make cell_dict, which contains useful cell info
     cell_dict = ou.cell_values(a_edges, m_or_q_edges, avg_map_fn_path)
     comp_samples = dict(np.load(comp_samples_path)) # Load companion samples
+    total_sample_num = np.shape((comp_samples[list(comp_samples.keys())[0]]))[1] # Record sample num before arrays change len
+
+    
     comp_ROIweights = {}
     comps_outsideROI = []
     ## In this loop, calculate the lambda index of every a/m sample for every companion
@@ -282,16 +285,24 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
         
         lam_inds = ou.assign_cells(a_list, m_list, cell_dict['a_m_lims_pairs']) # Calculate lambda inds
         
-        a_m_prior_compl_lam = np.vstack([a_m_prior_compl, lam_inds]) # Append lambda inds to array
-        
         ROIweight = len(lam_inds[lam_inds>-0.5])/len(lam_inds) # Fraction of samples in full ROI
-        
-        comp_samples[comp_name] = a_m_prior_compl_lam # New dict entry is the updated array
         comp_ROIweights[comp_name] = ROIweight # Put weights in separate dict
+        
+        
         
         if ROIweight==0: # Skip companions that fall outside the ROI. Their weights=0 anyway, but saves compute to remove
             print(f'{comp_name} falls fully outside the ROI; dropping.')
             comps_outsideROI.append(comp_name)
+            
+        ## For companions with at least some samples in the ROI, prune the ones outside it
+        lamROI_mask = lam_inds>-0.5
+
+        a_m_prior_compl_lam = np.vstack([a_m_prior_compl, lam_inds]) # Append lambda inds to array
+        a_m_prior_compl_lam = a_m_prior_compl_lam[:, lamROI_mask] # Remove any vals outside ROI
+        comp_samples[comp_name] = a_m_prior_compl_lam # New dict entry is the updated array
+        #if np.sum(lamROI_mask)<total_sample_num:
+        #    print("BBBOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO", comp_name)
+            
     for comp_name in comps_outsideROI:
         del comp_samples[comp_name]
     
@@ -330,11 +341,8 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
         
         # Frac. of inds that fall in at least 1 cell. This will be used
         # in MCMC prep. function to exclude comps outside ROI for efficiency
-        total_weight = (lam_inds>-1).sum()/len(lam_inds)
+        total_weight = (lam_inds>-1).sum()/total_sample_num
         bin_lam_dict[f"{comp_name}_weight_total"] = total_weight
-        
-        #if '8765' in comp_name:
-        #    import pdb; pdb.set_trace()
         
         for bin_ind in range(cell_dict['num_cells']):
             
@@ -343,19 +351,25 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
             if np.isnan(compl_over_prior_in_cell_avg): # Last catch for really bad systems. Delete later.
                 compl_over_prior_in_cell_avg=0
             
-            weight = lam_mask.sum()/len(lam_inds) # (Num. of samples in cell)/(tot. # of samples)
+            weight = lam_mask.sum()/total_sample_num # (Num. of samples in cell)/(tot. # of samples)
             
             bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"] = [compl_over_prior_in_cell_avg, weight]
     
     
     saved_dicts_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir, 'saved_dicts/')
     os.makedirs(saved_dicts_dir, exist_ok=True)
-    
+    #total_min = np.min([np.min(comp_samples[comp_name][1]) for comp_name in comp_samples.keys()])
+    #total_max = np.max([np.max(comp_samples[comp_name][1]) for comp_name in comp_samples.keys()])
+    #import pdb; pdb.set_trace()
     np.savez(saved_dicts_dir+'cell_dict.npz', **cell_dict) ## Cell-specific info
     np.savez(saved_dicts_dir+'sampled_post_prior_compl_lam_inROI.npz', **comp_samples) # Sample-specific info
     np.savez(saved_dicts_dir+'comp_ROIweights.npz', **comp_ROIweights) # Fraction of each comp that falls in ROI
     np.savez(saved_dicts_dir+'bin_lam_dict.npz', **bin_lam_dict) # Pre-computed info for hist likelihood
     
+    #bp = dict(np.load(saved_dicts_dir+'sampled_post_prior_compl_lam_inROI.npz'))
+    #total_min = np.min([np.min(bp[comp_name][1]) for comp_name in bp.keys()])
+    #total_max = np.max([np.max(bp[comp_name][1]) for comp_name in bp.keys()])
+    #import pdb; pdb.set_trace()
 
     return
     
@@ -407,6 +421,7 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
         interp_fn_avg_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
         interp_fn_avg = pickle.load(open(interp_fn_avg_path, 'rb'))
         
+
         mcmc_power.mcmc(nstars, comp_names_inROI, model_name,
                            samples_inROI, ROIweights_dict,
                            alims, mlims, stack_dim, interp_fn_avg,

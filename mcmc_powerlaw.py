@@ -58,7 +58,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
         model_func = PiecewisePower1
         ndim = 2
     elif model_func_name=='pp2':
-        model_func = BrokenLineSoftplus
+        model_func = PiecewisePower2
         ndim = 4
     elif model_func_name=='escarpment':
         model_func = escarpment
@@ -82,15 +82,20 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     if stack_dim=='m':
         fine_compl_AorM = np.mean(fine_compl_grid, axis=0) # Average over the "m" dimension
         fine_list_AorM = fine_alist
+        AorM_min, AorM_max = a_lims[0], a_lims[-1]
         AorM_ind = 0
         
     ## Make "m" histograms and stack for different "a" bins  
     elif stack_dim=='a':
         fine_compl_AorM = np.mean(fine_compl_grid, axis=1) # Average over the "a" dimension
         fine_list_AorM = fine_mlist
+        AorM_min, AorM_max = m_lims[0], m_lims[-1]
         AorM_ind = 1
     
+    #total_min = np.min([np.min(ROIsamples_dict[comp_name][1]) for comp_name in ROIsamples_dict.keys()])
+    #total_max = np.max([np.max(ROIsamples_dict[comp_name][1]) for comp_name in ROIsamples_dict.keys()])
     #import pdb; pdb.set_trace()
+
     dlogAorM = np.log10(fine_list_AorM[1]/fine_list_AorM[0]) # log-spacing of a or m grid
     
     ############################################################################
@@ -106,7 +111,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
                 (-0.17, 0.18),
             ]
         elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
-            # BrokenLineSoftplus: (m1, m2, b, log_xt)
+            # PiecewisePower2: (m1, m2, b, log_xt)
             parameter_sets = [
                 (-0.15, 0.0, 0.20, 1.2),
                 (-0.1, 0.05, 0.15, 0.7),
@@ -126,10 +131,12 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
         else:
             # Fallback - should not reach here in normal usage
             parameter_sets = []
-        #BrokenLineSoftplus([-1, 0.0, 0.15, 1.5], fine_list_AorM)
+        #PiecewisePower2([-1, 0.0, 0.15, 1.5], fine_list_AorM)
         plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
                             ROIsamples_dict, ROIweights_dict, dlogAorM, 
-                            fine_list_AorM, fine_compl_AorM, AorM_ind, parameter_sets)
+                            fine_list_AorM, fine_compl_AorM, 
+                            AorM_min, AorM_max, 
+                            AorM_ind, parameter_sets)
     
         tier1_dir='mtrue'
         tier2_dir='allstars'
@@ -138,6 +145,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
                                          nstars, comp_names_inROI, model_func, model_func_name,
                                          ROIsamples_dict, ROIweights_dict,
                                          dlogAorM, fine_list_AorM, fine_compl_AorM,
+                                         AorM_min, AorM_max, 
                                          AorM_ind, stack_dim, parameter_sets, m_unit='jupiter')
         import pdb; pdb.set_trace()    
     ##############################################################################
@@ -151,9 +159,10 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
         dlogAorM,
         fine_list_AorM,
         fine_compl_AorM,
+        AorM_min,
+        AorM_max,
         AorM_ind,
     )
-    #import pdb; pdb.set_trace()
     
     
     # ---- Initialize walkers ----
@@ -218,7 +227,7 @@ def loglik_power(theta, nstars, comp_names, model_func,
            model_func_name,
            ROIsamples_dict, ROIweights_dict, 
            dlogAorM, fine_list_AorM, fine_compl_AorM,
-           AorM_ind):
+           AorM_min, AorM_max, AorM_ind):
     """
     Log likelihood of a 1D piecewise power law in
     the M dimension, given a catalog of companion
@@ -243,8 +252,8 @@ def loglik_power(theta, nstars, comp_names, model_func,
             on a fine grid between min_M and max_M. Compls are from avg. map
     """
     
-    log_prior = log_prior(model_func_name, theta, fine_list_AorM)
-    if np.isinf(log_prior):
+    logprior = log_prior(model_func_name, theta, AorM_min, AorM_max)
+    if np.isinf(logprior):
         return -np.inf      
     
     fine_lam_list = model_func(theta, fine_list_AorM)
@@ -280,7 +289,9 @@ def loglik_power(theta, nstars, comp_names, model_func,
         
         lam_list = model_func(theta, AorM_list)
         if any(lam_list<0):
-            print(comp_name, theta[0], theta[1])
+            neg_ind = np.argmin(lam_list)
+            
+            print(f"{comp_name}, {theta[0]:.2f}, {theta[1]:.2f}, {lam_list[neg_ind]}, {AorM_list[neg_ind]}")
             return -np.inf
             #log_term=0
         #else:
@@ -323,11 +334,8 @@ def PiecewisePower1(theta, AorM):
     return slope * np.log10(AorM) + y_intercept
 
 
-#def softplus(z):
-    #return np.log1p(np.exp(z))   # stable version
- #   return np.log(1+1e3*np.exp(z))-np.log(1e3)
 
-def BrokenLineSoftplus(theta, AorM):
+def PiecewisePower2(theta, AorM):
     """
     Broken-line model in log-x space with guaranteed positivity.
 
@@ -463,7 +471,7 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
 
             theta = [m1, m2, b, log_xt]
 
-            lam = BrokenLineSoftplus(theta, AorM_list)
+            lam = PiecewisePower2(theta, AorM_list)
 
             rate_map = np.sum(lam * dlogAorM)
             
@@ -511,7 +519,7 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
     return p0
 
 
-def log_prior(model_func_name, theta, AorM_list):
+def log_prior(model_func_name, theta, AorM_min, AorM_max):
     """
     Calculate the log-prior for model parameters.
     
@@ -533,23 +541,23 @@ def log_prior(model_func_name, theta, AorM_list):
     if model_func_name == 'pp1':
         
         # Check if parameters are within bounds
-        if b < 0 or b > 10:
-            return -np.inf
-        if slope<-10 or slope>10:
+        extreme_val1 = PiecewisePower1(theta, AorM_min)
+        extreme_val2 = PiecewisePower1(theta, AorM_max)
+        
+        if extreme_val1<0 or extreme_val2<0:
             return -np.inf
         
         return 0.0
     
     elif model_func_name == 'pp2':
         m1, m2, b, log_xt = theta
-        log_AorM = np.log10(AorM_list)
-        minL, maxL = np.min(log_AorM), np.max(log_AorM)
-            
-        if b < 0 or b > 10:
-            return -np.inf
-        if m1<-10 or m2>10:
-            return -np.inf
-        if m2<-10 or m2>10:
+        minL, maxL = np.log10(AorM_min), np.log10(AorM_max)
+        
+        extreme_val1 = PiecewisePower2(theta, AorM_min)
+        extreme_val2 = PiecewisePower2(theta, AorM_max)
+        extreme_val3 = PiecewisePower2(theta, 10**(log_xt))
+        
+        if extreme_val1<0 or extreme_val2<0 or extreme_val3<0:
             return -np.inf
         if log_xt<minL or log_xt>maxL:
             return -np.inf
@@ -558,16 +566,15 @@ def log_prior(model_func_name, theta, AorM_list):
     
     elif model_func_name == 'escarpment':
         C1, C2, bp1, bp2 = theta
-        minA, maxA = np.min(AorM_list), np.max(AorM_list)
         
         if C1<0 or C2<0:
             return -np.inf
         # Check that bp1 < bp2
         if bp1 >= bp2:
             return -np.inf
-        if bp1<minA or bp1>maxA:
+        if bp1<AorM_min or bp1>AorM_max:
             return -np.inf
-        if bp2<minA or bp2>maxA:
+        if bp2<AorM_min or bp2>AorM_max:
             return -np.inf
         
         
@@ -580,6 +587,7 @@ def log_prior(model_func_name, theta, AorM_list):
 def plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
                           ROIsamples_dict, ROIweights_dict,
                           dlogAorM, fine_list_AorM, fine_compl_AorM,
+                          AorM_min, AorM_max,
                           AorM_ind, parameter_sets):
     """
     Plot hard-coded power law parameter sets with their likelihoods.
@@ -587,7 +595,7 @@ def plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
     Arguments:
         nstars (int): Number of host stars
         comp_names_inROI (list of str): Companion names in region of interest
-        model_func : The model function (e.g., PiecewisePower1, BrokenLineSoftplus)
+        model_func : The model function (e.g., PiecewisePower1, PiecewisePower2)
         model_func_name (str): Name of model function for label formatting
         ROIsamples_dict (dict): ROI sample data for companions
         ROIweights_dict (dict): ROI weights for companions
@@ -616,8 +624,10 @@ def plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
     # Calculate likelihood for each parameter set
     for i, theta in enumerate(parameter_sets):
         loglik = loglik_power(theta, nstars, comp_names_inROI, model_func,
+                              model_func_name,
                               ROIsamples_dict, ROIweights_dict,
                               dlogAorM, fine_list_AorM, fine_compl_AorM,
+                              AorM_min, AorM_max,
                               AorM_ind)
         
         # Format parameter string
@@ -633,6 +643,7 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
                                  nstars, comp_names_inROI, model_func, model_func_name,
                                  ROIsamples_dict, ROIweights_dict,
                                  dlogAorM, fine_list_AorM, fine_compl_AorM,
+                                 AorM_min, AorM_max,
                                  AorM_ind, stack_dim, parameter_sets, m_unit='earth'):
     """
     Plot hard-coded power law parameter sets overlaid on the ORD histogram.
@@ -641,7 +652,7 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
         tier1_dir, tier2_dir, tier3_dir (str): Directory paths for loading data
         nstars (int): Number of host stars
         comp_names_inROI (list of str): Companion names in region of interest
-        model_func : The model function (e.g., PiecewisePower1, BrokenLineSoftplus)
+        model_func : The model function (e.g., PiecewisePower1, PiecewisePower2)
         model_func_name (str): Name of model function for label formatting
         ROIsamples_dict (dict): ROI sample data for companions
         ROIweights_dict (dict): ROI weights for companions
@@ -694,8 +705,10 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
     param_info = []
     for theta in parameter_sets:
         loglik = loglik_power(theta, nstars, comp_names_inROI, model_func,
+                              model_func_name,
                               ROIsamples_dict, ROIweights_dict,
                               dlogAorM, fine_list_AorM, fine_compl_AorM,
+                              AorM_min, AorM_max,
                               AorM_ind)
         param_info.append((theta, loglik))
     
