@@ -1,7 +1,6 @@
 ## Perform MCMC simulation for different power law models
 import os
 import numpy as np
-import pandas as pd
 from pathlib import Path
 
 import emcee
@@ -132,7 +131,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
             # Fallback - should not reach here in normal usage
             parameter_sets = []
         #PiecewisePower2([-1, 0.0, 0.15, 1.5], fine_list_AorM)
-        plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
+        print_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
                             ROIsamples_dict, ROIweights_dict, dlogAorM, 
                             fine_list_AorM, fine_compl_AorM, 
                             AorM_min, AorM_max, 
@@ -584,13 +583,13 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         raise ValueError(f"Unknown model: {model_func_name}")
 
 
-def plot_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
+def print_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
                           ROIsamples_dict, ROIweights_dict,
                           dlogAorM, fine_list_AorM, fine_compl_AorM,
                           AorM_min, AorM_max,
                           AorM_ind, parameter_sets):
     """
-    Plot hard-coded power law parameter sets with their likelihoods.
+    Print hard-coded power law parameter sets with their likelihoods.
     
     Arguments:
         nstars (int): Number of host stars
