@@ -114,8 +114,6 @@ def prep_maps(tier1_dir,
     maps_save_label = 'saved_maps_'+tier1_dir
     maps_save_path = os.path.join(tier1_dir, maps_save_label)
     maps_ycol = f"inj_{tier1_dir}"
-    #_process_single_star([star_df.iloc[0], path_to_recoveries, maps_save_path, maps_ycol, m_unit])
-    #sfdsfs
     
     ncores = 30#mp.cpu_count()
     args_list = [
@@ -174,27 +172,7 @@ def prep_post_draws(tier1_dir, tier2_dir,
     #### CUSTOMIZE your own sampler to match the posterior format ####
     ## The output of custom sampler should be a dict whose keys are companion names
     ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
-    post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=500, m_unit=m_unit) # First sample posteriors
-    
-    ## DELETEEEEE ##
-    # # Add 30 synthetic companions based on gl317_0 with scaled parameters
-    # gl317_0_samples = post_sample_dict['gl317_0'].copy()
-    # for i in range(50):
-    #     # Generate random scaling factors for each component
-    #     f1 = np.random.uniform(0.1, 10)
-    #     f2 = np.random.uniform(0.1, 10)
-    #
-    #     # Create new samples by scaling the gl317_0 values
-    #     new_samples = np.array([
-    #         gl317_0_samples[0] * f1,  # Scale SMA
-    #         gl317_0_samples[1] * f2   # Scale mass
-    #     ])
-    #
-    #     # Add to dictionary with key "1002_i"
-    #     post_sample_dict[f"10002_{i}"] = new_samples
-    # #import pdb; pdb.set_trace()
-    #################################################
-    
+    post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=500, m_unit=m_unit) # First sample posteriors 
     
     ## If using mass ratio, convert masses to q
     #if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
@@ -289,7 +267,6 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
         comp_ROIweights[comp_name] = ROIweight # Put weights in separate dict
         
         
-        
         if ROIweight==0: # Skip companions that fall outside the ROI. Their weights=0 anyway, but saves compute to remove
             print(f'{comp_name} falls fully outside the ROI; dropping.')
             comps_outsideROI.append(comp_name)
@@ -300,8 +277,6 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
         a_m_prior_compl_lam = np.vstack([a_m_prior_compl, lam_inds]) # Append lambda inds to array
         a_m_prior_compl_lam = a_m_prior_compl_lam[:, lamROI_mask] # Remove any vals outside ROI
         comp_samples[comp_name] = a_m_prior_compl_lam # New dict entry is the updated array
-        #if np.sum(lamROI_mask)<total_sample_num:
-        #    print("BBBOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO", comp_name)
             
     for comp_name in comps_outsideROI:
         del comp_samples[comp_name]
@@ -339,10 +314,6 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
                 print(f'main.prep_occurrence_materials: \n'
                       f'{comp_name} in system {sysname} has {lam_nancount}/{len(compl_over_prior)} sample NaNs')
         
-        # Frac. of inds that fall in at least 1 cell. This will be used
-        # in MCMC prep. function to exclude comps outside ROI for efficiency
-        total_weight = (lam_inds>-1).sum()/total_sample_num
-        bin_lam_dict[f"{comp_name}_weight_total"] = total_weight
         
         for bin_ind in range(cell_dict['num_cells']):
             
@@ -358,18 +329,11 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
     
     saved_dicts_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir, 'saved_dicts/')
     os.makedirs(saved_dicts_dir, exist_ok=True)
-    #total_min = np.min([np.min(comp_samples[comp_name][1]) for comp_name in comp_samples.keys()])
-    #total_max = np.max([np.max(comp_samples[comp_name][1]) for comp_name in comp_samples.keys()])
-    #import pdb; pdb.set_trace()
+
     np.savez(saved_dicts_dir+'cell_dict.npz', **cell_dict) ## Cell-specific info
     np.savez(saved_dicts_dir+'sampled_post_prior_compl_lam_inROI.npz', **comp_samples) # Sample-specific info
     np.savez(saved_dicts_dir+'comp_ROIweights.npz', **comp_ROIweights) # Fraction of each comp that falls in ROI
     np.savez(saved_dicts_dir+'bin_lam_dict.npz', **bin_lam_dict) # Pre-computed info for hist likelihood
-    
-    #bp = dict(np.load(saved_dicts_dir+'sampled_post_prior_compl_lam_inROI.npz'))
-    #total_min = np.min([np.min(bp[comp_name][1]) for comp_name in bp.keys()])
-    #total_max = np.max([np.max(bp[comp_name][1]) for comp_name in bp.keys()])
-    #import pdb; pdb.set_trace()
 
     return
     
