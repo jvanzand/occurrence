@@ -180,7 +180,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     if parallel:
         with mp.Pool() as pool:
             sampler = emcee.EnsembleSampler(
-                nwalkers, ndim, loglik,
+                nwalkers, ndim, logprob,
                 args=loglik_args, pool=pool
             )
 
@@ -192,7 +192,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
             sampler.run_mcmc(pos, nsteps, progress=True)
 
     else:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, loglik_power,
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, logprob,
                                         args=loglik_args)
 
         # Burn-in
@@ -221,6 +221,25 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
 
     return sampler
 
+def logprob(theta, nstars, comp_names, model_func,
+           model_func_name,
+           ROIsamples_dict, ROIweights_dict, 
+           dlogAorM, fine_list_AorM, fine_compl_AorM,
+           AorM_min, AorM_max, AorM_ind):
+    """
+    Log-posterior (log-likelihood+log-prior)
+    """
+    logprior = log_prior(model_func_name, theta, AorM_min, AorM_max)
+    if np.isinf(logprior):
+        return -np.inf 
+    else:
+        loglik = loglik_power(theta, nstars, comp_names, model_func,
+                              model_func_name,
+                              ROIsamples_dict, ROIweights_dict, 
+                              dlogAorM, fine_list_AorM, fine_compl_AorM,
+                              AorM_min, AorM_max, AorM_ind)
+    return logprior+loglik
+    
 
 def loglik_power(theta, nstars, comp_names, model_func,
            model_func_name,
@@ -249,11 +268,7 @@ def loglik_power(theta, nstars, comp_names, model_func,
 
         fine_compl_grid (array of floats): Compl value at each M value on
             on a fine grid between min_M and max_M. Compls are from avg. map
-    """
-    
-    logprior = log_prior(model_func_name, theta, AorM_min, AorM_max)
-    if np.isinf(logprior):
-        return -np.inf      
+    """    
     
     fine_lam_list = model_func(theta, fine_list_AorM)
     rate_map = np.sum(fine_lam_list*dlogAorM) # Occurrence rate is rate density "integrated" over a or m space
