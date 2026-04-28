@@ -911,37 +911,29 @@ def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI,
 
 
 
-def plot_bics_on_histogram(tier123_dir, bic_params_list):
+def plot_bics_on_histogram(tier123_dir, bic_params_list, stack_dim='m', m_unit='earth'):
     """
-    Plot hard-coded power law parameter sets overlaid on the ORD histogram.
+    Plot max-likelihood models (from BIC calculations) overlaid on the ORD histogram.
     
     Arguments:
-        tier1_dir, tier2_dir, tier3_dir (str): Directory paths for loading data
-        nstars (int): Number of host stars
-        comp_names_inROI (list of str): Companion names in region of interest
-        model_func : The model function (e.g., PiecewisePower1, PiecewisePower2)
-        model_func_name (str): Name of model function for label formatting
-        ROIsamples_dict (dict): ROI sample data for companions
-        ROIweights_dict (dict): ROI weights for companions
-        dlogAorM (float): Log spacing of parameter grid
-        fine_list_AorM (array): Fine grid of parameter values
-        fine_compl_AorM (array): Fine grid of completeness values
-        AorM_ind (int): Index indicating dimension (0 for 'a', 1 for 'm')
-        stack_dim (str): Stack dimension ('a' or 'm')
-        parameter_sets (list): List of parameter tuples to evaluate
-        m_unit (str): Mass unit ('earth' or 'jupiter')
+        tier123_dir (str): Directory path in format 'tier1/tier2/tier3' for loading data
+        bic_params_list (list): List of tuples from calculate_bic() outputs, where each tuple is:
+                               (model_func_name, bic, loglik_max, params_mle)
+        stack_dim (str): Stack dimension ('a' or 'm'). Default: 'm'
+        m_unit (str): Mass unit ('earth' or 'jupiter'). Default: 'earth'
     """
    
     from occurrence import plotting_utils as pu
+    
     # Load summary dict for histogram
     path_to_summary = os.path.join(tier123_dir, 'saved_dicts/summary_dict.npz')
     summary_dict = dict(np.load(path_to_summary))
     
     # Get the ORD histogram with fig/ax objects
-    plot_save_dir = os.path.join(load_save_dir, 'plots/')
+    plot_save_dir = os.path.join(tier123_dir, 'plots/')
     os.makedirs(plot_save_dir, exist_ok=True)
     
-    tier1_dir = tier123_dir.spit('/')[0]
+    tier1_dir = tier123_dir.split('/')[0]
     fig, ax = pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
                                       rate_type='ORD', title='', return_fig_ax=True,
                                       savepath=None, figsize=(6, 4))
@@ -954,62 +946,61 @@ def plot_bics_on_histogram(tier123_dir, bic_params_list):
     else:
         axs_list = [ax]
         
+    # Color palette for distinct colors
+    colors = ['red', 'blue', 'green', 'orange', 'purple']
+    
+    # Iterate through the models and plot each max-likelihood model
+    for idx, bic_param_set in enumerate(bic_params_list):
         
-    ## Now iterate through the models ##
-    
-    for bic_param_set in bic_params_list:
-    
         model_func_name, bic, loglik_max, params_mle = bic_param_set
         
-
-        ## Choose ndim and function based on name
-        if model_func_name=='pp1':
+        # Choose model function and parameter names based on model
+        if model_func_name == 'pp1':
             model_func = PiecewisePower1
-            param_names = ['slope', 'int']
-        elif model_func_name=='pp2':
+            param_names = ['slope', 'intercept']
+        elif model_func_name == 'pp2':
             model_func = PiecewisePower2
             param_names = ['m1', 'm2', 'b', 'log_xt']
-        elif model_func_name=='escarpment':
+        elif model_func_name == 'escarpment':
             model_func = escarpment
             param_names = ['C1', 'C2', 'bp1', 'bp2']
         else:
-            param_names = [f'p{i}' for i in range(len(parameter_sets[0]))]
-    
-    
-        # Color palette for distinct colors
-        colors = ['red', 'blue', 'green', 'orange', 'purple']
-    
-    
-        # Plot each parameter set on the histogram
+            param_names = [f'p{i}' for i in range(len(params_mle))]
+        
+        # Get color for this model (cycle through color palette if needed)
+        color = colors[idx % len(colors)]
+        
+        # Plot this model on each axis
         for ax_i in axs_list:
             xlim = ax_i.get_xlim()
             x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
-        
-            for (theta, loglik), color in zip(param_info, colors):
-                y_model = model_func(theta, x_model)
             
-                # Build label with parameter values and likelihood
-                param_str = ', '.join([f"{name}={val:.2f}" for name, val in zip(param_names, theta)])
-                label = f'{param_str}, lnL={loglik:.1f}'
+            # Calculate model predictions
+            y_model = model_func(params_mle, x_model)
             
-                ax_i.plot(
-                    x_model, y_model,
-                    color=color,
-                    linewidth=2.0,
-                    label=label,
-                    zorder=90
-                )
+            # Build label with model name, parameters, BIC, and likelihood
+            param_str = ', '.join([f"{name}={val:.2f}" for name, val in zip(param_names, params_mle)])
+            label = f'{model_func_name} ({param_str}): BIC={bic:.1f}, lnL={loglik_max:.1f}'
+            
+            ax_i.plot(
+                x_model, y_model,
+                color=color,
+                linewidth=2.5,
+                label=label,
+                zorder=90
+            )
         
+        # Update legend after each model is added
+        for ax_i in axs_list:
             ax_i.legend(loc='upper right', fontsize=8)
 
-    
     # Save the figure
-    save_path = os.path.join(plot_save_dir, 'occurrence_ORD_hard_coded.png')
+    save_path = os.path.join(plot_save_dir, 'occurrence_ORD_BIC_models.png')
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(save_path, dpi=300)
     plt.close(fig)
     
-    print(f"\nHard-coded parameter sets plotted on histogram:")
+    print(f"\nBIC models plotted on histogram:")
     print(f"Saved to: {save_path}\n")
     
     return
