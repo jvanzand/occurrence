@@ -5,6 +5,7 @@ from pathlib import Path
 
 import emcee
 import multiprocessing as mp
+from scipy.optimize import minimize
 
 
 ## Delete
@@ -759,6 +760,132 @@ def plot_hard_coded_on_histogram(tier1_dir, tier2_dir, tier3_dir,
     print(f"Saved to: {save_path}\n")
     
     return
+
+
+def calculate_bic(model_func_name, nstars, comp_names_inROI, ROIsamples_dict, ROIweights_dict,
+                  a_lims, m_lims, stack_dim, interp_fn_avg, path_to_chains):
+    """
+    Calculate the Bayesian Information Criterion (BIC) for a power law model.
+    
+    BIC = k * ln(n) - 2 * ln(L_max)
+    where:
+        k = number of parameters
+        n = number of data points (nstars)
+        L_max = maximum likelihood
+    
+    Arguments:
+        model_func_name (str): Name of model ('pp1', 'pp2', 'escarpment')
+        nstars (int): Number of host stars (treated as number of data points)
+        comp_names_inROI (list of str): Companion names in region of interest
+        ROIsamples_dict (dict): ROI sample data for companions
+        ROIweights_dict (dict): ROI weights for companions
+        a_lims (tuple): Semi-major axis limits [a_min, a_max]
+        m_lims (tuple): Mass limits [m_min, m_max]
+        stack_dim (str): Stack dimension ('a' or 'm')
+        interp_fn_avg: Completeness interpolation function
+        path_to_chains (str): Path to pre-calculated MCMC chains (*.npz file)
+    
+    Returns:
+        bic (float): Bayesian Information Criterion value
+        loglik_max (float): Maximum likelihood value
+        params_mle (ndarray): Parameters at maximum likelihood
+    """
+    
+    # Determine model function and parameter count
+    if model_func_name == 'pp1':
+        model_func = PiecewisePower1
+        ndim = 2
+    elif model_func_name == 'pp2':
+        model_func = PiecewisePower2
+        ndim = 4
+    elif model_func_name == 'escarpment':
+        model_func = escarpment
+        ndim = 4
+    else:
+        raise ValueError(f"Unknown model: {model_func_name}")
+    
+    # Set up the fine grid for likelihood calculation
+    fine_grid_num = 101
+    fine_a_spacing = (a_lims[1]/a_lims[0])**(1/(fine_grid_num-1))
+    fine_m_spacing = (m_lims[1]/m_lims[0])**(1/(fine_grid_num-1))
+    fine_amin, fine_amax = a_lims[0]*(fine_a_spacing**0.5), a_lims[1]/(fine_a_spacing**0.5)
+    fine_mmin, fine_mmax = m_lims[0]*(fine_m_spacing**0.5), m_lims[1]/(fine_m_spacing**0.5)
+    
+    fine_alist = np.logspace(np.log10(fine_amin), np.log10(fine_amax), fine_grid_num-1)
+    fine_mlist = np.logspace(np.log10(fine_mmin), np.log10(fine_mmax), fine_grid_num-1)
+
+    A, M = np.meshgrid(fine_alist, fine_mlist, indexing='xy')
+    fine_compl_grid = interp_fn_avg((A, M))
+    
+    # Set up the appropriate stacking dimension
+    if stack_dim == 'm':
+        fine_compl_AorM = np.mean(fine_compl_grid, axis=0)
+        fine_list_AorM = fine_alist
+        AorM_min, AorM_max = a_lims[0], a_lims[-1]
+        AorM_ind = 0
+    elif stack_dim == 'a':
+        fine_compl_AorM = np.mean(fine_compl_grid, axis=1)
+        fine_list_AorM = fine_mlist
+        AorM_min, AorM_max = m_lims[0], m_lims[-1]
+        AorM_ind = 1
+    
+    dlogAorM = np.log10(fine_list_AorM[1]/fine_list_AorM[0])
+    
+    # Load the MCMC chains to get initial parameter guess from max likelihood
+    data = np.load(path_to_chains)
+    flat_chains = data['flat_chains']
+    flat_log_probs = data['flat_log_probs']
+    
+    # Find parameters with maximum likelihood
+    ml_idx = np.argmax(flat_log_probs)
+    theta_init = flat_chains[ml_idx]
+    
+    # Set up arguments for optimization
+    optim_args = (
+        nstars,
+        comp_names_inROI,
+        model_func,
+        model_func_name,
+        ROIsamples_dict,
+        ROIweights_dict,
+        dlogAorM,
+        fine_list_AorM,
+        fine_compl_AorM,
+        AorM_min,
+        AorM_max,
+        AorM_ind,
+    )
+    
+    # Optimize using Powell algorithm (derivative-free)
+    # Note: we minimize negative log-likelihood (maximize likelihood)
+    result = minimize(
+        lambda theta: -loglik_power(theta, *optim_args),
+        theta_init,
+        method='Powell',
+        options={'maxiter': 5000}
+    )
+    
+    params_mle = result.x
+    loglik_max = -result.fun  # Convert back to log-likelihood
+    
+    # Calculate BIC
+    # BIC = k * ln(n) - 2 * ln(L)
+    # where L is the likelihood (not log-likelihood), so:
+    # BIC = k * ln(n) - 2 * ln(L) = k * ln(n) - 2 * loglik
+    bic = ndim * np.log(nstars) - 2 * loglik_max
+    
+    print(f"\n" + "="*70)
+    print(f"BIC Calculation for {model_func_name.upper()}")
+    print("="*70)
+    print(f"Number of parameters (k): {ndim}")
+    print(f"Number of data points (n): {nstars}")
+    print(f"Maximum log-likelihood: {loglik_max:.4f}")
+    print(f"BIC = {ndim} * ln({nstars}) - 2 * {loglik_max:.4f}")
+    print(f"BIC = {bic:.4f}")
+    print(f"Parameters at MLE: {params_mle}")
+    print("="*70 + "\n")
+    
+    return bic, loglik_max, params_mle
 
 
 
