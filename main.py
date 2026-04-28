@@ -351,18 +351,18 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
     os.makedirs(saved_chains_dir, exist_ok=True)
     
     
-    load_materials_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
+    tier123_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
     
 
-    samples_inROI_path = os.path.join(load_materials_dir, 'saved_dicts/sampled_post_prior_compl_lam_inROI.npz')
+    samples_inROI_path = os.path.join(tier123_dir, 'saved_dicts/sampled_post_prior_compl_lam_inROI.npz')
     samples_inROI = dict(np.load(samples_inROI_path))
     comp_names_inROI = list(samples_inROI.keys())
     
     ## Handle hist separately because it uses different pre-computed values
     if 'hist' in run_models:
             
-        cell_dict_path = os.path.join(load_materials_dir, 'saved_dicts/cell_dict.npz')
-        bin_lam_dict_path = os.path.join(load_materials_dir, 'saved_dicts/bin_lam_dict.npz')
+        cell_dict_path = os.path.join(tier123_dir, 'saved_dicts/cell_dict.npz')
+        bin_lam_dict_path = os.path.join(tier123_dir, 'saved_dicts/bin_lam_dict.npz')
     
         cell_dict = dict(np.load(cell_dict_path)) # Includes bin sizes and avg_cell_compls
         bin_lam_dict = dict(np.load(bin_lam_dict_path)) # Contains, for every cell and for every companion, all (compl/prior) values that fall in that cell, AND the fraction (aka weight). This is equivalent to the info. stored in sampled_post_prior_compl_lam.npz, but compressed and sorted by lambda index.
@@ -378,19 +378,24 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
         # if os.path.exists(pp_chain_save_path):
         #     continue
         
-        ROIweights_path = os.path.join(load_materials_dir, 'saved_dicts/comp_ROIweights.npz')
+        ROIweights_path = os.path.join(tier123_dir, 'saved_dicts/comp_ROIweights.npz')
         ROIweights_dict = dict(np.load(ROIweights_path))
         alims = a_edges[0], a_edges[-1]
         mlims = m_edges[0], m_edges[-1]
         interp_fn_avg_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
         interp_fn_avg = pickle.load(open(interp_fn_avg_path, 'rb'))
         
-
-        mcmc_power.mcmc(nstars, comp_names_inROI, model_name,
-                           samples_inROI, ROIweights_dict,
-                           alims, mlims, stack_dim, interp_fn_avg,
-                           save_path=saved_chains_dir+f'chains_{model_name}.npz', parallel=parallel,
-                           nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
+        chain_path = saved_chains_dir+f'chains_{model_name}.npz'
+        #mcmc_power.mcmc(nstars, comp_names_inROI, model_name,
+        #                   samples_inROI, ROIweights_dict,
+        #                   alims, mlims, stack_dim, interp_fn_avg,
+        #                   save_path=chain_path, parallel=parallel,
+        #                   nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
+                 
+              
+    mcmc_power.calculate_bic(tier123_dir, pp_model_names, 
+                             nstars, comp_names_inROI, samples_inROI, ROIweights_dict,
+                             alims, mlims, stack_dim, interp_fn_avg)
         
     return
     
