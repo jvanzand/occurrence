@@ -179,7 +179,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     if parallel:
         with mp.Pool() as pool:
             sampler = emcee.EnsembleSampler(
-                nwalkers, ndim, logprob,
+                nwalkers, ndim, loglik_power,
                 args=loglik_args, pool=pool
             )
 
@@ -191,7 +191,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
             sampler.run_mcmc(pos, nsteps, progress=True)
 
     else:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, logprob,
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, loglik_power,
                                         args=loglik_args)
 
         # Burn-in
@@ -220,7 +220,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
 
     return sampler
 
-def logprob(theta, nstars, comp_names, model_func,
+def logprob_delete(theta, nstars, comp_names, model_func,
            model_func_name,
            ROIsamples_dict, ROIweights_dict, 
            dlogAorM, fine_list_AorM, fine_compl_AorM,
@@ -267,7 +267,11 @@ def loglik_power(theta, nstars, comp_names, model_func,
 
         fine_compl_grid (array of floats): Compl value at each M value on
             on a fine grid between min_M and max_M. Compls are from avg. map
-    """    
+    """
+    logprior = log_prior(model_func_name, theta, AorM_min, AorM_max)
+    if np.isinf(logprior):
+        return -np.inf 
+    
     
     fine_lam_list = model_func(theta, fine_list_AorM)
     rate_map = np.sum(fine_lam_list*dlogAorM) # Occurrence rate is rate density "integrated" over a or m space
@@ -401,12 +405,10 @@ def escarpment(theta, AorM):
     lam : array
         Occurrence rate at each input value
     """
-    C1, C2, bp1, bp2 = theta
+    C1, C2, log_bp1, log_bp2 = theta
     AorM = np.asarray(AorM)
     
     logx = np.log10(AorM)
-    log_bp1 = np.log10(bp1)
-    log_bp2 = np.log10(bp2)
     
     # Initialize output
     lam = np.zeros_like(logx, dtype=float)
@@ -474,7 +476,7 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
 
             # slopes: modest range
             m1 = np.random.uniform(-1.0, 0)
-            m2 = np.random.uniform(-1.0, 0)
+            m2 = np.random.uniform(m1, 0) # m2 should be larger (less negative) than m1
 
             # transition in log space
             log_xt = np.random.uniform(minL, maxL)
@@ -491,7 +493,6 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
             cond1 = 0 < rate_map < 1
             cond2 = m1<=0
             cond3 = m2<=0
-            cond4 = 0 < b < 1
             if cond1 and cond2 and cond3:
                 print(f"Initial params: m1={m1:.3f}, m2={m2:.3f}, b={b:.3f}, log_xt={log_xt:.3f},")
                 return theta
@@ -507,14 +508,18 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
             C2 = np.random.uniform(0.0, C1) # C2<C1
             
             # Breakpoints in linear space
-            bp1 = np.random.uniform(minA, maxA)
-            bp2 = np.random.uniform(bp1, maxA) # bp2>bp1
+            #bp1 = np.random.uniform(minA, maxA)
+            #bp2 = np.random.uniform(bp1, maxA) # bp2>bp1
+            
+            # Breakpoints in log space
+            log_bp1 = np.random.uniform(np.log10(minA), np.log10(maxA))
+            log_bp2 = np.random.uniform(log_bp1, np.log10(maxA))
             
             # Ensure bp1 < bp2
             #if bp1 >= bp2:
             #    continue
             
-            theta = [C1, C2, bp1, bp2]
+            theta = [C1, C2, log_bp1, log_bp2]
             lam = escarpment(theta, AorM_list)
             
             rate_map = np.sum(lam * dlogAorM)
@@ -524,7 +529,7 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
             cond2 = C1 > 0
             cond3 = C2 > 0
             if cond1 and cond2 and cond3:
-                print(f"Initial params: C1={C1:.3f}, C2={C2:.3f}, bp1={bp1:.3f}, bp2={bp2:.3f}")
+                print(f"Initial params: C1={C1:.3f}, C2={C2:.3f}, log_bp1={log_bp1:.3f}, log_bp2={log_bp2:.3f}")
                 return theta
         
         raise RuntimeError("Failed to find valid initial params for escarpment")
@@ -570,6 +575,10 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         extreme_val2 = PiecewisePower2(theta, AorM_max)
         extreme_val3 = PiecewisePower2(theta, 10**(log_xt))
         
+        if m1>0 or m2>0:
+            return -np.inf
+        if m1>m2:
+            return -np.inf
         if extreme_val1<0 or extreme_val2<0 or extreme_val3<0:
             return -np.inf
         if log_xt<minL or log_xt>maxL:
@@ -578,7 +587,8 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         return 0.0
     
     elif model_func_name == 'escarpment':
-        C1, C2, bp1, bp2 = theta
+        C1, C2, log_bp1, log_bp2 = theta
+        bp1, bp2 = 10**(log_bp1), 10**(log_bp2)
         
         if C1<0 or C2<0:
             return -np.inf
@@ -770,7 +780,7 @@ def plot_hard_coded_on_histogram(tier123_dir,
 
 def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI, 
                   ROIsamples_dict, ROIweights_dict,
-                  a_lims, m_lims, stack_dim, interp_fn_avg):
+                  a_lims, m_lims, stack_dim, interp_fn_avg, mass_unit):
     """
     Calculate the Bayesian Information Criterion (BIC) for a power law model.
     
@@ -797,7 +807,6 @@ def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI,
         loglik_max (float): Maximum likelihood value
         params_mle (ndarray): Parameters at maximum likelihood
     """
-    
     model_bic_params = []
     
     for model_func_name in model_func_name_list:
@@ -811,6 +820,8 @@ def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI,
         elif model_func_name == 'escarpment':
             model_func = escarpment
             ndim = 4
+        elif model_func_name == 'hist':
+            continue
         else:
             raise ValueError(f"Unknown model: {model_func_name}")
     
@@ -842,7 +853,7 @@ def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI,
         dlogAorM = np.log10(fine_list_AorM[1]/fine_list_AorM[0])
     
         # Load the MCMC chains to get initial parameter guess from max likelihood
-        path_to_chains = os.path.join(tier123_dir, f'saved_chains_{model_func_name}.npz')
+        path_to_chains = os.path.join(tier123_dir, f'saved_chains/chains_{model_func_name}.npz')
         data = np.load(path_to_chains)
         flat_chains = data['flat_chains']
         flat_log_probs = data['flat_log_probs']
@@ -899,19 +910,14 @@ def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI,
         model_bic_params.append([model_func_name, bic, loglik_max, params_mle])
     
     
-    plot_hard_coded_on_histogram(tier123_dir, model_bic_params)
-                                 #nstars, comp_names_inROI, model_func_name,
-                                 #ROIsamples_dict, ROIweights_dict,
-                                 #dlogAorM, fine_list_AorM, fine_compl_AorM,
-                                 #AorM_min, AorM_max,
-                                 #AorM_ind, stack_dim, parameter_sets, m_unit='earth')
+    plot_bics_on_histogram(tier123_dir, model_bic_params, stack_dim=stack_dim, m_unit=mass_unit)
     
     
     return
 
 
 
-def plot_bics_on_histogram(tier123_dir, bic_params_list, stack_dim='m', m_unit='earth'):
+def plot_bics_on_histogram(tier123_dir, bic_params_list, stack_dim, m_unit):
     """
     Plot max-likelihood models (from BIC calculations) overlaid on the ORD histogram.
     
@@ -939,16 +945,18 @@ def plot_bics_on_histogram(tier123_dir, bic_params_list, stack_dim='m', m_unit='
                                       savepath=None, figsize=(6, 4))
     
     # Handle both single and stacked axes
+    xlim_list = []
     if isinstance(ax, np.ndarray):
         axs_list = ax.flatten().tolist()
     elif isinstance(ax, list):
         axs_list = ax
     else:
         axs_list = [ax]
+    xlim_list = [ax_i.get_xlim() for ax_i in axs_list]
         
     # Color palette for distinct colors
     colors = ['red', 'blue', 'green', 'orange', 'purple']
-    
+    #import pdb; pdb.set_trace()
     # Iterate through the models and plot each max-likelihood model
     for idx, bic_param_set in enumerate(bic_params_list):
         
@@ -963,7 +971,7 @@ def plot_bics_on_histogram(tier123_dir, bic_params_list, stack_dim='m', m_unit='
             param_names = ['m1', 'm2', 'b', 'log_xt']
         elif model_func_name == 'escarpment':
             model_func = escarpment
-            param_names = ['C1', 'C2', 'bp1', 'bp2']
+            param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
         else:
             param_names = [f'p{i}' for i in range(len(params_mle))]
         
@@ -971,8 +979,8 @@ def plot_bics_on_histogram(tier123_dir, bic_params_list, stack_dim='m', m_unit='
         color = colors[idx % len(colors)]
         
         # Plot this model on each axis
-        for ax_i in axs_list:
-            xlim = ax_i.get_xlim()
+        for ax_idx, ax_i in enumerate(axs_list):
+            xlim = xlim_list[ax_idx]
             x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
             
             # Calculate model predictions

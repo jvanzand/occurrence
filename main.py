@@ -173,7 +173,7 @@ def prep_post_draws(tier1_dir, tier2_dir,
     ## The output of custom sampler should be a dict whose keys are companion names
     ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
     post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=500, m_unit=m_unit) # First sample posteriors 
-    
+    #import pdb; pdb.set_trace()
     ## If using mass ratio, convert masses to q
     #if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
     if 'q' in tier1_dir:
@@ -184,7 +184,7 @@ def prep_post_draws(tier1_dir, tier2_dir,
                 
             old_samples = post_sample_dict[comp_name]
             #import pdb; pdb.set_trace()
-            new_samples = np.array([old_samples[0], old_samples[1]/mstar]) # Same a samples; m-->q
+            new_samples = np.array([old_samples[0], old_samples[1]/mstar]) # Same 'a' samples; convert m-->q
             post_sample_dict[comp_name] = new_samples
                 
     #import pdb; pdb.set_trace()
@@ -202,6 +202,7 @@ def prep_post_draws(tier1_dir, tier2_dir,
     ## Probably the only compl array I'll use is compl_over_prior_single. compl_over_prior_avg is to test whether using avg completeness changes the answer. The two completeness arrays are for testing/sanity checks.
     saved_dict_dir = os.path.join(tier1_dir, tier2_dir, 'sampled_post_prior_compl.npz')
     np.savez(saved_dict_dir, **sampled_post_with_compls)
+    #import pdb; pdb.set_trace()
         
         
     return
@@ -262,7 +263,7 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
         a_list, m_list = a_m_prior_compl[:2] # First 2 sub-arrays are a/m lists
         
         lam_inds = ou.assign_cells(a_list, m_list, cell_dict['a_m_lims_pairs']) # Calculate lambda inds
-        
+
         ROIweight = len(lam_inds[lam_inds>-0.5])/len(lam_inds) # Fraction of samples in full ROI
         comp_ROIweights[comp_name] = ROIweight # Put weights in separate dict
         
@@ -367,35 +368,28 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
         cell_dict = dict(np.load(cell_dict_path)) # Includes bin sizes and avg_cell_compls
         bin_lam_dict = dict(np.load(bin_lam_dict_path)) # Contains, for every cell and for every companion, all (compl/prior) values that fall in that cell, AND the fraction (aka weight). This is equivalent to the info. stored in sampled_post_prior_compl_lam.npz, but compressed and sorted by lambda index.
     
-        mcmc_hist.mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
-                save_path=saved_chains_dir+'chains_hist.npz', parallel=parallel,
-                nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
+        if run_mcmc:
+            mcmc_hist.mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
+                    save_path=saved_chains_dir+'chains_hist.npz', parallel=parallel,
+                    nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
     
     ## Handle piecewise power models together because they follow the same pattern
+    interp_fn_avg_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
+    interp_fn_avg = pickle.load(open(interp_fn_avg_path, 'rb'))
+    ROIweights_path = os.path.join(tier123_dir, 'saved_dicts/comp_ROIweights.npz')
+    ROIweights_dict = dict(np.load(ROIweights_path))
+    alims = a_edges[0], a_edges[-1]
+    mlims = m_edges[0], m_edges[-1]
+    
     pp_model_names = [model_name for model_name in run_models if 'hist' not in model_name]
     for model_name in pp_model_names:
-        # pp_chain_save_path = saved_chains_dir+f'chains_{model_name}.npz'
-        # if os.path.exists(pp_chain_save_path):
-        #     continue
-        
-        ROIweights_path = os.path.join(tier123_dir, 'saved_dicts/comp_ROIweights.npz')
-        ROIweights_dict = dict(np.load(ROIweights_path))
-        alims = a_edges[0], a_edges[-1]
-        mlims = m_edges[0], m_edges[-1]
-        interp_fn_avg_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
-        interp_fn_avg = pickle.load(open(interp_fn_avg_path, 'rb'))
         
         chain_path = saved_chains_dir+f'chains_{model_name}.npz'
-        #mcmc_power.mcmc(nstars, comp_names_inROI, model_name,
-        #                   samples_inROI, ROIweights_dict,
-        #                   alims, mlims, stack_dim, interp_fn_avg,
-        #                   save_path=chain_path, parallel=parallel,
-        #                   nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
-                 
-              
-    mcmc_power.calculate_bic(tier123_dir, pp_model_names, 
-                             nstars, comp_names_inROI, samples_inROI, ROIweights_dict,
-                             alims, mlims, stack_dim, interp_fn_avg)
+        mcmc_power.mcmc(nstars, comp_names_inROI, model_name,
+                        samples_inROI, ROIweights_dict,
+                        alims, mlims, stack_dim, interp_fn_avg,
+                        save_path=chain_path, parallel=parallel,
+                        nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
         
     return
     
@@ -420,9 +414,36 @@ def summary_stats(tier1_dir, tier2_dir, tier3_dir, verbose=False):
     
     return
     
+def bic_compare(tier1_dir, tier2_dir, tier3_dir, 
+                run_models, nstars, a_edges, m_edges, 
+                stack_dim, mass_unit):
+    """
+    Calculate BIC for provided models and 
+    plot max-likelihood params over pre-calculated histogram
+    """
+    
+    tier123_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
+    
+    samples_inROI_path = os.path.join(tier123_dir, 'saved_dicts/sampled_post_prior_compl_lam_inROI.npz')
+    samples_inROI = dict(np.load(samples_inROI_path))
+    comp_names_inROI = list(samples_inROI.keys())
+    
+    interp_fn_avg_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
+    interp_fn_avg = pickle.load(open(interp_fn_avg_path, 'rb'))
+    ROIweights_path = os.path.join(tier123_dir, 'saved_dicts/comp_ROIweights.npz')
+    ROIweights_dict = dict(np.load(ROIweights_path))
+    alims = a_edges[0], a_edges[-1]
+    mlims = m_edges[0], m_edges[-1]
+    
+    mcmc_power.calculate_bic(tier123_dir, run_models, 
+                             nstars, comp_names_inROI, samples_inROI, ROIweights_dict,
+                             alims, mlims, stack_dim, interp_fn_avg, mass_unit)
+    
+    return
+    
 def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
-                       nstars, stack_dim, plot_model,
-                       m_unit='earth', 
+                       nstars, run_models, plot_model,
+                       stack_dim, m_unit='earth', 
                        hist_title=''):
     """
     Load MCMC chains and make diagnostic
@@ -473,20 +494,22 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
                             rate_type='OR', title=hist_title,
                             savepath=plot_save_dir+f'occurrence_OR.png', figsize=(6, 4))
                             
+    for model_name in run_models:
+        ## Plot corner for power law model
+        # plot_dim = 'a' if stack_dim=='m' else 'm' if stack_dim=='a' else None # dim to label corner correctly
+        path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}.npz')
+        save_corner_dir = os.path.join(plot_save_dir, f'corner_{model_name}.png')
+        pu.plot_corner_from_file(path_to_power_chains, plot_model=model_name, outpath=save_corner_dir,
+                                 thin=10, max_samples=50000)
+        
+                            
     if plot_model is None:
         pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
                                 rate_type='ORD', title=hist_title,
                                 savepath=plot_save_dir+f'occurrence_ORD.png', figsize=(6, 4))
         
     else:
-        
-        ## Plot corner for power law model
-        # plot_dim = 'a' if stack_dim=='m' else 'm' if stack_dim=='a' else None # dim to label corner correctly
-        path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{plot_model}.npz')
-        save_corner_dir = os.path.join(plot_save_dir, f'corner_{plot_model}.png')
-        pu.plot_corner_from_file(path_to_power_chains, plot_model=plot_model, outpath=save_corner_dir,
-                                 thin=10, max_samples=50000)
-        
+
         fig, ax = pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
                                           rate_type='ORD', title=hist_title, return_fig_ax=True,
                                           savepath=None, figsize=(6, 4))

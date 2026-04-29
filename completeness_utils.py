@@ -375,6 +375,7 @@ def cell_completeness(xlims, ylims, interp_fn):
     Returns:
         avg (float): Average completeness in grid cell
     """
+    import warnings
 
     sub_xgrid = np.linspace(xlims[0], xlims[1], 100)
     sub_ygrid = np.linspace(ylims[0], ylims[1], 100)
@@ -387,9 +388,9 @@ def cell_completeness(xlims, ylims, interp_fn):
             counter += 1
             interp_val = interp_fn((xval, yval))
             if np.isnan(interp_val):
-                raise Exception("NaN encountered in completeness_utils.cell_completeness")
+                warnings.warn("NaN encountered in completeness_utils.cell_completeness")
                 # import pdb; pdb.set_trace()
-                total += nan_fill # Catch any Nans, although they should have been filled above
+                total += 1 # Assume NaNs are encountered in high-mass regions where q~1
             else:
                 total += interp_val
 

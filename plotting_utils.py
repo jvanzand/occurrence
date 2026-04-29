@@ -279,7 +279,7 @@ def plot_corner_from_file(
         else:
             # Default fallback
             param_names = [f"$\\theta_{{{i}}}$" for i in range(ndim)]
-
+    #import pdb; pdb.set_trace()
     # Make corner plot
     fig = corner.corner(
         samples,
@@ -633,12 +633,16 @@ def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
     # --- Model selection ---
     if model_func_name == 'pp1':
         model_func = mcmc_power.PiecewisePower1
+        param_names = ['slope', 'intercept']
     elif model_func_name == 'pp2':
         model_func = mcmc_power.PiecewisePower2
+        param_names = ['m1', 'm2', 'b', 'log_xt']
     elif model_func_name == 'escarpment':
         model_func = mcmc_power.escarpment
+        param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
     else:
         raise NotImplementedError
+        
 
     # --- Random posterior draws ---
     rng = np.random.default_rng()
@@ -675,7 +679,8 @@ def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
             x_model, y_model,
             color='red',
             linewidth=2.5,
-            label=f'{model_func_name} ML',
+            label=f', '.join([f"{name}={val:7.3f}" for name, val in zip(param_names, ml_params)]),
+            #label=f'{model_func_name} ML',
             zorder=100
         )
 
