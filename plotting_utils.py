@@ -276,10 +276,13 @@ def plot_corner_from_file(
             param_names = ['slope', 'intercept']
         elif plot_model == 'pp2':
             param_names = ['slope1', 'slope2', 'intercept1', 'break_point']
+        elif plot_model == 'escarpment':
+            param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
         else:
             # Default fallback
             param_names = [f"$\\theta_{{{i}}}$" for i in range(ndim)]
-    #import pdb; pdb.set_trace()
+    #if plot_model=='escarpment':
+    #    import pdb; pdb.set_trace()
     # Make corner plot
     fig = corner.corner(
         samples,

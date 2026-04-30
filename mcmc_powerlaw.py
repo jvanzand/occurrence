@@ -575,13 +575,18 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         extreme_val2 = PiecewisePower2(theta, AorM_max)
         extreme_val3 = PiecewisePower2(theta, 10**(log_xt))
         
-        if m1>0 or m2>0:
-            return -np.inf
-        if m1>m2:
-            return -np.inf
+        #if m1>0 or m2>0:
+        #    print("PRIOR FAIL 1")
+        #    return -np.inf
+        #if m1<-1 or m2<-1:
+        #    return -np.inf
+        #if m1>m2:
+        #    return -np.inf
         if extreme_val1<0 or extreme_val2<0 or extreme_val3<0:
+            print("PRIOR FAIL 2")
             return -np.inf
         if log_xt<minL or log_xt>maxL:
+            print("PRIOR FAIL 3")
             return -np.inf
         
         return 0.0
