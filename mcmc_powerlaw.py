@@ -60,6 +60,9 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     elif model_func_name=='pp2':
         model_func = PiecewisePower2
         ndim = 4
+    elif model_func_name=='step':
+        model_func = step
+        ndim = 3
     elif model_func_name=='escarpment':
         model_func = escarpment
         ndim = 4
@@ -118,6 +121,15 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
                 (-0.15, 0.1, 0.12, 0.5),
                 (-0.05, 0.15, 0.18, 0.6),
                 (-0.2, 0.05, 0.10, 0.4),
+            ]
+        elif model_func_name == 'step':
+            # step: (C1, C2, log_bp)
+            parameter_sets = [
+                (0.25, 0.05, 1.0),
+                (0.20, 0.08, 0.8),
+                (0.30, 0.10, 1.2),
+                (0.22, 0.06, 0.9),
+                (0.28, 0.09, 1.1),
             ]
         elif model_func_name == 'escarpment':
             # escarpment: (C1, C2, bp1, bp2)
@@ -380,6 +392,48 @@ def PiecewisePower2(theta, AorM):
     return f
 
 
+def step(theta, AorM):
+    """
+    Step model in log-x space: two horizontal lines with one breakpoint.
+    
+    The model consists of two segments in semi-log space:
+    - Horizontal line at C1 for x < breakpoint
+    - Horizontal line at C2 for x >= breakpoint
+    
+    Parameters
+    ----------
+    theta : (C1, C2, log_bp)
+        C1 : occurrence rate at low x values
+        C2 : occurrence rate at high x values
+        log_bp : log10 breakpoint (x value)
+    
+    AorM : array-like (>0)
+        Input values (must be > 0)
+    
+    Returns
+    -------
+    lam : array
+        Occurrence rate at each input value
+    """
+    C1, C2, log_bp = theta
+    AorM = np.asarray(AorM)
+    
+    logx = np.log10(AorM)
+    
+    # Initialize output
+    lam = np.zeros_like(logx, dtype=float)
+    
+    # Region 1: x < bp → y = C1
+    mask1 = logx < log_bp
+    lam[mask1] = C1
+    
+    # Region 2: x >= bp → y = C2
+    mask2 = logx >= log_bp
+    lam[mask2] = C2
+    
+    return lam
+
+
 def escarpment(theta, AorM):
     """
     Escarpment model in log-x space: two horizontal lines connected by a sloped line.
@@ -499,6 +553,32 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
 
         raise RuntimeError("Failed to find valid initial params")
     
+    elif model_func_name=='step':
+        minA, maxA = np.min(AorM_list), np.max(AorM_list)
+        
+        for _ in range(1000):
+            # C1 and C2: occurrence rates (should be positive and their integral < 1)
+            C1 = np.random.uniform(0.0, 1.0)
+            C2 = np.random.uniform(0.0, C1) # C2<C1
+            
+            # Breakpoint in log space
+            log_bp = np.random.uniform(np.log10(minA), np.log10(maxA))
+            
+            theta = [C1, C2, log_bp]
+            lam = step(theta, AorM_list)
+            
+            rate_map = np.sum(lam * dlogAorM)
+            
+            # Check conditions
+            cond1 = 0 < rate_map < 1
+            cond2 = C1 > 0
+            cond3 = C2 > 0
+            if cond1 and cond2 and cond3:
+                print(f"Initial params: C1={C1:.3f}, C2={C2:.3f}, log_bp={log_bp:.3f}")
+                return theta
+        
+        raise RuntimeError("Failed to find valid initial params for step")
+    
     elif model_func_name=='escarpment':
         minA, maxA = np.min(AorM_list), np.max(AorM_list)
         
@@ -591,6 +671,18 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         
         return 0.0
     
+    elif model_func_name == 'step':
+        C1, C2, log_bp = theta
+        bp = 10**(log_bp)
+        
+        if C1<0 or C2<0:
+            return -np.inf
+        # Check that bp is within bounds
+        if bp<AorM_min or bp>AorM_max:
+            return -np.inf
+        
+        return 0.0
+    
     elif model_func_name == 'escarpment':
         C1, C2, log_bp1, log_bp2 = theta
         bp1, bp2 = 10**(log_bp1), 10**(log_bp2)
@@ -643,6 +735,8 @@ def print_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name
         param_names = ['slope', 'intercept']
     elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
         param_names = ['m1', 'm2', 'b', 'log_xt']
+    elif model_func_name == 'step':
+        param_names = ['C1', 'C2', 'log_bp']
     elif model_func_name == 'escarpment':
         param_names = ['C1', 'C2', 'bp1', 'bp2']
     else:
@@ -692,29 +786,27 @@ def plot_hard_coded_on_histogram(tier123_dir,
         parameter_sets (list): List of parameter tuples to evaluate
         m_unit (str): Mass unit ('earth' or 'jupiter')
     """
+                                 
+    from occurrence import plotting_utils as pu
+    
     
     ## Choose ndim and function based on name
     if model_func_name=='pp1':
         model_func = PiecewisePower1
+        param_names = ['slope', 'int']
     elif model_func_name=='pp2':
         model_func = PiecewisePower2
+        param_names = ['m1', 'm2', 'b', 'log_xt']
+    elif model_func_name=='step':
+        model_func = step
+        param_names = ['C1', 'C2', 'log_bp']
     elif model_func_name=='escarpment':
         model_func = escarpment
+        param_names = ['C1', 'C2', 'bp1', 'bp2']
     
-    from occurrence import plotting_utils as pu
     
     # Color palette for distinct colors
     colors = ['red', 'blue', 'green', 'orange', 'purple']
-    
-    # Determine parameter names for labels
-    if model_func_name == 'pp1':
-        param_names = ['slope', 'int']
-    elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
-        param_names = ['m1', 'm2', 'b', 'log_xt']
-    elif model_func_name == 'escarpment':
-        param_names = ['C1', 'C2', 'bp1', 'bp2']
-    else:
-        param_names = [f'p{i}' for i in range(len(parameter_sets[0]))]
     
     # Load summary dict for histogram
     path_to_summary = os.path.join(tier123_dir, 'saved_dicts/summary_dict.npz')
@@ -822,6 +914,9 @@ def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI,
         elif model_func_name == 'pp2':
             model_func = PiecewisePower2
             ndim = 4
+        elif model_func_name == 'step':
+            model_func = step
+            ndim = 3
         elif model_func_name == 'escarpment':
             model_func = escarpment
             ndim = 4
@@ -974,6 +1069,9 @@ def plot_bics_on_histogram(tier123_dir, bic_params_list, stack_dim, m_unit):
         elif model_func_name == 'pp2':
             model_func = PiecewisePower2
             param_names = ['m1', 'm2', 'b', 'log_xt']
+        elif model_func_name == 'step':
+            model_func = step
+            param_names = ['C1', 'C2', 'log_bp']
         elif model_func_name == 'escarpment':
             model_func = escarpment
             param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']

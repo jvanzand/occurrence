@@ -276,6 +276,8 @@ def plot_corner_from_file(
             param_names = ['slope', 'intercept']
         elif plot_model == 'pp2':
             param_names = ['slope1', 'slope2', 'intercept1', 'break_point']
+        elif plot_model == 'step':
+            param_names = ['C1', 'C2', 'log_bp']
         elif plot_model == 'escarpment':
             param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
         else:
@@ -640,6 +642,9 @@ def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
     elif model_func_name == 'pp2':
         model_func = mcmc_power.PiecewisePower2
         param_names = ['m1', 'm2', 'b', 'log_xt']
+    elif model_func_name == 'step':
+        model_func = mcmc_power.step
+        param_names = ['C1', 'C2', 'log_bp']
     elif model_func_name == 'escarpment':
         model_func = mcmc_power.escarpment
         param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
