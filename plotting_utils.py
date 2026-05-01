@@ -283,8 +283,7 @@ def plot_corner_from_file(
         else:
             # Default fallback
             param_names = [f"$\\theta_{{{i}}}$" for i in range(ndim)]
-    #if plot_model=='escarpment':
-    #    import pdb; pdb.set_trace()
+
     # Make corner plot
     fig = corner.corner(
         samples,
@@ -610,12 +609,15 @@ def make_bar_vals(x_pairs, y_vals):
 
 
 
-def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
+def plot_power(fig, ax, model_func_name, save_path, stack_dim='m', n_draws=50):
     """
     Over-plot the max-likelihood model AND random posterior draws.
 
     Parameters
     ----------
+    stack_dim : str
+        Dimension along which histograms are stacked ('a' or 'm').
+        Used to determine which chain file corresponds to each axis.
     n_draws : int
         Number of posterior samples to plot (low-opacity)
     """
@@ -624,17 +626,7 @@ def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
 
     plot_dir = os.path.dirname(save_path)
     load_dir = os.path.dirname(plot_dir)
-    chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}.npz')
-
-    data = np.load(chain_file)
-    flat_chains = data['flat_chains']
-    flat_log_probs = data['flat_log_probs']
-
-    # --- Max likelihood ---
-    ml_idx = np.argmax(flat_log_probs)
-    ml_params = flat_chains[ml_idx]
-    print("MAX LIKE:", ", ".join(f"{p:.3f}" for p in ml_params))
-
+    
     # --- Model selection ---
     if model_func_name == 'pp1':
         model_func = mcmc_power.PiecewisePower1
@@ -650,13 +642,7 @@ def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
         param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
     else:
         raise NotImplementedError
-        
-
-    # --- Random posterior draws ---
-    rng = np.random.default_rng()
-    draw_indices = rng.choice(len(flat_chains), size=n_draws, replace=False)
-    posterior_draws = flat_chains[draw_indices]
-
+    
     # --- Handle axes ---
     if isinstance(ax, np.ndarray):
         axs_list = ax.flatten().tolist()
@@ -664,9 +650,41 @@ def plot_power(fig, ax, model_func_name, save_path, n_draws=50):
         axs_list = ax
     else:
         axs_list = [ax]
+    
+    # Determine number of bins from the number of axes
+    # When there are multiple stacked histograms, each axis corresponds to one bin
+    n_bins = len(axs_list)
 
     # --- Plot ---
-    for ax_i in axs_list:
+    for ax_idx, ax_i in enumerate(axs_list):
+        # Determine which bin this axis corresponds to
+        # The axes are reversed in plot_occurrence_hist, so the mapping is:
+        # ax_idx 0 -> highest bin index (n_bins - 1)
+        # ax_idx 1 -> bin index (n_bins - 2)
+        # etc.
+        bin_idx = n_bins - 1 - ax_idx
+        
+        # Load the chain file for this bin
+        chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}_bin{bin_idx}.npz')
+        
+        # Check if file exists; if not, try the old naming scheme (single bin)
+        if not os.path.exists(chain_file):
+            chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}.npz')
+        
+        data = np.load(chain_file)
+        flat_chains = data['flat_chains']
+        flat_log_probs = data['flat_log_probs']
+
+        # --- Max likelihood ---
+        ml_idx = np.argmax(flat_log_probs)
+        ml_params = flat_chains[ml_idx]
+        print(f"BIN {bin_idx} MAX LIKE:", ", ".join(f"{p:.3f}" for p in ml_params))
+
+        # --- Random posterior draws ---
+        rng = np.random.default_rng()
+        draw_indices = rng.choice(len(flat_chains), size=n_draws, replace=False)
+        posterior_draws = flat_chains[draw_indices]
+
         xlim = ax_i.get_xlim()
         x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
 

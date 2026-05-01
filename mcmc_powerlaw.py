@@ -877,7 +877,7 @@ def plot_hard_coded_on_histogram(tier123_dir,
 
 def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI, 
                   ROIsamples_dict, ROIweights_dict,
-                  a_lims, m_lims, stack_dim, interp_fn_avg, mass_unit):
+                  a_lims, m_lims, stack_dim, interp_fn_avg, mass_unit, bin_idx=None):
     """
     Calculate the Bayesian Information Criterion (BIC) for a power law model.
     
@@ -897,6 +897,7 @@ def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI,
         m_lims (tuple): Mass limits [m_min, m_max]
         stack_dim (str): Stack dimension ('a' or 'm')
         interp_fn_avg: Completeness interpolation function
+        bin_idx (int or None): Bin index for multi-bin fits. If None, uses old single-bin naming.
         path_to_chains (str): Path to pre-calculated MCMC chains (*.npz file)
     
     Returns:
@@ -953,7 +954,15 @@ def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI,
         dlogAorM = np.log10(fine_list_AorM[1]/fine_list_AorM[0])
     
         # Load the MCMC chains to get initial parameter guess from max likelihood
-        path_to_chains = os.path.join(tier123_dir, f'saved_chains/chains_{model_func_name}.npz')
+        if bin_idx is not None:
+            path_to_chains = os.path.join(tier123_dir, f'saved_chains/chains_{model_func_name}_bin{bin_idx}.npz')
+        else:
+            path_to_chains = os.path.join(tier123_dir, f'saved_chains/chains_{model_func_name}.npz')
+        
+        # Try to load; if bin file doesn't exist, fall back to single-bin file
+        if not os.path.exists(path_to_chains) and bin_idx is not None:
+            path_to_chains = os.path.join(tier123_dir, f'saved_chains/chains_{model_func_name}.npz')
+        
         data = np.load(path_to_chains)
         flat_chains = data['flat_chains']
         flat_log_probs = data['flat_log_probs']

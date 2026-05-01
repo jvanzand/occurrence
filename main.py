@@ -378,18 +378,52 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
     interp_fn_avg = pickle.load(open(interp_fn_avg_path, 'rb'))
     ROIweights_path = os.path.join(tier123_dir, 'saved_dicts/comp_ROIweights.npz')
     ROIweights_dict = dict(np.load(ROIweights_path))
-    alims = a_edges[0], a_edges[-1]
-    mlims = m_edges[0], m_edges[-1]
     
     pp_model_names = [model_name for model_name in run_models if 'hist' not in model_name]
-    for model_name in pp_model_names:
+    
+    # Determine which dimension to iterate over (stack_dim) and which to use full range (other dim)
+    if stack_dim == 'a':
+        # Iterate over SMA bins, use full mass range
+        stack_edges = a_edges
+        full_edges = m_edges
+        full_lims = m_edges[0], m_edges[-1]
+        dim_label = 'a'
+        dim_short = 'a'
+    elif stack_dim == 'm':
+        # Iterate over mass bins, use full SMA range
+        stack_edges = m_edges
+        full_edges = a_edges
+        full_lims = a_edges[0], a_edges[-1]
+        dim_label = 'm'
+        dim_short = 'm'
+    else:
+        raise ValueError(f"stack_dim must be 'a' or 'm', got {stack_dim}")
+    
+    # Iterate over bins in the stack_dim direction
+    n_stack_bins = len(stack_edges) - 1
+    for bin_idx in range(n_stack_bins):
+        stack_min = stack_edges[bin_idx]
+        stack_max = stack_edges[bin_idx + 1]
         
-        chain_path = saved_chains_dir+f'chains_{model_name}.npz'
-        mcmc_power.mcmc(nstars, comp_names_inROI, model_name,
-                        samples_inROI, ROIweights_dict,
-                        alims, mlims, stack_dim, interp_fn_avg,
-                        save_path=chain_path, parallel=parallel,
-                        nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
+        # Create bin limits for this iteration
+        if stack_dim == 'a':
+            alims = (stack_min, stack_max)
+            mlims = full_lims
+        else:  # stack_dim == 'm'
+            alims = full_lims
+            mlims = (stack_min, stack_max)
+        
+        # Create distinguishing filename suffix for this bin
+        # Format: _binX or _a0p1-1AU or _m1-2Mj, etc.
+        bin_suffix = f'_bin{bin_idx}'
+        
+        for model_name in pp_model_names:
+            chain_path = saved_chains_dir + f'chains_{model_name}{bin_suffix}.npz'
+            mcmc_power.mcmc(nstars, comp_names_inROI, model_name,
+                            samples_inROI, ROIweights_dict,
+                            alims, mlims, stack_dim, interp_fn_avg,
+                            save_path=chain_path, parallel=parallel,
+                            nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
         
     return
     
@@ -432,12 +466,38 @@ def bic_compare(tier1_dir, tier2_dir, tier3_dir,
     interp_fn_avg = pickle.load(open(interp_fn_avg_path, 'rb'))
     ROIweights_path = os.path.join(tier123_dir, 'saved_dicts/comp_ROIweights.npz')
     ROIweights_dict = dict(np.load(ROIweights_path))
-    alims = a_edges[0], a_edges[-1]
-    mlims = m_edges[0], m_edges[-1]
     
-    mcmc_power.calculate_bic(tier123_dir, run_models, 
-                             nstars, comp_names_inROI, samples_inROI, ROIweights_dict,
-                             alims, mlims, stack_dim, interp_fn_avg, mass_unit)
+    # Determine which dimension to iterate over (stack_dim) and which to use full range (other dim)
+    if stack_dim == 'a':
+        # Iterate over SMA bins, use full mass range
+        stack_edges = a_edges
+        full_edges = m_edges
+        full_lims = m_edges[0], m_edges[-1]
+    elif stack_dim == 'm':
+        # Iterate over mass bins, use full SMA range
+        stack_edges = m_edges
+        full_edges = a_edges
+        full_lims = a_edges[0], a_edges[-1]
+    else:
+        raise ValueError(f"stack_dim must be 'a' or 'm', got {stack_dim}")
+    
+    # Iterate over bins in the stack_dim direction
+    n_stack_bins = len(stack_edges) - 1
+    for bin_idx in range(n_stack_bins):
+        stack_min = stack_edges[bin_idx]
+        stack_max = stack_edges[bin_idx + 1]
+        
+        # Create bin limits for this iteration
+        if stack_dim == 'a':
+            alims = (stack_min, stack_max)
+            mlims = full_lims
+        else:  # stack_dim == 'm'
+            alims = full_lims
+            mlims = (stack_min, stack_max)
+        
+        mcmc_power.calculate_bic(tier123_dir, run_models, 
+                                 nstars, comp_names_inROI, samples_inROI, ROIweights_dict,
+                                 alims, mlims, stack_dim, interp_fn_avg, mass_unit, bin_idx=bin_idx)
     
     return
     
@@ -494,13 +554,26 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
                             rate_type='OR', title=hist_title,
                             savepath=plot_save_dir+f'occurrence_OR.png', figsize=(6, 4))
                             
+    # Determine number of stack_dim bins to create corner plots for each
+    if stack_dim == 'a':
+        n_stack_bins = len(a_edges) - 1
+    elif stack_dim == 'm':
+        n_stack_bins = len(m_edges) - 1
+    else:
+        n_stack_bins = 1
+    
     for model_name in run_models:
-        ## Plot corner for power law model
-        # plot_dim = 'a' if stack_dim=='m' else 'm' if stack_dim=='a' else None # dim to label corner correctly
-        path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}.npz')
-        save_corner_dir = os.path.join(plot_save_dir, f'corner_{model_name}.png')
-        pu.plot_corner_from_file(path_to_power_chains, plot_model=model_name, outpath=save_corner_dir,
-                                 thin=10, max_samples=50000)
+        ## Plot corner for power law model (one for each bin)
+        for bin_idx in range(n_stack_bins):
+            path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}_bin{bin_idx}.npz')
+            # Fallback to old naming if single-bin file doesn't exist
+            if not os.path.exists(path_to_power_chains):
+                path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}.npz')
+            save_corner_dir = os.path.join(plot_save_dir, f'corner_{model_name}_bin{bin_idx}.png')
+            
+            if os.path.exists(path_to_power_chains):
+                pu.plot_corner_from_file(path_to_power_chains, plot_model=model_name, outpath=save_corner_dir,
+                                         thin=10, max_samples=50000)
         
                             
     if plot_model is None:
@@ -513,7 +586,7 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
         fig, ax = pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
                                           rate_type='ORD', title=hist_title, return_fig_ax=True,
                                           savepath=None, figsize=(6, 4))
-        pu.plot_power(fig, ax, plot_model, save_path=plot_save_dir+f'occurrence_ORD.png')
+        pu.plot_power(fig, ax, plot_model, save_path=plot_save_dir+f'occurrence_ORD.png', stack_dim=stack_dim)
     
     return
     
