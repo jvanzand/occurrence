@@ -662,7 +662,8 @@ def plot_power(fig, ax, model_func_name, save_path, stack_dim='m', n_draws=50):
         # ax_idx 0 -> highest bin index (n_bins - 1)
         # ax_idx 1 -> bin index (n_bins - 2)
         # etc.
-        bin_idx = n_bins - 1 - ax_idx
+        #bin_idx = n_bins - 1 - ax_idx
+        bin_idx = ax_idx
         
         # Load the chain file for this bin
         chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}_bin{bin_idx}.npz')

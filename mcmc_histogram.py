@@ -170,7 +170,7 @@ def loglik_hist(lam, nstars, comp_names, bin_lam_dict, num_cells, all_binsizes, 
         single_bin_sum = 0
         for comp_name in comp_names:
              
-            # Both compl_over_prior and weight are stored in one entry to save retrieve time
+            # Both compl_over_prior and weight are stored in one entry for easy retrieval
             cop_and_weight = bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"]
 
             if cop_and_weight[1]==0: # Skip if weight=0 (companion does not overlap the bin)

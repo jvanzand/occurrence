@@ -209,7 +209,8 @@ def prep_post_draws(tier1_dir, tier2_dir,
     
     
 def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
-                              a_edges, m_or_q_edges, star_df, 
+                              a_edges, m_or_q_edges, stack_dim,
+                              star_df, 
                               compl_type='single',
                               m_unit='earth',
                               fig_title='Companions in Occurrence Region'):
@@ -254,15 +255,39 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
     comp_samples = dict(np.load(comp_samples_path)) # Load companion samples
     total_sample_num = np.shape((comp_samples[list(comp_samples.keys())[0]]))[1] # Record sample num before arrays change len
 
-    
     comp_ROIweights = {}
     comps_outsideROI = []
-    ## In this loop, calculate the lambda index of every a/m sample for every companion
+    
+    ## Prepare bin pairs in case of 2D fit
+    if stack_dim=='a':
+        stack_edges = a_edges
+        array_ind = 0
+    elif stack_dim=='m':
+        stack_edges = m_or_q_edges
+        array_ind = 1
+    stack_bin_limit_pairs = [[stack_edges[i], stack_edges[i+1]] for i in range(len(stack_edges)-1)]
+    
+    ## This is a dict of dicts. For each companion, place the samples in the corresponding dict
+    stack_SampleDict_dict = {f'stack_SampleDict_{stack_dim}{i}':{} for i in range(len(stack_bin_limit_pairs))}
+    stack_ROIWeightDict_dict = {f'stack_ROIWeightDict_{stack_dim}{i}':{} 
+                                for i in range(len(stack_bin_limit_pairs))}
+    
+        
+
+    # 4th element of catalog_dict is average completeness/prior (for testing)
+    # 5th element of catalog_dict is single system completeness/prior (most correct)
+    compl_ind = 4 if compl_type=='avg' else 5 if compl_type=='single' else 5 # Default to 5 anyway
+    bin_lam_dict = {}
+    ## In this loop:
+    ##     1) Calculate the lambda index of every a/m sample for every companion
+    ##     2) Create subsets of the comp_samples and comp_ROIweights dicts for each stack_dim bin
+    ##     3) Fill in bin_lam_dict, which has useful info for exp^-Lambda term of histogram likelihood
     for comp_name in comp_samples.keys():
         a_m_prior_compl = comp_samples[comp_name]
         a_list, m_list = a_m_prior_compl[:2] # First 2 sub-arrays are a/m lists
+        compl_over_prior = comp_samples[comp_name][compl_ind]
         
-        lam_inds = ou.assign_cells(a_list, m_list, cell_dict['a_m_lims_pairs']) # Calculate lambda inds
+        lam_inds = ou.assign_cells(a_list, m_list, cell_dict['a_m_lims_pairs']).astype(int) # Calculate lambda inds
 
         ROIweight = len(lam_inds[lam_inds>-0.5])/len(lam_inds) # Fraction of samples in full ROI
         comp_ROIweights[comp_name] = ROIweight # Put weights in separate dict
@@ -278,33 +303,35 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
         a_m_prior_compl_lam = np.vstack([a_m_prior_compl, lam_inds]) # Append lambda inds to array
         a_m_prior_compl_lam = a_m_prior_compl_lam[:, lamROI_mask] # Remove any vals outside ROI
         comp_samples[comp_name] = a_m_prior_compl_lam # New dict entry is the updated array
+        
+        #import pdb; pdb.set_trace()
+        
+        ## Loop to make extra dicts for 2D case.
+        ## Treat each bin in the stack dimension as its own sub-ROI and save 1 dict of samples and 1 of weights
+        for i, stack_bin_limit_pair in enumerate(stack_bin_limit_pairs):
+            min_val, max_val = stack_bin_limit_pair
+            stack_mask = (min_val<a_m_prior_compl_lam[1]) & (a_m_prior_compl_lam[1]<max_val)
             
-    for comp_name in comps_outsideROI:
-        del comp_samples[comp_name]
-    
-    # import pdb; pdb.set_trace()
-    print("Companions at least partially in ROI: ", len(comp_samples))
-    ##################################################################
-    
-    # 4th element of catalog_dict is average completeness/prior (for testing)
-    # 5th element of catalog_dict is single system completeness/prior (most correct)
-    compl_ind = 4 if compl_type=='avg' else 5 if compl_type=='single' else 5 # Default to 5 anyway
-    bin_lam_dict = {}
-    for comp_name in comp_samples.keys():
-        a_samples = comp_samples[comp_name][0]
-        m_samples = comp_samples[comp_name][1]
-        compl_over_prior = comp_samples[comp_name][compl_ind]
-        lam_inds = comp_samples[comp_name][6].astype(int) # Ensure lambda inds are ints, not floats
+            
+            weight_in_stack_bin = stack_mask.sum()/len(lam_inds) # Fraction of samples that fall in this stack bin
+            
+            if weight_in_stack_bin==0: # Skip companions that fall outside stack bin.
+                print(f"Skipping comp {comp_name} in stack bin {stack_bin_limit_pair}")
+                continue
+            stack_ROIWeightDict_dict[f'stack_ROIWeightDict_{stack_dim}{i}'][comp_name] = weight_in_stack_bin
+            
+            a_m_prior_compl_lam_stack = a_m_prior_compl_lam[:, stack_mask]
+            stack_SampleDict_dict[f'stack_SampleDict_{stack_dim}{i}'][comp_name] = a_m_prior_compl_lam_stack
+            
+        #import pdb; pdb.set_trace()
         
-        try:
-            sysname = star_df[star_df["comp_list"].apply(lambda x: comp_name in x)].star_name.iloc[0]
-        except:
-            import pdb; pdb.set_trace()
         
+        ## Now fill in bin_lam_dict, which has useful info for exp^-Lambda term of histogram likelihood
         ## Check for companions that have lots of NaN completeness values
         ## Should not be a problem for real companions
         lam_nancount = np.isnan(compl_over_prior).sum()
         if lam_nancount>10:
+            sysname = star_df[star_df["comp_list"].apply(lambda x: comp_name in x)].star_name.iloc[0]
             #import pdb; pdb.set_trace()
             if lam_nancount>999:
                 print(f'main.prep_occurrence_materials: \n'
@@ -326,8 +353,15 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
             weight = lam_mask.sum()/total_sample_num # (Num. of samples in cell)/(tot. # of samples)
             
             bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"] = [compl_over_prior_in_cell_avg, weight]
+            
+    for comp_name in comps_outsideROI:
+        del comp_samples[comp_name]
     
     
+    print("Companions at least partially in ROI: ", len(comp_samples))
+    #import pdb; pdb.set_trace()
+
+
     saved_dicts_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir, 'saved_dicts/')
     os.makedirs(saved_dicts_dir, exist_ok=True)
 
@@ -335,6 +369,18 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
     np.savez(saved_dicts_dir+'sampled_post_prior_compl_lam_inROI.npz', **comp_samples) # Sample-specific info
     np.savez(saved_dicts_dir+'comp_ROIweights.npz', **comp_ROIweights) # Fraction of each comp that falls in ROI
     np.savez(saved_dicts_dir+'bin_lam_dict.npz', **bin_lam_dict) # Pre-computed info for hist likelihood
+    
+
+    np.savez(saved_dicts_dir+'stack_SampleDict_dict.npz', 
+             **stack_SampleDict_dict) # like comp_samples but for 2D
+    np.savez(saved_dicts_dir+'stack_ROIWeightDict_dict.npz', 
+             **stack_ROIWeightDict_dict) # like comp_ROIweights but for 2D
+    #my_dict = {"alpha": [1, 2, 3], "beta": [4, 5], "gamma": [6, 7, 8]}
+    #dict_dict = {'d1':my_dict, 'd2':my_dict, 'd3':my_dict}
+    #np.savez(saved_dicts_dir+'test_dict.npz', **dict_dict)
+    
+    #test_dict = np.load(os.path.join(saved_dicts_dir, 'test_dict.npz'))
+    #import pdb; pdb.set_trace()
 
     return
     
@@ -372,6 +418,10 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
             mcmc_hist.mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
                     save_path=saved_chains_dir+'chains_hist.npz', parallel=parallel,
                     nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
+            
+    ## After running MCMC for histogram, create summary products        
+    summary_stats(tier1_dir, tier2_dir, tier3_dir, verbose=False)
+    
     
     ## Handle piecewise power models together because they follow the same pattern
     interp_fn_avg_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
@@ -388,20 +438,39 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
         full_edges = m_edges
         full_lims = m_edges[0], m_edges[-1]
         dim_label = 'a'
-        dim_short = 'a'
+        #dim_short = 'a'
     elif stack_dim == 'm':
         # Iterate over mass bins, use full SMA range
         stack_edges = m_edges
         full_edges = a_edges
         full_lims = a_edges[0], a_edges[-1]
         dim_label = 'm'
-        dim_short = 'm'
+        #dim_short = 'm'
     else:
         raise ValueError(f"stack_dim must be 'a' or 'm', got {stack_dim}")
+    
+    ## Load dictionaries with samples/weights specific to stack bins
+    stack_SampleDict_dict_path = os.path.join(tier123_dir, 'saved_dicts/stack_SampleDict_dict.npz')
+    stack_ROIWeightDict_dict_path = os.path.join(tier123_dir, 'saved_dicts/stack_ROIWeightDict_dict.npz')
+    
+    stack_SampleDict_dict = dict(np.load(stack_SampleDict_dict_path, allow_pickle=True))
+    stack_ROIWeightDict_dict = dict(np.load(stack_ROIWeightDict_dict_path, allow_pickle=True))
     
     # Iterate over bins in the stack_dim direction
     n_stack_bins = len(stack_edges) - 1
     for bin_idx in range(n_stack_bins):
+        #if bin_idx==1:
+        #    continue
+        
+        ## Select correct dictionaries for the current stack bin
+        stack_SampleDict = stack_SampleDict_dict[f'stack_SampleDict_{stack_dim}{bin_idx}'].item()
+        stack_ROIWeightDict = stack_ROIWeightDict_dict[f'stack_ROIWeightDict_{stack_dim}{bin_idx}'].item()
+        
+        comp_names_in_stack_ROI = list(stack_SampleDict.keys())
+        #test_dict = dict(np.load(os.path.join(tier123_dir, 'saved_dicts/test_dict.npz'), allow_pickle=True))
+        #import pdb; pdb.set_trace()
+        
+        
         stack_min = stack_edges[bin_idx]
         stack_max = stack_edges[bin_idx + 1]
         
@@ -418,9 +487,10 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
         bin_suffix = f'_bin{bin_idx}'
         
         for model_name in pp_model_names:
+        
             chain_path = saved_chains_dir + f'chains_{model_name}{bin_suffix}.npz'
-            mcmc_power.mcmc(nstars, comp_names_inROI, model_name,
-                            samples_inROI, ROIweights_dict,
+            mcmc_power.mcmc(nstars, comp_names_in_stack_ROI, model_name,
+                            stack_SampleDict, stack_ROIWeightDict,
                             alims, mlims, stack_dim, interp_fn_avg,
                             save_path=chain_path, parallel=parallel,
                             nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
@@ -548,7 +618,7 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
     ############################################################
     ############################################################
 
-    
+    #import pdb; pdb.set_trace()
     ## Plot occurrence histogram in OR and ORD
     pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
                             rate_type='OR', title=hist_title,
@@ -556,13 +626,17 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
                             
     # Determine number of stack_dim bins to create corner plots for each
     if stack_dim == 'a':
-        n_stack_bins = len(a_edges) - 1
+        #n_stack_bins = len(a_edges) - 1
+        n_stack_bins = summary_dict['n_abins']
     elif stack_dim == 'm':
-        n_stack_bins = len(m_edges) - 1
+        #n_stack_bins = len(m_edges) - 1
+        n_stack_bins = summary_dict['n_mbins']
     else:
         n_stack_bins = 1
     
-    for model_name in run_models:
+    plot_corner_names = [model_name for model_name in run_models if model_name!='hist']
+    for model_name in plot_corner_names:
+
         ## Plot corner for power law model (one for each bin)
         for bin_idx in range(n_stack_bins):
             path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}_bin{bin_idx}.npz')

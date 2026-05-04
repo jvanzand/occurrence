@@ -107,11 +107,12 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
         if model_func_name == 'pp1':
             # PiecewisePower1: (slope, intercept)
             parameter_sets = [
-                (-0.13, 0.22),
-                (-0.14, 0.21),
-                (-0.15, 0.20),
-                (-0.16, 0.19),
-                (-0.17, 0.18),
+                (-0.062, 0.119),
+                (-0.091, 0.173),
+                (-0.02, 0.05),
+                (-0.01, 0.04),
+                (-0.005, 0.03),
+                (-0.002, 0.02),
             ]
         elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
             # PiecewisePower2: (m1, m2, b, log_xt)
@@ -150,15 +151,16 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
                             AorM_min, AorM_max, 
                             AorM_ind, parameter_sets)
     
-        tier123_dir = 'mtrue/allstars/1_10AU'
+        tier123_dir = 'mtrue/allstars/2D_test'
         plot_hard_coded_on_histogram(tier123_dir, 
                                          nstars, comp_names_inROI, model_func_name,
                                          ROIsamples_dict, ROIweights_dict,
                                          dlogAorM, fine_list_AorM, fine_compl_AorM,
                                          AorM_min, AorM_max, 
                                          AorM_ind, stack_dim, parameter_sets, m_unit='jupiter')
-        import pdb; pdb.set_trace()    
+        #import pdb; pdb.set_trace()    
     ##############################################################################
+    #import pdb; pdb.set_trace()
     loglik_args = (
         nstars,
         comp_names_inROI,
@@ -176,7 +178,25 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     
     
     # ---- Initialize walkers ----
-    theta_init = initial_params(model_func_name, fine_list_AorM, dlogAorM)
+    
+    if model_func_name=='pp1':
+        import pickle
+        summ_path = 'mtrue/allstars/2D_test/saved_dicts/summary_dict.npz'
+        dd = dict(np.load(summ_path))
+        m_lims = dd['a_m_lims_pairs'][:,1,:][::2]
+        log_centers = np.log10((m_lims[:,0]*m_lims[:,1])**0.5)
+        OR_vals = dd['mode_ORD'].reshape(7,2)[:,1]
+    
+        OR_errs_high = dd['hdi_high_ORD'].reshape(7,2)[:,1] - OR_vals
+        OR_errs_low = OR_vals - dd['hdi_low_ORD'].reshape(7,2)[:,1]
+        OR_errs = 0.5*(OR_errs_high+OR_errs_low)
+        try:
+            theta_init = np.polyfit(log_centers, OR_vals, w=1/OR_errs, deg=1)
+        except:
+            import pdb; pdb.set_trace()
+
+    else:
+        theta_init = initial_params(model_func_name, fine_list_AorM, dlogAorM)
     
 
     # Small Gaussian ball around initial guess
@@ -283,6 +303,7 @@ def loglik_power(theta, nstars, comp_names, model_func,
     logprior = log_prior(model_func_name, theta, AorM_min, AorM_max)
     if np.isinf(logprior):
         return -np.inf 
+
     
     
     fine_lam_list = model_func(theta, fine_list_AorM)
@@ -310,7 +331,10 @@ def loglik_power(theta, nstars, comp_names, model_func,
     for comp_name in comp_names:
         
         # First, unpack the companion posterior
+        #try:
         comp_sample_array = ROIsamples_dict[comp_name]
+        #except:
+        #    import pdb; pdb.set_trace()
         AorM_list = comp_sample_array[AorM_ind]
         cop_list = comp_sample_array[5] # completeness (from single map) over prior
         
@@ -504,7 +528,7 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
         # Start with random slopes, then find possible b
         slope = np.random.uniform(-0.5, 0.5)
         
-        ## First, all lam should be non-negative
+        ## First, all lam should be non-negative. y=mx+b, y=0 --> b=-mx 
         if slope<=0:
             min_b = -slope*maxL
         else:
@@ -643,6 +667,8 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         extreme_val2 = PiecewisePower1(theta, AorM_max)
         
         if extreme_val1<0 or extreme_val2<0:
+            return -np.inf
+        if extreme_val1>1 or extreme_val2>1:
             return -np.inf
         
         return 0.0
@@ -813,7 +839,7 @@ def plot_hard_coded_on_histogram(tier123_dir,
     summary_dict = dict(np.load(path_to_summary))
     
     # Get the ORD histogram with fig/ax objects
-    plot_save_dir = os.path.join(load_save_dir, 'plots/')
+    plot_save_dir = os.path.join(tier123_dir, 'plots/')
     os.makedirs(plot_save_dir, exist_ok=True)
     
     tier1_dir = tier123_dir.split('/')[0]
