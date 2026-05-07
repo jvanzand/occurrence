@@ -13,14 +13,17 @@ import matplotlib.pyplot as plt
 
 def mcmc(nstars, comp_names_inROI, model_func_name,
          ROIsamples_dict, ROIweights_dict,
-         a_lims, m_lims, stack_dim,
+         a_lims, m_lims,
          interp_fn_avg,
-             nwalkers=50,
-             nsteps=5000,
-             burnin=1000,
-             parallel=False,
-             save_path="chains.npz",
-             random_seed=None):
+         stack_dim,
+         stack_ind=0,
+         nwalkers=50,
+         nsteps=5000,
+         burnin=1000,
+         parallel=False,
+         save_path="chains.npz",
+         random_seed=None,
+         hist_summary_path=None):
     """
     Run MCMC to compute occurrence rates
     Start by extracting and manipulating ingredients 
@@ -180,18 +183,33 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     # ---- Initialize walkers ----
     
     if model_func_name=='pp1':
-        import pickle
-        summ_path = 'mtrue/allstars/2D_test/saved_dicts/summary_dict.npz'
-        dd = dict(np.load(summ_path))
-        m_lims = dd['a_m_lims_pairs'][:,1,:][::2]
-        log_centers = np.log10((m_lims[:,0]*m_lims[:,1])**0.5)
-        OR_vals = dd['mode_ORD'].reshape(7,2)[:,1]
-    
-        OR_errs_high = dd['hdi_high_ORD'].reshape(7,2)[:,1] - OR_vals
-        OR_errs_low = OR_vals - dd['hdi_low_ORD'].reshape(7,2)[:,1]
-        OR_errs = 0.5*(OR_errs_high+OR_errs_low)
+        #import pdb; pdb.set_trace()
+        
+        hist_summary_dict = dict(np.load(hist_summary_path))
+        
+        
+        if stack_dim=='a':
+            stack_nbins = hist_summary_dict['n_abins']
+            nonstack_nbins = hist_summary_dict['n_mbins']
+            nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,1][::stack_nbins]
+        elif stack_dim=='m':
+            nonstack_lims = a_lims
+        
+        
         try:
-            theta_init = np.polyfit(log_centers, OR_vals, w=1/OR_errs, deg=1)
+            log_centers = np.log10((nonstack_edges[:,0]*nonstack_edges[:,1])**0.5)
+        except:
+            import pdb; pdb.set_trace()
+            
+        ORD_vals = hist_summary_dict['mode_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
+        ORD_errs_high = hist_summary_dict['hdi_high_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind] - ORD_vals
+        ORD_errs_low = ORD_vals - hist_summary_dict['hdi_low_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
+        
+
+        ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
+        try:
+            theta_init = np.polyfit(log_centers, ORD_vals, w=1/ORD_errs, deg=1)
+            print("GOING PP1: ", theta_init)
         except:
             import pdb; pdb.set_trace()
 
@@ -200,7 +218,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     
 
     # Small Gaussian ball around initial guess
-    pos = theta_init + 1e-3 * np.random.randn(nwalkers, ndim)
+    pos = theta_init + 1e-2 * np.random.randn(nwalkers, ndim)
 
     
     # Clip starting values according to which model_func is being used
@@ -251,25 +269,6 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     )
 
     return sampler
-
-def logprob_delete(theta, nstars, comp_names, model_func,
-           model_func_name,
-           ROIsamples_dict, ROIweights_dict, 
-           dlogAorM, fine_list_AorM, fine_compl_AorM,
-           AorM_min, AorM_max, AorM_ind):
-    """
-    Log-posterior (log-likelihood+log-prior)
-    """
-    logprior = log_prior(model_func_name, theta, AorM_min, AorM_max)
-    if np.isinf(logprior):
-        return -np.inf 
-    else:
-        loglik = loglik_power(theta, nstars, comp_names, model_func,
-                              model_func_name,
-                              ROIsamples_dict, ROIweights_dict, 
-                              dlogAorM, fine_list_AorM, fine_compl_AorM,
-                              AorM_min, AorM_max, AorM_ind)
-    return logprior+loglik
     
 
 def loglik_power(theta, nstars, comp_names, model_func,
@@ -310,7 +309,8 @@ def loglik_power(theta, nstars, comp_names, model_func,
     rate_map = np.sum(fine_lam_list*dlogAorM) # Occurrence rate is rate density "integrated" over a or m space
 
     if (rate_map<0) | (rate_map>1): # If occurrence is <0 or >1, reject
-        print(f"Params are {theta[0]:.1f}, {theta[1]:.1f}, rate_map is {rate_map:.4f}, dw is {dlogAorM:.3f}")
+        theta_str = ", ".join(f"{t:.1f}" for t in theta)
+        print(f"{model_func_name}, Params are {theta_str}, rate_map is {rate_map:.4f}, dw is {dlogAorM:.3f}")
         return -np.inf
 
     ## First get the pre-factor e^(-Lambda). We want log-likelihood, so just -Lambda
@@ -703,6 +703,8 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         
         if C1<0 or C2<0:
             return -np.inf
+        if C1>1 or C2>1:
+            return -np.inf
         # Check that bp is within bounds
         if bp<AorM_min or bp>AorM_max:
             return -np.inf
@@ -714,6 +716,8 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         bp1, bp2 = 10**(log_bp1), 10**(log_bp2)
         
         if C1<0 or C2<0:
+            return -np.inf
+        if C1>1 or C2>1:
             return -np.inf
         # Check that bp1 < bp2
         if bp1 >= bp2:

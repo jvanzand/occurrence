@@ -375,12 +375,6 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
              **stack_SampleDict_dict) # like comp_samples but for 2D
     np.savez(saved_dicts_dir+'stack_ROIWeightDict_dict.npz', 
              **stack_ROIWeightDict_dict) # like comp_ROIweights but for 2D
-    #my_dict = {"alpha": [1, 2, 3], "beta": [4, 5], "gamma": [6, 7, 8]}
-    #dict_dict = {'d1':my_dict, 'd2':my_dict, 'd3':my_dict}
-    #np.savez(saved_dicts_dir+'test_dict.npz', **dict_dict)
-    
-    #test_dict = np.load(os.path.join(saved_dicts_dir, 'test_dict.npz'))
-    #import pdb; pdb.set_trace()
 
     return
     
@@ -467,8 +461,6 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
         stack_ROIWeightDict = stack_ROIWeightDict_dict[f'stack_ROIWeightDict_{stack_dim}{bin_idx}'].item()
         
         comp_names_in_stack_ROI = list(stack_SampleDict.keys())
-        #test_dict = dict(np.load(os.path.join(tier123_dir, 'saved_dicts/test_dict.npz'), allow_pickle=True))
-        #import pdb; pdb.set_trace()
         
         
         stack_min = stack_edges[bin_idx]
@@ -491,9 +483,11 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
             chain_path = saved_chains_dir + f'chains_{model_name}{bin_suffix}.npz'
             mcmc_power.mcmc(nstars, comp_names_in_stack_ROI, model_name,
                             stack_SampleDict, stack_ROIWeightDict,
-                            alims, mlims, stack_dim, interp_fn_avg,
+                            alims, mlims, interp_fn_avg, stack_dim,
+                            stack_ind=bin_idx,
                             save_path=chain_path, parallel=parallel,
-                            nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
+                            nwalkers=nwalkers, nsteps=nsteps, burnin=burnin,
+                            hist_summary_path=os.path.join(tier123_dir, 'saved_dicts/summary_dict.npz'))
         
     return
     
@@ -572,7 +566,7 @@ def bic_compare(tier1_dir, tier2_dir, tier3_dir,
     return
     
 def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
-                       nstars, run_models, plot_model,
+                       nstars, run_models, plot_models,
                        stack_dim, m_unit='earth', 
                        hist_title=''):
     """
@@ -650,7 +644,7 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
                                          thin=10, max_samples=50000)
         
                             
-    if plot_model is None:
+    if plot_models is None:
         pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
                                 rate_type='ORD', title=hist_title,
                                 savepath=plot_save_dir+f'occurrence_ORD.png', figsize=(6, 4))
@@ -660,7 +654,8 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
         fig, ax = pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
                                           rate_type='ORD', title=hist_title, return_fig_ax=True,
                                           savepath=None, figsize=(6, 4))
-        pu.plot_power(fig, ax, plot_model, save_path=plot_save_dir+f'occurrence_ORD.png', stack_dim=stack_dim)
+        #import pdb; pdb.set_trace()
+        pu.plot_power(fig, ax, plot_models, save_path=plot_save_dir+f'occurrence_ORD.png', stack_dim=stack_dim)
     
     return
     

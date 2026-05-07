@@ -609,7 +609,7 @@ def make_bar_vals(x_pairs, y_vals):
 
 
 
-def plot_power(fig, ax, model_func_name, save_path, stack_dim='m', n_draws=50):
+def plot_power(fig, ax, model_func_names, save_path, stack_dim='m', n_draws=50):
     """
     Over-plot the max-likelihood model AND random posterior draws.
 
@@ -627,21 +627,10 @@ def plot_power(fig, ax, model_func_name, save_path, stack_dim='m', n_draws=50):
     plot_dir = os.path.dirname(save_path)
     load_dir = os.path.dirname(plot_dir)
     
-    # --- Model selection ---
-    if model_func_name == 'pp1':
-        model_func = mcmc_power.PiecewisePower1
-        param_names = ['slope', 'intercept']
-    elif model_func_name == 'pp2':
-        model_func = mcmc_power.PiecewisePower2
-        param_names = ['m1', 'm2', 'b', 'log_xt']
-    elif model_func_name == 'step':
-        model_func = mcmc_power.step
-        param_names = ['C1', 'C2', 'log_bp']
-    elif model_func_name == 'escarpment':
-        model_func = mcmc_power.escarpment
-        param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
-    else:
-        raise NotImplementedError
+    cmap = plt.get_cmap('tab10')
+    colors = [cmap(i) for i in range(len(model_func_names))]
+    color_map = dict(zip(model_func_names, colors))
+    
     
     # --- Handle axes ---
     if isinstance(ax, np.ndarray):
@@ -665,51 +654,73 @@ def plot_power(fig, ax, model_func_name, save_path, stack_dim='m', n_draws=50):
         #bin_idx = n_bins - 1 - ax_idx
         bin_idx = ax_idx
         
-        # Load the chain file for this bin
-        chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}_bin{bin_idx}.npz')
+        if ax_idx==0:
+            xlim = ax_i.get_xlim()
+        #import pdb; pdb.set_trace()
+        for model_func_name in model_func_names:
         
-        # Check if file exists; if not, try the old naming scheme (single bin)
-        if not os.path.exists(chain_file):
-            chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}.npz')
+            # --- Model selection ---
+            if model_func_name == 'pp1':
+                model_func = mcmc_power.PiecewisePower1
+                param_names = ['slope', 'intercept']
+            elif model_func_name == 'pp2':
+                model_func = mcmc_power.PiecewisePower2
+                param_names = ['m1', 'm2', 'b', 'log_xt']
+            elif model_func_name == 'step':
+                model_func = mcmc_power.step
+                param_names = ['C1', 'C2', 'log_bp']
+            elif model_func_name == 'escarpment':
+                model_func = mcmc_power.escarpment
+                param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
+            else:
+                raise NotImplementedError
         
-        data = np.load(chain_file)
-        flat_chains = data['flat_chains']
-        flat_log_probs = data['flat_log_probs']
+            plot_clr = color_map[model_func_name]
+        
+            # Load the chain file for this bin
+            chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}_bin{bin_idx}.npz')
+        
+            # Check if file exists; if not, try the old naming scheme (single bin)
+            if not os.path.exists(chain_file):
+                chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}.npz')
+        
+            data = np.load(chain_file)
+            flat_chains = data['flat_chains']
+            flat_log_probs = data['flat_log_probs']
 
-        # --- Max likelihood ---
-        ml_idx = np.argmax(flat_log_probs)
-        ml_params = flat_chains[ml_idx]
-        print(f"BIN {bin_idx} MAX LIKE:", ", ".join(f"{p:.3f}" for p in ml_params))
+            # --- Max likelihood ---
+            ml_idx = np.argmax(flat_log_probs)
+            ml_params = flat_chains[ml_idx]
+            print(f"BIN {bin_idx} MAX LIKE:", ", ".join(f"{p:.3f}" for p in ml_params))
 
-        # --- Random posterior draws ---
-        rng = np.random.default_rng()
-        draw_indices = rng.choice(len(flat_chains), size=n_draws, replace=False)
-        posterior_draws = flat_chains[draw_indices]
+            # --- Random posterior draws ---
+            rng = np.random.default_rng()
+            draw_indices = rng.choice(len(flat_chains), size=n_draws, replace=False)
+            posterior_draws = flat_chains[draw_indices]
 
-        xlim = ax_i.get_xlim()
-        x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
+            x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
 
-        # Plot posterior draws (underneath)
-        for theta in posterior_draws:
-            y_draw = model_func(theta, x_model)
+            # Plot posterior draws (underneath)
+            for theta in posterior_draws:
+                y_draw = model_func(theta, x_model)
+                ax_i.plot(
+                    x_model, y_draw,
+                    color=plot_clr,
+                    alpha=0.08,        # low opacity
+                    linewidth=1.0,
+                    zorder=10
+                )
+
+            # Plot max-likelihood (on top)
+            y_model = model_func(ml_params, x_model)
             ax_i.plot(
-                x_model, y_draw,
-                color='red',
-                alpha=0.08,        # low opacity
-                linewidth=1.0,
-                zorder=10
+                x_model, y_model,
+                color=plot_clr,
+                linewidth=2.5,
+                label=f'{model_func_name}: '+f', '.join([f"{name}={val:.2f}" for name, val in zip(param_names, ml_params)]),
+                #label=f'{model_func_name} ML',
+                zorder=100
             )
-
-        # Plot max-likelihood (on top)
-        y_model = model_func(ml_params, x_model)
-        ax_i.plot(
-            x_model, y_model,
-            color='red',
-            linewidth=2.5,
-            label=f', '.join([f"{name}={val:7.3f}" for name, val in zip(param_names, ml_params)]),
-            #label=f'{model_func_name} ML',
-            zorder=100
-        )
 
         ax_i.legend(loc='upper right', fontsize=10)
 
