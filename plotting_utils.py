@@ -698,7 +698,7 @@ def plot_power(fig, ax, model_func_names, save_path, stack_dim='m', n_draws=50):
             draw_indices = rng.choice(len(flat_chains), size=n_draws, replace=False)
             posterior_draws = flat_chains[draw_indices]
 
-            x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
+            x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 2000)
 
             # Plot posterior draws (underneath)
             for theta in posterior_draws:

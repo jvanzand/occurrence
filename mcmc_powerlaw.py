@@ -7,14 +7,10 @@ import emcee
 import multiprocessing as mp
 from scipy.optimize import minimize
 
-
-## Delete
 import matplotlib.pyplot as plt
 
-def mcmc(nstars, comp_names_inROI, model_func_name,
-         ROIsamples_dict, ROIweights_dict,
-         a_lims, m_lims,
-         interp_fn_avg,
+def mcmc(hist_dict,
+         model_func_name,
          stack_dim,
          stack_ind=0,
          nwalkers=50,
@@ -23,7 +19,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
          parallel=False,
          save_path="chains.npz",
          random_seed=None,
-         hist_summary_path=None):
+         ):
     """
     Run MCMC to compute occurrence rates
     Start by extracting and manipulating ingredients 
@@ -71,158 +67,23 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
         ndim = 4
         
     
-    ## Need a 2D grid to calculate e^-Lambda integral
-    fine_grid_num = 101
-    fine_a_spacing = (a_lims[1]/a_lims[0])**(1/(fine_grid_num-1))
-    fine_m_spacing = (m_lims[1]/m_lims[0])**(1/(fine_grid_num-1))
-    fine_amin, fine_amax = a_lims[0]*(fine_a_spacing**0.5), a_lims[1]/(fine_a_spacing**0.5)
-    fine_mmin, fine_mmax = m_lims[0]*(fine_m_spacing**0.5), m_lims[1]/(fine_m_spacing**0.5)
-    
-    fine_alist = np.logspace(np.log10(fine_amin), np.log10(fine_amax), fine_grid_num-1) # a values, log-spaced
-    fine_mlist = np.logspace(np.log10(fine_mmin), np.log10(fine_mmax), fine_grid_num-1) # m values, log-spaced
-
-    A, M = np.meshgrid(fine_alist, fine_mlist, indexing='xy')
-    fine_compl_grid = interp_fn_avg((A, M)) # Completeness grid w/ shape (len(fine_mlist), len(fine_alist))
-    
-    ## Make "a" histograms and stack for different "m" bins
-    if stack_dim=='m':
-        fine_compl_AorM = np.mean(fine_compl_grid, axis=0) # Average over the "m" dimension
-        fine_list_AorM = fine_alist
-        AorM_min, AorM_max = a_lims[0], a_lims[-1]
-        AorM_ind = 0
-        
-    ## Make "m" histograms and stack for different "a" bins  
-    elif stack_dim=='a':
-        fine_compl_AorM = np.mean(fine_compl_grid, axis=1) # Average over the "a" dimension
-        fine_list_AorM = fine_mlist
-        AorM_min, AorM_max = m_lims[0], m_lims[-1]
-        AorM_ind = 1
-    
-    #total_min = np.min([np.min(ROIsamples_dict[comp_name][1]) for comp_name in ROIsamples_dict.keys()])
-    #total_max = np.max([np.max(ROIsamples_dict[comp_name][1]) for comp_name in ROIsamples_dict.keys()])
-    #import pdb; pdb.set_trace()
-
-    dlogAorM = np.log10(fine_list_AorM[1]/fine_list_AorM[0]) # log-spacing of a or m grid
-    
-    ############################################################################
-    diagnostic=False
-    if diagnostic:
-        if model_func_name == 'pp1':
-            # PiecewisePower1: (slope, intercept)
-            parameter_sets = [
-                (-0.062, 0.119),
-                (-0.091, 0.173),
-                (-0.02, 0.05),
-                (-0.01, 0.04),
-                (-0.005, 0.03),
-                (-0.002, 0.02),
-            ]
-        elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
-            # PiecewisePower2: (m1, m2, b, log_xt)
-            parameter_sets = [
-                (-0.15, 0.0, 0.20, 1.2),
-                (-0.1, 0.05, 0.15, 0.7),
-                (-0.15, 0.1, 0.12, 0.5),
-                (-0.05, 0.15, 0.18, 0.6),
-                (-0.2, 0.05, 0.10, 0.4),
-            ]
-        elif model_func_name == 'step':
-            # step: (C1, C2, log_bp)
-            parameter_sets = [
-                (0.25, 0.05, 1.0),
-                (0.20, 0.08, 0.8),
-                (0.30, 0.10, 1.2),
-                (0.22, 0.06, 0.9),
-                (0.28, 0.09, 1.1),
-            ]
-        elif model_func_name == 'escarpment':
-            # escarpment: (C1, C2, bp1, bp2)
-            parameter_sets = [
-                (0.25, 0.05, 3.0, 10.0),
-                (0.20, 0.08, 2.5, 8.0),
-                (0.30, 0.10, 3.5, 12.0),
-                (0.22, 0.06, 3.2, 9.0),
-                (0.28, 0.09, 2.8, 11.0),
-            ]
-        else:
-            # Fallback - should not reach here in normal usage
-            parameter_sets = []
-        #PiecewisePower2([-1, 0.0, 0.15, 1.5], fine_list_AorM)
-        print_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
-                            ROIsamples_dict, ROIweights_dict, dlogAorM, 
-                            fine_list_AorM, fine_compl_AorM, 
-                            AorM_min, AorM_max, 
-                            AorM_ind, parameter_sets)
-    
-        tier123_dir = 'mtrue/allstars/2D_test'
-        plot_hard_coded_on_histogram(tier123_dir, 
-                                         nstars, comp_names_inROI, model_func_name,
-                                         ROIsamples_dict, ROIweights_dict,
-                                         dlogAorM, fine_list_AorM, fine_compl_AorM,
-                                         AorM_min, AorM_max, 
-                                         AorM_ind, stack_dim, parameter_sets, m_unit='jupiter')
-        #import pdb; pdb.set_trace()    
+    ############################################################################ 
     ##############################################################################
     #import pdb; pdb.set_trace()
+    
     loglik_args = (
-        nstars,
-        comp_names_inROI,
+        hist_dict,
         model_func,
-        model_func_name,
-        ROIsamples_dict,
-        ROIweights_dict,
-        dlogAorM,
-        fine_list_AorM,
-        fine_compl_AorM,
-        AorM_min,
-        AorM_max,
-        AorM_ind,
+        model_func_name
     )
     
     
     # ---- Initialize walkers ----
-    
-    if model_func_name=='pp1':
-        #import pdb; pdb.set_trace()
-        
-        hist_summary_dict = dict(np.load(hist_summary_path))
-        
-        
-        if stack_dim=='a':
-            stack_nbins = hist_summary_dict['n_abins']
-            nonstack_nbins = hist_summary_dict['n_mbins']
-            nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,1][::stack_nbins]
-        elif stack_dim=='m':
-            nonstack_lims = a_lims
-        
-        
-        try:
-            log_centers = np.log10((nonstack_edges[:,0]*nonstack_edges[:,1])**0.5)
-        except:
-            import pdb; pdb.set_trace()
-            
-        ORD_vals = hist_summary_dict['mode_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
-        ORD_errs_high = hist_summary_dict['hdi_high_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind] - ORD_vals
-        ORD_errs_low = ORD_vals - hist_summary_dict['hdi_low_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
-        
-
-        ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
-        try:
-            theta_init = np.polyfit(log_centers, ORD_vals, w=1/ORD_errs, deg=1)
-            print("GOING PP1: ", theta_init)
-        except:
-            import pdb; pdb.set_trace()
-
-    else:
-        theta_init = initial_params(model_func_name, fine_list_AorM, dlogAorM)
+    theta_init = initial_params(model_func_name, hist_dict)
     
 
     # Small Gaussian ball around initial guess
-    pos = theta_init + 1e-2 * np.random.randn(nwalkers, ndim)
-
-    
-    # Clip starting values according to which model_func is being used
-    #pos = np.clip(pos, 1e-6, None)
+    pos = theta_init + 1e-3 * np.random.randn(nwalkers, ndim)
     
     
     # ---- Set up sampler ----
@@ -271,11 +132,7 @@ def mcmc(nstars, comp_names_inROI, model_func_name,
     return sampler
     
 
-def loglik_power(theta, nstars, comp_names, model_func,
-           model_func_name,
-           ROIsamples_dict, ROIweights_dict, 
-           dlogAorM, fine_list_AorM, fine_compl_AorM,
-           AorM_min, AorM_max, AorM_ind):
+def loglik_power(theta, hist_dict, model_func, model_name):
     """
     Log likelihood of a 1D piecewise power law in
     the M dimension, given a catalog of companion
@@ -299,65 +156,16 @@ def loglik_power(theta, nstars, comp_names, model_func,
         fine_compl_grid (array of floats): Compl value at each M value on
             on a fine grid between min_M and max_M. Compls are from avg. map
     """
-    logprior = log_prior(model_func_name, theta, AorM_min, AorM_max)
+    
+    AorM_min, AorM_max = hist_dict['lims']
+    logprior = log_prior(model_name, theta, AorM_min, AorM_max)
     if np.isinf(logprior):
         return -np.inf 
 
+    model_ORD_vals = model_func(theta, hist_dict['bin_centers'])
     
-    
-    fine_lam_list = model_func(theta, fine_list_AorM)
-    rate_map = np.sum(fine_lam_list*dlogAorM) # Occurrence rate is rate density "integrated" over a or m space
-
-    if (rate_map<0) | (rate_map>1): # If occurrence is <0 or >1, reject
-        theta_str = ", ".join(f"{t:.1f}" for t in theta)
-        print(f"{model_func_name}, Params are {theta_str}, rate_map is {rate_map:.4f}, dw is {dlogAorM:.3f}")
-        return -np.inf
-
-    ## First get the pre-factor e^(-Lambda). We want log-likelihood, so just -Lambda
-    ## Lambda is Nstars * integral(lambda*completeness)
-    ## Basic Riemann sum of lambda*compl over M space: sum (lambda(M)*compl(M)*dlogM) over the grid
-    integral = np.sum(fine_lam_list*fine_compl_AorM*dlogAorM)
-    Lambda = nstars*integral
-
-    ## Now the product term
-    ## For every companion, do three things:
-    ##     First, determine the lambda value at that companion's M value using the escarpment function
-    ##     Second, retrieve a list of the completeness/prior values for each of that companion's samples
-    ##         (NOTE: these cannot be pre-averaged as in the histogram case because each one will
-    ##                be multiplied by a different lambda value)
-    ##     Third, retrieve the companion's weight (ie, fraction of samples that fall in the ROI)
-
-    log_prod_term = 0 
-    for comp_name in comp_names:
-        
-        # First, unpack the companion posterior
-        #try:
-        comp_sample_array = ROIsamples_dict[comp_name]
-        #except:
-        #    import pdb; pdb.set_trace()
-        AorM_list = comp_sample_array[AorM_ind]
-        cop_list = comp_sample_array[5] # completeness (from single map) over prior
-        
-        ROIweight = ROIweights_dict[comp_name]
-        
-        lam_list = model_func(theta, AorM_list)
-        if any(lam_list<0):
-            neg_ind = np.argmin(lam_list)
-            
-            print(f"{comp_name}, {theta[0]:.2f}, {theta[1]:.2f}, {lam_list[neg_ind]}, {AorM_list[neg_ind]}")
-            return -np.inf
-            #log_term=0
-        #else:
-            ## Calculate this companion's contribution to the likelihood
-        mean = np.mean(lam_list*cop_list)
-        log_term = ROIweight * np.log(mean+1e-300) # Ensure non-zero for stability
-            
-        log_prod_term += log_term
-        if np.isnan(log_term):
-            import pdb; pdb.set_trace()
-
-
-    loglik = -Lambda + log_prod_term
+    ## Uses AVERAGE of upper/lower uncertainties. Consider using split gaussian in the future
+    loglik = -np.sum((hist_dict['ORD_vals']-model_ORD_vals)**2 / (2*hist_dict['ORD_errs']**2))
 
     if np.isnan(loglik):
         import pdb; pdb.set_trace()
@@ -508,7 +316,7 @@ def escarpment(theta, AorM):
     return lam
 
 
-def initial_params(model_func_name, AorM_list, dlogAorM):
+def initial_params(model_func_name, hist_dict):
     """
     Generate initial parameter guesses
     for a model function. Initial guesses
@@ -516,127 +324,59 @@ def initial_params(model_func_name, AorM_list, dlogAorM):
     the function is identified by ndim
     """
     
+    bin_centers = hist_dict['bin_centers']
+    min_xval, max_xval = hist_dict['lims']
+    ORD_vals = hist_dict['ORD_vals']
+    
     if model_func_name=='pp1':
         
-        log_AorM = np.log10(AorM_list)
-        minL, maxL = np.min(log_AorM), np.max(log_AorM)
-        
-        ## pp1 takes the form lam(x) = r*log10(x)+b
-        ## From that, we can derive constraints to ensure
-        ## lam>0 for all lam, and integral(lam*dlogAorM)<1
-        
-        # Start with random slopes, then find possible b
-        slope = np.random.uniform(-0.5, 0.5)
-        
-        ## First, all lam should be non-negative. y=mx+b, y=0 --> b=-mx 
-        if slope<=0:
-            min_b = -slope*maxL
-        else:
-            min_b = -slope*minL
-        
-        ## Second, the integral should be <1
-        S1 = np.sum(log_AorM*dlogAorM)
-        S2 = dlogAorM*len(AorM_list)
-        max_b = (1-slope*S1)/S2
-        
-        b = np.random.uniform(min_b, max_b)
+        ## pp1 takes the form lam(x) = slope*log10(x)+b
+        ## Initial guess: line connecting the extreme points
+        slope = (ORD_vals[-1]-ORD_vals[0])/(np.log10(max_xval)-np.log10(min_xval)) # slope = delta_y/delta_x
+        b = ORD_vals[-1]-slope*np.log10(max_xval) # b = y1-slope*x1
+        #import pdb; pdb.set_trace()
         
         p0 = [slope, b]
-        #p0 = [-0.1, 0.23]
-        #import pdb; pdb.set_trace()
-        print(f"Initial params: slope={slope:.3f} and b={b:.3f} from {min_b:.2f}-{max_b:.2f} ")
+
+        print(f"Initial params: slope={slope:.3f} and b={b:.3f}")
     
     elif model_func_name=='pp2':
-        logA = np.log10(AorM_list)
-        minL, maxL = np.min(logA), np.max(logA)
+        #import pdb; pdb.set_trace()
+        
+        ## Idea: divide the histogram down the middle and fit a line to each half
+        center_val = (min_xval*max_xval)**0.5
+        center_bin_ind = np.argmin(abs(bin_centers/center_val-1)) # Find the nearest bin center in log space
+        center_ORD = ORD_vals[center_bin_ind]
+        
+        slope1 = (center_ORD-ORD_vals[0])/(np.log10(center_val)-np.log10(min_xval)) # slope = delta_y/delta_x
+        b1 = center_ORD-slope1*np.log10(center_val) # b = y1-slope*x1
+        
+        slope2 = (ORD_vals[-1]-center_ORD)/(np.log10(max_xval)-np.log10(center_val)) # slope = delta_y/delta_x
+        #b2 = ORD_vals[-1]-slope1*np.log10(max_xval) # b = y1-slope*x1
+        log_breakpoint = np.log10(center_val)
 
-        for _ in range(1000):
-
-            # slopes: modest range
-            m1 = np.random.uniform(-1.0, 0)
-            m2 = np.random.uniform(m1, 0) # m2 should be larger (less negative) than m1
-
-            # transition in log space
-            log_xt = np.random.uniform(minL, maxL)
-
-            # intercept: start near small values
-            b = np.random.uniform(0.0, 0.4)
-
-            theta = [m1, m2, b, log_xt]
-
-            lam = PiecewisePower2(theta, AorM_list)
-
-            rate_map = np.sum(lam * dlogAorM)
-            
-            cond1 = 0 < rate_map < 1
-            cond2 = m1<=0
-            cond3 = m2<=0
-            if cond1 and cond2 and cond3:
-                print(f"Initial params: m1={m1:.3f}, m2={m2:.3f}, b={b:.3f}, log_xt={log_xt:.3f},")
-                return theta
-
-        raise RuntimeError("Failed to find valid initial params")
+        p0 = [slope1, slope2, b1, log_breakpoint]
     
     elif model_func_name=='step':
-        minA, maxA = np.min(AorM_list), np.max(AorM_list)
         
-        for _ in range(1000):
-            # C1 and C2: occurrence rates (should be positive and their integral < 1)
-            C1 = np.random.uniform(0.0, 1.0)
-            C2 = np.random.uniform(0.0, C1) # C2<C1
-            
-            # Breakpoint in log space
-            log_bp = np.random.uniform(np.log10(minA), np.log10(maxA))
-            
-            theta = [C1, C2, log_bp]
-            lam = step(theta, AorM_list)
-            
-            rate_map = np.sum(lam * dlogAorM)
-            
-            # Check conditions
-            cond1 = 0 < rate_map < 1
-            cond2 = C1 > 0
-            cond3 = C2 > 0
-            if cond1 and cond2 and cond3:
-                print(f"Initial params: C1={C1:.3f}, C2={C2:.3f}, log_bp={log_bp:.3f}")
-                return theta
+        center_val = (min_xval*max_xval)**0.5
+        log_breakpoint = np.log10(center_val)
+        C1 = min(ORD_vals)
+        C2 = max(ORD_vals)
         
-        raise RuntimeError("Failed to find valid initial params for step")
+        
+        p0 = [C1, C2, log_breakpoint]
     
     elif model_func_name=='escarpment':
-        minA, maxA = np.min(AorM_list), np.max(AorM_list)
         
-        for _ in range(1000):
-            # C1 and C2: occurrence rates (should be positive and their integral < 1)
-            C1 = np.random.uniform(0.0, 1.0)
-            C2 = np.random.uniform(0.0, C1) # C2<C1
+        C1 = min(ORD_vals)
+        C2 = max(ORD_vals)
             
-            # Breakpoints in linear space
-            #bp1 = np.random.uniform(minA, maxA)
-            #bp2 = np.random.uniform(bp1, maxA) # bp2>bp1
+        # Breakpoints in log space
+        log_bp1 = np.random.uniform(np.log10(min_xval), np.log10(max_xval))
+        log_bp2 = np.random.uniform(log_bp1, np.log10(max_xval))
             
-            # Breakpoints in log space
-            log_bp1 = np.random.uniform(np.log10(minA), np.log10(maxA))
-            log_bp2 = np.random.uniform(log_bp1, np.log10(maxA))
-            
-            # Ensure bp1 < bp2
-            #if bp1 >= bp2:
-            #    continue
-            
-            theta = [C1, C2, log_bp1, log_bp2]
-            lam = escarpment(theta, AorM_list)
-            
-            rate_map = np.sum(lam * dlogAorM)
-            
-            # Check conditions
-            cond1 = 0 < rate_map < 1
-            cond2 = C1 > 0
-            cond3 = C2 > 0
-            if cond1 and cond2 and cond3:
-                print(f"Initial params: C1={C1:.3f}, C2={C2:.3f}, log_bp1={log_bp1:.3f}, log_bp2={log_bp2:.3f}")
-                return theta
-        
-        raise RuntimeError("Failed to find valid initial params for escarpment")
+        p0 = [C1, C2, log_bp1, log_bp2]
     
     return p0
 
@@ -679,23 +419,22 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         
         extreme_val1 = PiecewisePower2(theta, AorM_min)
         extreme_val2 = PiecewisePower2(theta, AorM_max)
-        extreme_val3 = PiecewisePower2(theta, 10**(log_xt))
+        extreme_val3 = PiecewisePower2(theta, 10**log_xt)
         
-        #if m1>0 or m2>0:
-        #    print("PRIOR FAIL 1")
-        #    return -np.inf
-        #if m1<-1 or m2<-1:
-        #    return -np.inf
-        #if m1>m2:
-        #    return -np.inf
+
         if extreme_val1<0 or extreme_val2<0 or extreme_val3<0:
-            print("PRIOR FAIL 2")
             return -np.inf
         if log_xt<minL or log_xt>maxL:
-            print("PRIOR FAIL 3")
+            return -np.inf
+        if abs(m1)>100 or abs(m2)>100:
             return -np.inf
         
-        return 0.0
+        # Log-uniform prior on absolute value of slopes
+        logprior=0
+        logprior -= np.log(abs(m1))
+        logprior -= np.log(abs(m2))
+        
+        return logprior
     
     elif model_func_name == 'step':
         C1, C2, log_bp = theta
@@ -791,123 +530,9 @@ def print_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name
     return
 
 
-def plot_hard_coded_on_histogram(tier123_dir,
-                                 nstars, comp_names_inROI, model_func_name,
-                                 ROIsamples_dict, ROIweights_dict,
-                                 dlogAorM, fine_list_AorM, fine_compl_AorM,
-                                 AorM_min, AorM_max,
-                                 AorM_ind, stack_dim, parameter_sets, m_unit='earth'):
-    """
-    Plot hard-coded power law parameter sets overlaid on the ORD histogram.
-    
-    Arguments:
-        tier1_dir, tier2_dir, tier3_dir (str): Directory paths for loading data
-        nstars (int): Number of host stars
-        comp_names_inROI (list of str): Companion names in region of interest
-        model_func : The model function (e.g., PiecewisePower1, PiecewisePower2)
-        model_func_name (str): Name of model function for label formatting
-        ROIsamples_dict (dict): ROI sample data for companions
-        ROIweights_dict (dict): ROI weights for companions
-        dlogAorM (float): Log spacing of parameter grid
-        fine_list_AorM (array): Fine grid of parameter values
-        fine_compl_AorM (array): Fine grid of completeness values
-        AorM_ind (int): Index indicating dimension (0 for 'a', 1 for 'm')
-        stack_dim (str): Stack dimension ('a' or 'm')
-        parameter_sets (list): List of parameter tuples to evaluate
-        m_unit (str): Mass unit ('earth' or 'jupiter')
-    """
-                                 
-    from occurrence import plotting_utils as pu
-    
-    
-    ## Choose ndim and function based on name
-    if model_func_name=='pp1':
-        model_func = PiecewisePower1
-        param_names = ['slope', 'int']
-    elif model_func_name=='pp2':
-        model_func = PiecewisePower2
-        param_names = ['m1', 'm2', 'b', 'log_xt']
-    elif model_func_name=='step':
-        model_func = step
-        param_names = ['C1', 'C2', 'log_bp']
-    elif model_func_name=='escarpment':
-        model_func = escarpment
-        param_names = ['C1', 'C2', 'bp1', 'bp2']
-    
-    
-    # Color palette for distinct colors
-    colors = ['red', 'blue', 'green', 'orange', 'purple']
-    
-    # Load summary dict for histogram
-    path_to_summary = os.path.join(tier123_dir, 'saved_dicts/summary_dict.npz')
-    summary_dict = dict(np.load(path_to_summary))
-    
-    # Get the ORD histogram with fig/ax objects
-    plot_save_dir = os.path.join(tier123_dir, 'plots/')
-    os.makedirs(plot_save_dir, exist_ok=True)
-    
-    tier1_dir = tier123_dir.split('/')[0]
-    fig, ax = pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
-                                      rate_type='ORD', title='', return_fig_ax=True,
-                                      savepath=None, figsize=(6, 4))
-    
-    # Handle both single and stacked axes
-    if isinstance(ax, np.ndarray):
-        axs_list = ax.flatten().tolist()
-    elif isinstance(ax, list):
-        axs_list = ax
-    else:
-        axs_list = [ax]
-    
-    # Calculate likelihoods and prepare labels for each parameter set
-    param_info = []
-    for theta in parameter_sets:
-        loglik = loglik_power(theta, nstars, comp_names_inROI, model_func,
-                              model_func_name,
-                              ROIsamples_dict, ROIweights_dict,
-                              dlogAorM, fine_list_AorM, fine_compl_AorM,
-                              AorM_min, AorM_max,
-                              AorM_ind)
-        param_info.append((theta, loglik))
-    
-    # Plot each parameter set on the histogram
-    for ax_i in axs_list:
-        xlim = ax_i.get_xlim()
-        x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
-        
-        for (theta, loglik), color in zip(param_info, colors):
-            y_model = model_func(theta, x_model)
-            
-            # Build label with parameter values and likelihood
-            param_str = ', '.join([f"{name}={val:.2f}" for name, val in zip(param_names, theta)])
-            label = f'{param_str}, lnL={loglik:.1f}'
-            
-            ax_i.plot(
-                x_model, y_model,
-                color=color,
-                linewidth=2.0,
-                label=label,
-                zorder=90
-            )
-        
-        ax_i.legend(loc='upper right', fontsize=8)
 
-    
-    # Save the figure
-    save_path = os.path.join(plot_save_dir, 'occurrence_ORD_hard_coded.png')
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(save_path, dpi=300)
-    plt.close(fig)
-    
-    print(f"\nHard-coded parameter sets plotted on histogram:")
-    print(f"Saved to: {save_path}\n")
-    
-    return
-
-
-def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI, 
-                  ROIsamples_dict, ROIweights_dict,
-                  a_lims, m_lims, stack_dim, interp_fn_avg, mass_unit, bin_idx=None):
+def calculate_bic(tier123_dir, model_func_name,
+                  hist_dict, nstars):
     """
     Calculate the Bayesian Information Criterion (BIC) for a power law model.
     
@@ -935,128 +560,66 @@ def calculate_bic(tier123_dir, model_func_name_list, nstars, comp_names_inROI,
         loglik_max (float): Maximum likelihood value
         params_mle (ndarray): Parameters at maximum likelihood
     """
-    model_bic_params = []
     
-    for model_func_name in model_func_name_list:
-        # Determine model function and parameter count
-        if model_func_name == 'pp1':
-            model_func = PiecewisePower1
-            ndim = 2
-        elif model_func_name == 'pp2':
-            model_func = PiecewisePower2
-            ndim = 4
-        elif model_func_name == 'step':
-            model_func = step
-            ndim = 3
-        elif model_func_name == 'escarpment':
-            model_func = escarpment
-            ndim = 4
-        elif model_func_name == 'hist':
-            continue
-        else:
-            raise ValueError(f"Unknown model: {model_func_name}")
-    
-        # Set up the fine grid for likelihood calculation
-        fine_grid_num = 101
-        fine_a_spacing = (a_lims[1]/a_lims[0])**(1/(fine_grid_num-1))
-        fine_m_spacing = (m_lims[1]/m_lims[0])**(1/(fine_grid_num-1))
-        fine_amin, fine_amax = a_lims[0]*(fine_a_spacing**0.5), a_lims[1]/(fine_a_spacing**0.5)
-        fine_mmin, fine_mmax = m_lims[0]*(fine_m_spacing**0.5), m_lims[1]/(fine_m_spacing**0.5)
-    
-        fine_alist = np.logspace(np.log10(fine_amin), np.log10(fine_amax), fine_grid_num-1)
-        fine_mlist = np.logspace(np.log10(fine_mmin), np.log10(fine_mmax), fine_grid_num-1)
-
-        A, M = np.meshgrid(fine_alist, fine_mlist, indexing='xy')
-        fine_compl_grid = interp_fn_avg((A, M))
-    
-        # Set up the appropriate stacking dimension
-        if stack_dim == 'm':
-            fine_compl_AorM = np.mean(fine_compl_grid, axis=0)
-            fine_list_AorM = fine_alist
-            AorM_min, AorM_max = a_lims[0], a_lims[-1]
-            AorM_ind = 0
-        elif stack_dim == 'a':
-            fine_compl_AorM = np.mean(fine_compl_grid, axis=1)
-            fine_list_AorM = fine_mlist
-            AorM_min, AorM_max = m_lims[0], m_lims[-1]
-            AorM_ind = 1
-    
-        dlogAorM = np.log10(fine_list_AorM[1]/fine_list_AorM[0])
-    
-        # Load the MCMC chains to get initial parameter guess from max likelihood
-        if bin_idx is not None:
-            path_to_chains = os.path.join(tier123_dir, f'saved_chains/chains_{model_func_name}_bin{bin_idx}.npz')
-        else:
-            path_to_chains = os.path.join(tier123_dir, f'saved_chains/chains_{model_func_name}.npz')
+    # Determine model function and parameter count
+    if model_func_name == 'pp1':
+        model_func = PiecewisePower1
+        ndim = 2
+    elif model_func_name == 'pp2':
+        model_func = PiecewisePower2
+        ndim = 4
+    elif model_func_name == 'step':
+        model_func = step
+        ndim = 3
+    elif model_func_name == 'escarpment':
+        model_func = escarpment
+        ndim = 4
+    else:
+        raise ValueError(f"Cannot calculate BIC for model: {model_func_name}")
         
-        # Try to load; if bin file doesn't exist, fall back to single-bin file
-        if not os.path.exists(path_to_chains) and bin_idx is not None:
-            path_to_chains = os.path.join(tier123_dir, f'saved_chains/chains_{model_func_name}.npz')
-        
-        data = np.load(path_to_chains)
-        flat_chains = data['flat_chains']
-        flat_log_probs = data['flat_log_probs']
+
+    # Set up arguments for optimization
+    optim_args = (
+        hist_dict,
+        model_func,
+        model_func_name,
+    )
     
-        # Find parameters with maximum likelihood
-        ml_idx = np.argmax(flat_log_probs)
-        theta_init = flat_chains[ml_idx]
+    theta_init = initial_params(model_func_name, hist_dict)
+    # Optimize using Powell algorithm (derivative-free)
+    # Note: we minimize negative log-likelihood (maximize likelihood)
+    result = minimize(
+        lambda theta: -loglik_power(theta, *optim_args),
+        theta_init,
+        method='Powell',
+        options={'maxiter': 5000}
+    )
+
+    params_mle = result.x
+    loglik_max = -result.fun  # Convert back to log-likelihood
+
+    # Calculate BIC
+    # BIC = k * ln(n) - 2 * ln(L)
+    # where L is the likelihood (not log-likelihood), so:
+    # BIC = k * ln(n) - 2 * ln(L) = k * ln(n) - 2 * loglik
+    bic = ndim * np.log(nstars) - 2 * loglik_max
+
+    print(f"\n" + "="*70)
+    print(f"BIC Calculation for {model_func_name.upper()}")
+    print("="*70)
+    print(f"Number of parameters (k): {ndim}")
+    print(f"Number of data points (n): {nstars}")
+    print(f"Maximum log-likelihood: {loglik_max:.4f}")
+    print(f"BIC = {ndim} * ln({nstars}) - 2 * {loglik_max:.4f}")
+    print(f"BIC = {bic:.4f}")
+    print(f"Parameters at MLE: {params_mle}")
+    print("="*70 + "\n")
     
-        # Set up arguments for optimization
-        optim_args = (
-            nstars,
-            comp_names_inROI,
-            model_func,
-            model_func_name,
-            ROIsamples_dict,
-            ROIweights_dict,
-            dlogAorM,
-            fine_list_AorM,
-            fine_compl_AorM,
-            AorM_min,
-            AorM_max,
-            AorM_ind,
-        )
-    
-        # Optimize using Powell algorithm (derivative-free)
-        # Note: we minimize negative log-likelihood (maximize likelihood)
-        result = minimize(
-            lambda theta: -loglik_power(theta, *optim_args),
-            theta_init,
-            method='Powell',
-            options={'maxiter': 5000}
-        )
-    
-        params_mle = result.x
-        loglik_max = -result.fun  # Convert back to log-likelihood
-    
-        # Calculate BIC
-        # BIC = k * ln(n) - 2 * ln(L)
-        # where L is the likelihood (not log-likelihood), so:
-        # BIC = k * ln(n) - 2 * ln(L) = k * ln(n) - 2 * loglik
-        bic = ndim * np.log(nstars) - 2 * loglik_max
-    
-        print(f"\n" + "="*70)
-        print(f"BIC Calculation for {model_func_name.upper()}")
-        print("="*70)
-        print(f"Number of parameters (k): {ndim}")
-        print(f"Number of data points (n): {nstars}")
-        print(f"Maximum log-likelihood: {loglik_max:.4f}")
-        print(f"BIC = {ndim} * ln({nstars}) - 2 * {loglik_max:.4f}")
-        print(f"BIC = {bic:.4f}")
-        print(f"Parameters at MLE: {params_mle}")
-        print("="*70 + "\n")
-        
-        model_bic_params.append([model_func_name, bic, loglik_max, params_mle])
-    
-    
-    plot_bics_on_histogram(tier123_dir, model_bic_params, stack_dim=stack_dim, m_unit=mass_unit)
-    
-    
-    return
+    return model_func_name, bic, loglik_max, params_mle
 
 
 
-def plot_bics_on_histogram(tier123_dir, bic_params_list, stack_dim, m_unit):
+def plot_bics_on_histogram(tier123_dir, model_bic_dict, stack_dim, m_unit):
     """
     Plot max-likelihood models (from BIC calculations) overlaid on the ORD histogram.
     
@@ -1097,48 +660,53 @@ def plot_bics_on_histogram(tier123_dir, bic_params_list, stack_dim, m_unit):
     colors = ['red', 'blue', 'green', 'orange', 'purple']
     #import pdb; pdb.set_trace()
     # Iterate through the models and plot each max-likelihood model
-    for idx, bic_param_set in enumerate(bic_params_list):
+    
+    for idx, key in enumerate(model_bic_dict.keys()):
+        ax_idx = int(key.split('_')[-1])
+        ax_i = axs_list[ax_idx]
         
-        model_func_name, bic, loglik_max, params_mle = bic_param_set
+        model_func_name, bic, loglik_max, params_mle = model_bic_dict[key]
         
         # Choose model function and parameter names based on model
         if model_func_name == 'pp1':
             model_func = PiecewisePower1
             param_names = ['slope', 'intercept']
+            color='RoyalBlue'
         elif model_func_name == 'pp2':
             model_func = PiecewisePower2
             param_names = ['m1', 'm2', 'b', 'log_xt']
+            color='tomato'
         elif model_func_name == 'step':
             model_func = step
             param_names = ['C1', 'C2', 'log_bp']
+            color='goldenrod'
         elif model_func_name == 'escarpment':
             model_func = escarpment
             param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
+            color='forestgreen'
         else:
-            param_names = [f'p{i}' for i in range(len(params_mle))]
+            raise ValueError(f"Unknown model: {model_func_name}")
         
-        # Get color for this model (cycle through color palette if needed)
-        color = colors[idx % len(colors)]
         
-        # Plot this model on each axis
-        for ax_idx, ax_i in enumerate(axs_list):
-            xlim = xlim_list[ax_idx]
-            x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
-            
-            # Calculate model predictions
-            y_model = model_func(params_mle, x_model)
-            
-            # Build label with model name, parameters, BIC, and likelihood
-            param_str = ', '.join([f"{name}={val:.2f}" for name, val in zip(param_names, params_mle)])
-            label = f'{model_func_name} ({param_str}): BIC={bic:.1f}, lnL={loglik_max:.1f}'
-            
-            ax_i.plot(
-                x_model, y_model,
-                color=color,
-                linewidth=2.5,
-                label=label,
-                zorder=90
-            )
+        
+        ## Plot model on the desired axes
+        xlim = xlim_list[ax_idx]
+        x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 200)
+        
+        # Calculate model predictions
+        y_model = model_func(params_mle, x_model)
+        
+        # Build label with model name, parameters, BIC, and likelihood
+        param_str = ', '.join([f"{name}={val:.2f}" for name, val in zip(param_names, params_mle)])
+        label = f'{model_func_name} ({param_str}): BIC={bic:.1f}, lnL={loglik_max:.1f}'
+        
+        ax_i.plot(
+            x_model, y_model,
+            color=color,
+            linewidth=2.5,
+            label=label,
+            zorder=90
+        )
         
         # Update legend after each model is added
         for ax_i in axs_list:

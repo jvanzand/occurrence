@@ -115,7 +115,7 @@ def prep_maps(tier1_dir,
     maps_save_path = os.path.join(tier1_dir, maps_save_label)
     maps_ycol = f"inj_{tier1_dir}"
     
-    ncores = 30#mp.cpu_count()
+    ncores = np.min([mp.cpu_count(), 30])
     args_list = [
         (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit)
         for _, row in star_df.iterrows()
@@ -417,62 +417,41 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
     summary_stats(tier1_dir, tier2_dir, tier3_dir, verbose=False)
     
     
-    ## Handle piecewise power models together because they follow the same pattern
-    interp_fn_avg_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
-    interp_fn_avg = pickle.load(open(interp_fn_avg_path, 'rb'))
-    ROIweights_path = os.path.join(tier123_dir, 'saved_dicts/comp_ROIweights.npz')
-    ROIweights_dict = dict(np.load(ROIweights_path))
-    
     pp_model_names = [model_name for model_name in run_models if 'hist' not in model_name]
     
-    # Determine which dimension to iterate over (stack_dim) and which to use full range (other dim)
-    if stack_dim == 'a':
-        # Iterate over SMA bins, use full mass range
-        stack_edges = a_edges
-        full_edges = m_edges
-        full_lims = m_edges[0], m_edges[-1]
-        dim_label = 'a'
-        #dim_short = 'a'
-    elif stack_dim == 'm':
-        # Iterate over mass bins, use full SMA range
-        stack_edges = m_edges
-        full_edges = a_edges
-        full_lims = a_edges[0], a_edges[-1]
-        dim_label = 'm'
-        #dim_short = 'm'
+    ## Retrieve summary info for histogram
+    hist_summary_path = os.path.join(tier123_dir, 'saved_dicts/summary_dict.npz')
+    hist_summary_dict = dict(np.load(hist_summary_path))
+        
+    if stack_dim=='a':
+        stack_nbins = hist_summary_dict['n_abins']
+        nonstack_nbins = hist_summary_dict['n_mbins']
+        nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,1][::stack_nbins]
+    
+    elif stack_dim=='m':
+        stack_nbins = hist_summary_dict['n_mbins']
+        nonstack_nbins = hist_summary_dict['n_mbins']
+        nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,0][::stack_nbins]
+
     else:
         raise ValueError(f"stack_dim must be 'a' or 'm', got {stack_dim}")
     
-    ## Load dictionaries with samples/weights specific to stack bins
-    stack_SampleDict_dict_path = os.path.join(tier123_dir, 'saved_dicts/stack_SampleDict_dict.npz')
-    stack_ROIWeightDict_dict_path = os.path.join(tier123_dir, 'saved_dicts/stack_ROIWeightDict_dict.npz')
-    
-    stack_SampleDict_dict = dict(np.load(stack_SampleDict_dict_path, allow_pickle=True))
-    stack_ROIWeightDict_dict = dict(np.load(stack_ROIWeightDict_dict_path, allow_pickle=True))
+    nonstack_bin_centers = (nonstack_edges[:,1]*nonstack_edges[:,0])**0.5
     
     # Iterate over bins in the stack_dim direction
-    n_stack_bins = len(stack_edges) - 1
-    for bin_idx in range(n_stack_bins):
-        #if bin_idx==1:
-        #    continue
-        
-        ## Select correct dictionaries for the current stack bin
-        stack_SampleDict = stack_SampleDict_dict[f'stack_SampleDict_{stack_dim}{bin_idx}'].item()
-        stack_ROIWeightDict = stack_ROIWeightDict_dict[f'stack_ROIWeightDict_{stack_dim}{bin_idx}'].item()
-        
-        comp_names_in_stack_ROI = list(stack_SampleDict.keys())
-        
-        
-        stack_min = stack_edges[bin_idx]
-        stack_max = stack_edges[bin_idx + 1]
-        
-        # Create bin limits for this iteration
-        if stack_dim == 'a':
-            alims = (stack_min, stack_max)
-            mlims = full_lims
-        else:  # stack_dim == 'm'
-            alims = full_lims
-            mlims = (stack_min, stack_max)
+    for bin_idx in range(stack_nbins):
+            
+            
+        ORD_vals = hist_summary_dict['mode_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
+        ORD_errs_high = hist_summary_dict['hdi_high_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind] - ORD_vals
+        ORD_errs_low = ORD_vals - hist_summary_dict['hdi_low_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
+        ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
+    
+        hist_dict = {'bin_centers':nonstack_bin_centers,
+                     'lims':(nonstack_edges[0][0], nonstack_edges[-1][-1]),
+                     'ORD_vals':ORD_vals,
+                     'ORD_errs':ORD_errs,
+                     }
         
         # Create distinguishing filename suffix for this bin
         # Format: _binX or _a0p1-1AU or _m1-2Mj, etc.
@@ -481,13 +460,11 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
         for model_name in pp_model_names:
         
             chain_path = saved_chains_dir + f'chains_{model_name}{bin_suffix}.npz'
-            mcmc_power.mcmc(nstars, comp_names_in_stack_ROI, model_name,
-                            stack_SampleDict, stack_ROIWeightDict,
-                            alims, mlims, interp_fn_avg, stack_dim,
+            mcmc_power.mcmc(hist_dict, model_name,
+                            stack_dim,
                             stack_ind=bin_idx,
                             save_path=chain_path, parallel=parallel,
-                            nwalkers=nwalkers, nsteps=nsteps, burnin=burnin,
-                            hist_summary_path=os.path.join(tier123_dir, 'saved_dicts/summary_dict.npz'))
+                            nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
         
     return
     
@@ -513,8 +490,7 @@ def summary_stats(tier1_dir, tier2_dir, tier3_dir, verbose=False):
     return
     
 def bic_compare(tier1_dir, tier2_dir, tier3_dir, 
-                run_models, nstars, a_edges, m_edges, 
-                stack_dim, mass_unit):
+                nstars, run_models, stack_dim, m_unit):
     """
     Calculate BIC for provided models and 
     plot max-likelihood params over pre-calculated histogram
@@ -522,46 +498,47 @@ def bic_compare(tier1_dir, tier2_dir, tier3_dir,
     
     tier123_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
     
-    samples_inROI_path = os.path.join(tier123_dir, 'saved_dicts/sampled_post_prior_compl_lam_inROI.npz')
-    samples_inROI = dict(np.load(samples_inROI_path))
-    comp_names_inROI = list(samples_inROI.keys())
+    ## Retrieve summary info for histogram
+    hist_summary_path = os.path.join(tier123_dir, 'saved_dicts/summary_dict.npz')
+    hist_summary_dict = dict(np.load(hist_summary_path))
+        
+    if stack_dim=='a':
+        stack_nbins = hist_summary_dict['n_abins']
+        nonstack_nbins = hist_summary_dict['n_mbins']
+        nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,1][::stack_nbins]
     
-    interp_fn_avg_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
-    interp_fn_avg = pickle.load(open(interp_fn_avg_path, 'rb'))
-    ROIweights_path = os.path.join(tier123_dir, 'saved_dicts/comp_ROIweights.npz')
-    ROIweights_dict = dict(np.load(ROIweights_path))
-    
-    # Determine which dimension to iterate over (stack_dim) and which to use full range (other dim)
-    if stack_dim == 'a':
-        # Iterate over SMA bins, use full mass range
-        stack_edges = a_edges
-        full_edges = m_edges
-        full_lims = m_edges[0], m_edges[-1]
-    elif stack_dim == 'm':
-        # Iterate over mass bins, use full SMA range
-        stack_edges = m_edges
-        full_edges = a_edges
-        full_lims = a_edges[0], a_edges[-1]
+    elif stack_dim=='m':
+        stack_nbins = hist_summary_dict['n_mbins']
+        nonstack_nbins = hist_summary_dict['n_mbins']
+        nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,0][::stack_nbins]
     else:
         raise ValueError(f"stack_dim must be 'a' or 'm', got {stack_dim}")
+
+    nonstack_bin_centers = (nonstack_edges[:,1]*nonstack_edges[:,0])**0.5
     
-    # Iterate over bins in the stack_dim direction
-    n_stack_bins = len(stack_edges) - 1
-    for bin_idx in range(n_stack_bins):
-        stack_min = stack_edges[bin_idx]
-        stack_max = stack_edges[bin_idx + 1]
+    model_bic_output_dict = {}
+    for stack_ind in range(stack_nbins):
         
-        # Create bin limits for this iteration
-        if stack_dim == 'a':
-            alims = (stack_min, stack_max)
-            mlims = full_lims
-        else:  # stack_dim == 'm'
-            alims = full_lims
-            mlims = (stack_min, stack_max)
+        ORD_vals = hist_summary_dict['mode_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
+        ORD_errs_high = hist_summary_dict['hdi_high_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind] - ORD_vals
+        ORD_errs_low = ORD_vals - hist_summary_dict['hdi_low_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
+        ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
+    
+        hist_dict = {'bin_centers':nonstack_bin_centers,
+                     'lims':(nonstack_edges[0][0], nonstack_edges[-1][-1]),
+                     'ORD_vals':ORD_vals,
+                     'ORD_errs':ORD_errs,
+                     }
         
-        mcmc_power.calculate_bic(tier123_dir, run_models, 
-                                 nstars, comp_names_inROI, samples_inROI, ROIweights_dict,
-                                 alims, mlims, stack_dim, interp_fn_avg, mass_unit, bin_idx=bin_idx)
+        for model_name in run_models:
+            if model_name=='hist':
+                continue
+            single_model_bic_outputs = mcmc_power.calculate_bic(tier123_dir, model_name, hist_dict, nstars)
+            
+            dict_key = f"bic_outputs_{model_name}_{stack_ind}"
+            model_bic_output_dict[dict_key] = single_model_bic_outputs
+
+    mcmc_power.plot_bics_on_histogram(tier123_dir, model_bic_output_dict, stack_dim, m_unit)
     
     return
     

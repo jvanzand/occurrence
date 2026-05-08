@@ -144,8 +144,11 @@ def include_post_completeness(sampled_post_dict, star_df,
         
         comp_list = star_df.query(f"star_name=='{star_name}'").comp_list.iloc[0] # List of comp names
         ## For every companion in the system, calculate the average compl over all stars AND the single-system compl
-        #import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         for comp_name in comp_list:
+            
+            if comp_name not in sampled_post_dict.keys():
+                continue
             
             a_m_prior = sampled_post_dict[comp_name] # Already-saved values, which we will append to
             
