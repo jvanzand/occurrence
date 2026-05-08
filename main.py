@@ -441,10 +441,9 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
     # Iterate over bins in the stack_dim direction
     for bin_idx in range(stack_nbins):
             
-            
-        ORD_vals = hist_summary_dict['mode_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
-        ORD_errs_high = hist_summary_dict['hdi_high_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind] - ORD_vals
-        ORD_errs_low = ORD_vals - hist_summary_dict['hdi_low_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
+        ORD_vals = hist_summary_dict['mode_ORD'].reshape(nonstack_nbins,-1)[:,bin_idx]
+        ORD_errs_high = hist_summary_dict['hdi_high_ORD'].reshape(nonstack_nbins,-1)[:,bin_idx] - ORD_vals
+        ORD_errs_low = ORD_vals - hist_summary_dict['hdi_low_ORD'].reshape(nonstack_nbins,-1)[:,bin_idx]
         ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
     
         hist_dict = {'bin_centers':nonstack_bin_centers,
@@ -565,8 +564,10 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
     ## Start with corner plot for histogram model ##
     cell_dict = dict(np.load(path_to_cell_dict)) # Includes bin sizes and avg_cell_compls
     save_corner_dir = os.path.join(plot_save_dir, 'corner_hist.png')
-    pu.plot_corner_from_file(path_to_hist_chains, plot_model='hist', outpath=save_corner_dir,
-                             thin=10, max_samples=50000)
+
+    if not os.path.exists(save_corner_dir): # Corners are costly to plot; skip if exists
+        pu.plot_corner_from_file(path_to_hist_chains, plot_model='hist', outpath=save_corner_dir,
+                                 thin=10, max_samples=50000)
 
 
 
@@ -616,7 +617,7 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
                 path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}.npz')
             save_corner_dir = os.path.join(plot_save_dir, f'corner_{model_name}_bin{bin_idx}.png')
             
-            if os.path.exists(path_to_power_chains):
+            if os.path.exists(path_to_power_chains) and not os.path.exists(save_corner_dir):
                 pu.plot_corner_from_file(path_to_power_chains, plot_model=model_name, outpath=save_corner_dir,
                                          thin=10, max_samples=50000)
         
