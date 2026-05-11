@@ -609,7 +609,7 @@ def make_bar_vals(x_pairs, y_vals):
 
 
 
-def plot_power(fig, ax, model_func_names, save_path, stack_dim='m', n_draws=50):
+def plot_power(fig, ax, model_func_names, color_dict, save_path, stack_dim='m', n_draws=50):
     """
     Over-plot the max-likelihood model AND random posterior draws.
 
@@ -626,10 +626,6 @@ def plot_power(fig, ax, model_func_names, save_path, stack_dim='m', n_draws=50):
 
     plot_dir = os.path.dirname(save_path)
     load_dir = os.path.dirname(plot_dir)
-    
-    cmap = plt.get_cmap('tab10')
-    colors = [cmap(i) for i in range(len(model_func_names))]
-    color_map = dict(zip(model_func_names, colors))
     
     
     # --- Handle axes ---
@@ -675,7 +671,7 @@ def plot_power(fig, ax, model_func_names, save_path, stack_dim='m', n_draws=50):
             else:
                 raise NotImplementedError
         
-            plot_clr = color_map[model_func_name]
+            plot_clr = color_dict[model_func_name]
         
             # Load the chain file for this bin
             chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}_bin{bin_idx}.npz')

@@ -532,7 +532,7 @@ def print_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name
 
 
 def calculate_bic(tier123_dir, model_func_name,
-                  hist_dict, nstars):
+                  hist_dict):
     """
     Calculate the Bayesian Information Criterion (BIC) for a power law model.
     
@@ -597,20 +597,20 @@ def calculate_bic(tier123_dir, model_func_name,
 
     params_mle = result.x
     loglik_max = -result.fun  # Convert back to log-likelihood
-
+    n_data = len(hist_dict['bin_centers']) # Number of histogram bins is the number of "data points"
     # Calculate BIC
     # BIC = k * ln(n) - 2 * ln(L)
     # where L is the likelihood (not log-likelihood), so:
     # BIC = k * ln(n) - 2 * ln(L) = k * ln(n) - 2 * loglik
-    bic = ndim * np.log(nstars) - 2 * loglik_max
+    bic = ndim * np.log(n_data) - 2 * loglik_max
 
     print(f"\n" + "="*70)
     print(f"BIC Calculation for {model_func_name.upper()}")
     print("="*70)
     print(f"Number of parameters (k): {ndim}")
-    print(f"Number of data points (n): {nstars}")
+    print(f"Number of data points (n): {n_data}")
     print(f"Maximum log-likelihood: {loglik_max:.4f}")
-    print(f"BIC = {ndim} * ln({nstars}) - 2 * {loglik_max:.4f}")
+    print(f"BIC = {ndim} * ln({n_data}) - 2 * {loglik_max:.4f}")
     print(f"BIC = {bic:.4f}")
     print(f"Parameters at MLE: {params_mle}")
     print("="*70 + "\n")
@@ -619,7 +619,8 @@ def calculate_bic(tier123_dir, model_func_name,
 
 
 
-def plot_bics_on_histogram(tier123_dir, model_bic_dict, stack_dim, m_unit):
+def plot_bics_on_histogram(tier123_dir, model_bic_dict, color_dict,
+                           stack_dim, m_unit):
     """
     Plot max-likelihood models (from BIC calculations) overlaid on the ORD histogram.
     
@@ -656,9 +657,6 @@ def plot_bics_on_histogram(tier123_dir, model_bic_dict, stack_dim, m_unit):
         axs_list = [ax]
     xlim_list = [ax_i.get_xlim() for ax_i in axs_list]
         
-    # Color palette for distinct colors
-    colors = ['red', 'blue', 'green', 'orange', 'purple']
-    #import pdb; pdb.set_trace()
     # Iterate through the models and plot each max-likelihood model
     
     for idx, key in enumerate(model_bic_dict.keys()):
@@ -671,23 +669,19 @@ def plot_bics_on_histogram(tier123_dir, model_bic_dict, stack_dim, m_unit):
         if model_func_name == 'pp1':
             model_func = PiecewisePower1
             param_names = ['slope', 'intercept']
-            color='RoyalBlue'
         elif model_func_name == 'pp2':
             model_func = PiecewisePower2
             param_names = ['m1', 'm2', 'b', 'log_xt']
-            color='tomato'
         elif model_func_name == 'step':
             model_func = step
             param_names = ['C1', 'C2', 'log_bp']
-            color='goldenrod'
         elif model_func_name == 'escarpment':
             model_func = escarpment
             param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
-            color='forestgreen'
         else:
             raise ValueError(f"Unknown model: {model_func_name}")
         
-        
+        color = color_dict[model_func_name]
         
         ## Plot model on the desired axes
         xlim = xlim_list[ax_idx]

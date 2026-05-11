@@ -19,6 +19,12 @@ from occurrence import mcmc_powerlaw as mcmc_power
 
 from occurrence.completeness_utils import _process_single_star
 
+model_color_dict = {'pp1':'RoyalBlue',
+                    'pp2':'tomato',
+                    'step':'goldenrod',
+                    'escarpment':'forestgreen'}
+
+
 def prep_recoveries_files(tier1_dir,
                           star_df,
                           #convert_recs_msini_mtrue=False,
@@ -267,13 +273,7 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
         array_ind = 1
     stack_bin_limit_pairs = [[stack_edges[i], stack_edges[i+1]] for i in range(len(stack_edges)-1)]
     
-    ## This is a dict of dicts. For each companion, place the samples in the corresponding dict
-    stack_SampleDict_dict = {f'stack_SampleDict_{stack_dim}{i}':{} for i in range(len(stack_bin_limit_pairs))}
-    stack_ROIWeightDict_dict = {f'stack_ROIWeightDict_{stack_dim}{i}':{} 
-                                for i in range(len(stack_bin_limit_pairs))}
-    
         
-
     # 4th element of catalog_dict is average completeness/prior (for testing)
     # 5th element of catalog_dict is single system completeness/prior (most correct)
     compl_ind = 4 if compl_type=='avg' else 5 if compl_type=='single' else 5 # Default to 5 anyway
@@ -303,27 +303,6 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
         a_m_prior_compl_lam = np.vstack([a_m_prior_compl, lam_inds]) # Append lambda inds to array
         a_m_prior_compl_lam = a_m_prior_compl_lam[:, lamROI_mask] # Remove any vals outside ROI
         comp_samples[comp_name] = a_m_prior_compl_lam # New dict entry is the updated array
-        
-        #import pdb; pdb.set_trace()
-        
-        ## Loop to make extra dicts for 2D case.
-        ## Treat each bin in the stack dimension as its own sub-ROI and save 1 dict of samples and 1 of weights
-        for i, stack_bin_limit_pair in enumerate(stack_bin_limit_pairs):
-            min_val, max_val = stack_bin_limit_pair
-            stack_mask = (min_val<a_m_prior_compl_lam[1]) & (a_m_prior_compl_lam[1]<max_val)
-            
-            
-            weight_in_stack_bin = stack_mask.sum()/len(lam_inds) # Fraction of samples that fall in this stack bin
-            
-            if weight_in_stack_bin==0: # Skip companions that fall outside stack bin.
-                print(f"Skipping comp {comp_name} in stack bin {stack_bin_limit_pair}")
-                continue
-            stack_ROIWeightDict_dict[f'stack_ROIWeightDict_{stack_dim}{i}'][comp_name] = weight_in_stack_bin
-            
-            a_m_prior_compl_lam_stack = a_m_prior_compl_lam[:, stack_mask]
-            stack_SampleDict_dict[f'stack_SampleDict_{stack_dim}{i}'][comp_name] = a_m_prior_compl_lam_stack
-            
-        #import pdb; pdb.set_trace()
         
         
         ## Now fill in bin_lam_dict, which has useful info for exp^-Lambda term of histogram likelihood
@@ -369,12 +348,7 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
     np.savez(saved_dicts_dir+'sampled_post_prior_compl_lam_inROI.npz', **comp_samples) # Sample-specific info
     np.savez(saved_dicts_dir+'comp_ROIweights.npz', **comp_ROIweights) # Fraction of each comp that falls in ROI
     np.savez(saved_dicts_dir+'bin_lam_dict.npz', **bin_lam_dict) # Pre-computed info for hist likelihood
-    
 
-    np.savez(saved_dicts_dir+'stack_SampleDict_dict.npz', 
-             **stack_SampleDict_dict) # like comp_samples but for 2D
-    np.savez(saved_dicts_dir+'stack_ROIWeightDict_dict.npz', 
-             **stack_ROIWeightDict_dict) # like comp_ROIweights but for 2D
 
     return
     
@@ -489,7 +463,7 @@ def summary_stats(tier1_dir, tier2_dir, tier3_dir, verbose=False):
     return
     
 def bic_compare(tier1_dir, tier2_dir, tier3_dir, 
-                nstars, run_models, stack_dim, m_unit):
+                run_models, stack_dim, m_unit):
     """
     Calculate BIC for provided models and 
     plot max-likelihood params over pre-calculated histogram
@@ -532,12 +506,13 @@ def bic_compare(tier1_dir, tier2_dir, tier3_dir,
         for model_name in run_models:
             if model_name=='hist':
                 continue
-            single_model_bic_outputs = mcmc_power.calculate_bic(tier123_dir, model_name, hist_dict, nstars)
+            single_model_bic_outputs = mcmc_power.calculate_bic(tier123_dir, model_name, hist_dict)
             
             dict_key = f"bic_outputs_{model_name}_{stack_ind}"
             model_bic_output_dict[dict_key] = single_model_bic_outputs
 
-    mcmc_power.plot_bics_on_histogram(tier123_dir, model_bic_output_dict, stack_dim, m_unit)
+    mcmc_power.plot_bics_on_histogram(tier123_dir, model_bic_output_dict, 
+                                      model_color_dict, stack_dim, m_unit)
     
     return
     
@@ -633,7 +608,9 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
                                           rate_type='ORD', title=hist_title, return_fig_ax=True,
                                           savepath=None, figsize=(6, 4))
         #import pdb; pdb.set_trace()
-        pu.plot_power(fig, ax, plot_models, save_path=plot_save_dir+f'occurrence_ORD.png', stack_dim=stack_dim)
+        pu.plot_power(fig, ax, plot_models, model_color_dict,
+                      save_path=plot_save_dir+f'occurrence_ORD.png', 
+                      stack_dim=stack_dim)
     
     return
     
