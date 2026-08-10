@@ -377,8 +377,8 @@ def cell_completeness(xlims, ylims, interp_fn):
     """
     import warnings
 
-    sub_xgrid = np.linspace(xlims[0], xlims[1], 100)
-    sub_ygrid = np.linspace(ylims[0], ylims[1], 100)
+    sub_xgrid = np.logspace(np.log10(xlims[0]), np.log10(xlims[1]), 100)
+    sub_ygrid = np.logspace(np.log10(ylims[0]), np.log10(ylims[1]), 100)
     
 
     counter = 0

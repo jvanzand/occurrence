@@ -59,12 +59,20 @@ def mcmc(hist_dict,
     elif model_func_name=='pp2':
         model_func = PiecewisePower2
         ndim = 4
+    elif model_func_name=='logG':
+        model_func = log_gaussian
+        ndim = 3
     elif model_func_name=='step':
         model_func = step
         ndim = 3
     elif model_func_name=='escarpment':
         model_func = escarpment
         ndim = 4
+    elif model_func_name == 'bpl':
+        model_func = brokenpowerlaw
+        ndim = 4
+    else:
+        raise ValueError(f"Unknown model: {model_func_name}")
         
     
     ############################################################################ 
@@ -134,7 +142,7 @@ def mcmc(hist_dict,
 
 def loglik_power(theta, hist_dict, model_func, model_name):
     """
-    Log likelihood of a 1D piecewise power law in
+    Log likelihood of a parametric model in
     the M dimension, given a catalog of companion
     posterior draws in the form of a dictionary
 
@@ -164,14 +172,30 @@ def loglik_power(theta, hist_dict, model_func, model_name):
 
     model_ORD_vals = model_func(theta, hist_dict['bin_centers'])
     
-    ## Uses AVERAGE of upper/lower uncertainties. Consider using split gaussian in the future
-    loglik = -np.sum((hist_dict['ORD_vals']-model_ORD_vals)**2 / (2*hist_dict['ORD_errs']**2))
+    # Implement the split gaussian here. If model value is greater, 
+    ## use the upper error. If it's lower, use lower err.
+    selected_errs = np.where(model_ORD_vals > hist_dict['ORD_vals'],
+                             hist_dict['ORD_errs_high'],
+                             hist_dict['ORD_errs_low'],
+                            )
+
+    loglik = -np.sum((hist_dict['ORD_vals']-model_ORD_vals)**2 / (2*selected_errs**2))
 
     if np.isnan(loglik):
+        print("mcmc_powerlaw.py: Error encountered in loglik", model_ORD_vals, selected_errs)
         import pdb; pdb.set_trace()
 
     return loglik
     
+
+def FlatLine(theta, AorM):
+    """
+    Simple constant function for DBIC calc
+    """
+    
+    return theta[0]
+    
+
 
 def PiecewisePower1(theta, AorM):
     """
@@ -223,6 +247,10 @@ def PiecewisePower2(theta, AorM):
 
     return f
 
+def log_gaussian(theta, AorM):
+    A, mu, sigma = theta # Sample mu uniformly so that e^mu (ie log-normal median) is sampled logarithmically
+    
+    return A*np.exp(-(np.log10(AorM)-mu)**2 / (2*sigma**2))
 
 def step(theta, AorM):
     """
@@ -237,7 +265,7 @@ def step(theta, AorM):
     theta : (C1, C2, log_bp)
         C1 : occurrence rate at low x values
         C2 : occurrence rate at high x values
-        log_bp : log10 breakpoint (x value)
+        log_bp : ln breakpoint (x value)
     
     AorM : array-like (>0)
         Input values (must be > 0)
@@ -316,6 +344,13 @@ def escarpment(theta, AorM):
     return lam
 
 
+def brokenpowerlaw(theta, AorM):
+    C, log_a0, beta, gamma = theta
+    a0 = np.exp(log_a0)
+    return C*AorM**beta * (1 - np.exp(-(AorM/a0)**gamma))
+
+
+
 def initial_params(model_func_name, hist_dict):
     """
     Generate initial parameter guesses
@@ -328,9 +363,16 @@ def initial_params(model_func_name, hist_dict):
     min_xval, max_xval = hist_dict['lims']
     ORD_vals = hist_dict['ORD_vals']
     
-    if model_func_name=='pp1':
+    
+    if model_func_name=='flat':
         
-        ## pp1 takes the form lam(x) = slope*log10(x)+b
+        C = np.mean(ORD_vals)
+        p0 = [C]
+        
+        
+    elif model_func_name=='pp1':
+        
+        ## pp1 takes the form lam(x) = slope*ln(x)+b
         ## Initial guess: line connecting the extreme points
         slope = (ORD_vals[-1]-ORD_vals[0])/(np.log10(max_xval)-np.log10(min_xval)) # slope = delta_y/delta_x
         b = ORD_vals[-1]-slope*np.log10(max_xval) # b = y1-slope*x1
@@ -339,6 +381,7 @@ def initial_params(model_func_name, hist_dict):
         p0 = [slope, b]
 
         print(f"Initial params: slope={slope:.3f} and b={b:.3f}")
+        
     
     elif model_func_name=='pp2':
         #import pdb; pdb.set_trace()
@@ -357,6 +400,15 @@ def initial_params(model_func_name, hist_dict):
 
         p0 = [slope1, slope2, b1, log_breakpoint]
     
+    
+    elif model_func_name=='logG':
+
+        A = np.mean(ORD_vals)
+        mu = np.mean(np.log10(bin_centers)) # Take log-mean
+        sigma = np.log10((bin_centers[-1]/bin_centers[0])**(1/4)) # Fraction of the total
+        
+        p0 = [A, mu, sigma]
+    
     elif model_func_name=='step':
         
         center_val = (min_xval*max_xval)**0.5
@@ -368,15 +420,52 @@ def initial_params(model_func_name, hist_dict):
         p0 = [C1, C2, log_breakpoint]
     
     elif model_func_name=='escarpment':
+    
+        ## Idea: divide the histogram into even thirds. Fit a line to the middle third and set the
+        ##       height of the first and last at the corresponding levels.
         
-        C1 = min(ORD_vals)
-        C2 = max(ORD_vals)
-            
-        # Breakpoints in log space
-        log_bp1 = np.random.uniform(np.log10(min_xval), np.log10(max_xval))
-        log_bp2 = np.random.uniform(log_bp1, np.log10(max_xval))
-            
+        
+        # Domain in log-space
+        log_min = np.log10(min_xval)
+        log_max = np.log10(max_xval)
+
+        # Breakpoints at thirds
+        log_bp1 = log_min + (log_max - log_min)/3
+        log_bp2 = log_min + 2*(log_max - log_min)/3
+
+        # Select bins in middle third
+        middle_mask = (
+            (np.log10(bin_centers) >= log_bp1) &
+            (np.log10(bin_centers) <= log_bp2)
+        )
+
+        middle_x = np.log10(bin_centers[middle_mask])
+        middle_y = ORD_vals[middle_mask]
+
+        # Fit line to middle section
+        slope_mid, intercept_mid = np.polyfit(middle_x, middle_y, 1)
+
+        # Flat levels determined by evaluating the middle line
+        # at the breakpoints
+        C1 = slope_mid*log_bp1 + intercept_mid
+        C2 = slope_mid*log_bp2 + intercept_mid
+        
+        if C1<0 or C1>1:
+            C1 = np.median(ORD_vals)
+        if C2<0 or C2>1:
+            C2 = np.median(ORD_vals)
+
+        # Parameter vector
         p0 = [C1, C2, log_bp1, log_bp2]
+        
+    elif model_func_name=='bpl':
+
+        C = np.max(ORD_vals)
+        log_a0 = np.log10((min_xval*max_xval)**0.5) # Middle of the domain
+        beta = np.random.uniform(-0.5, 0.5)
+        gamma = np.random.uniform(-0.5, 0.5)
+        
+        p0 = [C, log_a0, beta, gamma]
     
     return p0
 
@@ -400,7 +489,13 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
                           -inf for parameters outside allowed bounds)
     """
     
-    if model_func_name == 'pp1':
+    if model_func_name == 'flat':
+    
+        if FlatLine(theta, AorM_min)<0:
+            return -np.inf
+        return 0.0
+    
+    elif model_func_name == 'pp1':
         
         # Check if parameters are within bounds
         extreme_val1 = PiecewisePower1(theta, AorM_min)
@@ -419,7 +514,7 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         
         extreme_val1 = PiecewisePower2(theta, AorM_min)
         extreme_val2 = PiecewisePower2(theta, AorM_max)
-        extreme_val3 = PiecewisePower2(theta, 10**log_xt)
+        extreme_val3 = PiecewisePower2(theta, 10**(log_xt))
         
 
         if extreme_val1<0 or extreme_val2<0 or extreme_val3<0:
@@ -431,10 +526,28 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         
         # Log-uniform prior on absolute value of slopes
         logprior=0
-        logprior -= np.log(abs(m1))
-        logprior -= np.log(abs(m2))
+        logprior -= np.log10(abs(m1))
+        logprior -= np.log10(abs(m2))
         
         return logprior
+        
+    elif model_func_name=='logG':
+        
+        A, mu, sigma = theta
+        
+        
+        if A<0 or A>10*AorM_max:
+            return -np.inf
+        if mu<np.log10(AorM_min)-15 or mu>np.log10(AorM_max)+15:
+            return -np.inf
+        if abs(sigma)>np.log10(AorM_max/AorM_min):
+            return -np.inf
+        if sigma<0:
+            return -np.inf
+            
+        return 0.0
+            
+        
     
     elif model_func_name == 'step':
         C1, C2, log_bp = theta
@@ -466,7 +579,22 @@ def log_prior(model_func_name, theta, AorM_min, AorM_max):
         if bp2<AorM_min or bp2>AorM_max:
             return -np.inf
         
+        return 0.0
         
+    elif model_func_name == 'bpl':
+        C, log_a0, beta, gamma = theta
+        a0 = 10**(log_a0)
+        
+        if C<=0:
+            return -np.inf
+        if C>2:
+            return -np.inf
+        if abs(log_a0)>10:
+            return -np.inf
+        if abs(beta)>4:
+            return -np.inf
+        if abs(gamma)>4:
+            return -np.inf
         return 0.0
     
     else:
@@ -498,18 +626,13 @@ def print_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name
     print("\n" + "="*60)
     print(f"Hard-coded {model_func_name} Parameter Likelihoods")
     print("="*60)
-    
-    # For label formatting, determine parameter names based on model function
-    if model_func_name == 'pp1':
-        param_names = ['slope', 'intercept']
-    elif model_func_name == 'pp2' or 'Softplus' in model_func_name:
-        param_names = ['m1', 'm2', 'b', 'log_xt']
-    elif model_func_name == 'step':
-        param_names = ['C1', 'C2', 'log_bp']
-    elif model_func_name == 'escarpment':
-        param_names = ['C1', 'C2', 'bp1', 'bp2']
-    else:
-        # Generic fallback
+ 
+     
+    try:
+        model_info = model_dict[model_func_name]
+        param_names = model_info[2]
+
+    except:
         param_names = [f'p{i}' for i in range(len(parameter_sets[0]))]
     
     # Calculate likelihood for each parameter set
@@ -532,7 +655,9 @@ def print_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name
 
 
 def calculate_bic(tier123_dir, model_func_name,
-                  hist_dict):
+                  hist_dict, model_dict, 
+                  stack_ind, init_type, 
+                  verbose=True):
     """
     Calculate the Bayesian Information Criterion (BIC) for a power law model.
     
@@ -561,22 +686,12 @@ def calculate_bic(tier123_dir, model_func_name,
         params_mle (ndarray): Parameters at maximum likelihood
     """
     
-    # Determine model function and parameter count
-    if model_func_name == 'pp1':
-        model_func = PiecewisePower1
-        ndim = 2
-    elif model_func_name == 'pp2':
-        model_func = PiecewisePower2
-        ndim = 4
-    elif model_func_name == 'step':
-        model_func = step
-        ndim = 3
-    elif model_func_name == 'escarpment':
-        model_func = escarpment
-        ndim = 4
-    else:
-        raise ValueError(f"Cannot calculate BIC for model: {model_func_name}")
-        
+    try:
+        model_info = model_dict[model_func_name]
+        model_func = eval(model_info[0])
+        ndim = model_info[1]
+    except:
+        raise ValueError(f"Cannot calculate BIC for model: {model_func_name}. Ensure it's in model_dict")
 
     # Set up arguments for optimization
     optim_args = (
@@ -585,7 +700,17 @@ def calculate_bic(tier123_dir, model_func_name,
         model_func_name,
     )
     
-    theta_init = initial_params(model_func_name, hist_dict)
+    #import pdb; pdb.set_trace()
+    
+    if init_type=='chains':
+        ## Alternative theta_init: use the max-likelihood params from MCMC
+        chain_path = os.path.join(tier123_dir, 'saved_chains/', f'chains_{model_func_name}_bin{stack_ind}.npz')
+        chain = np.load(chain_path)['flat_chains']
+        theta_init = np.median(chain, axis=0)
+    
+    elif init_type=='guess':
+        theta_init = initial_params(model_func_name, hist_dict)
+        
     # Optimize using Powell algorithm (derivative-free)
     # Note: we minimize negative log-likelihood (maximize likelihood)
     result = minimize(
@@ -604,22 +729,23 @@ def calculate_bic(tier123_dir, model_func_name,
     # BIC = k * ln(n) - 2 * ln(L) = k * ln(n) - 2 * loglik
     bic = ndim * np.log(n_data) - 2 * loglik_max
 
-    print(f"\n" + "="*70)
-    print(f"BIC Calculation for {model_func_name.upper()}")
-    print("="*70)
-    print(f"Number of parameters (k): {ndim}")
-    print(f"Number of data points (n): {n_data}")
-    print(f"Maximum log-likelihood: {loglik_max:.4f}")
-    print(f"BIC = {ndim} * ln({n_data}) - 2 * {loglik_max:.4f}")
-    print(f"BIC = {bic:.4f}")
-    print(f"Parameters at MLE: {params_mle}")
-    print("="*70 + "\n")
+    if verbose:
+        print(f"\n" + "="*70)
+        print(f"BIC Calculation for {model_func_name.upper()}")
+        print("="*70)
+        print(f"Number of parameters (k): {ndim}")
+        print(f"Number of data points (n): {n_data}")
+        print(f"Maximum log-likelihood: {loglik_max:.4f}")
+        print(f"BIC = {ndim} * ln({n_data}) - 2 * {loglik_max:.4f}")
+        print(f"BIC = {bic:.4f}")
+        print(f"Parameters at MLE: {params_mle}")
+        print("="*70 + "\n")
     
     return model_func_name, bic, loglik_max, params_mle
 
 
 
-def plot_bics_on_histogram(tier123_dir, model_bic_dict, color_dict,
+def plot_bics_on_histogram(tier123_dir, model_bic_dict, model_dict,
                            stack_dim, m_unit):
     """
     Plot max-likelihood models (from BIC calculations) overlaid on the ORD histogram.
@@ -657,31 +783,28 @@ def plot_bics_on_histogram(tier123_dir, model_bic_dict, color_dict,
         axs_list = [ax]
     xlim_list = [ax_i.get_xlim() for ax_i in axs_list]
         
-    # Iterate through the models and plot each max-likelihood model
+        
     
+    
+    # Iterate through the models and plot each max-likelihood model
     for idx, key in enumerate(model_bic_dict.keys()):
+        #import pdb; pdb.set_trace()
+        if 'flat' in key: # Skip flat model, which is used for comparison
+            continue
         ax_idx = int(key.split('_')[-1])
         ax_i = axs_list[ax_idx]
         
+        _, flat_bic, _, _ = model_bic_dict[f'bic_outputs_flat_{ax_idx}']
         model_func_name, bic, loglik_max, params_mle = model_bic_dict[key]
-        
-        # Choose model function and parameter names based on model
-        if model_func_name == 'pp1':
-            model_func = PiecewisePower1
-            param_names = ['slope', 'intercept']
-        elif model_func_name == 'pp2':
-            model_func = PiecewisePower2
-            param_names = ['m1', 'm2', 'b', 'log_xt']
-        elif model_func_name == 'step':
-            model_func = step
-            param_names = ['C1', 'C2', 'log_bp']
-        elif model_func_name == 'escarpment':
-            model_func = escarpment
-            param_names = ['C1', 'C2', 'log_bp1', 'log_bp2']
-        else:
+        delta_bic = flat_bic-bic
+            
+        try:
+            model_info = model_dict[model_func_name]
+            model_func = eval(model_info[0])
+            param_names = model_info[2]
+            color = model_info[3]
+        except:
             raise ValueError(f"Unknown model: {model_func_name}")
-        
-        color = color_dict[model_func_name]
         
         ## Plot model on the desired axes
         xlim = xlim_list[ax_idx]
@@ -692,7 +815,8 @@ def plot_bics_on_histogram(tier123_dir, model_bic_dict, color_dict,
         
         # Build label with model name, parameters, BIC, and likelihood
         param_str = ', '.join([f"{name}={val:.2f}" for name, val in zip(param_names, params_mle)])
-        label = f'{model_func_name} ({param_str}): BIC={bic:.1f}, lnL={loglik_max:.1f}'
+        #label = f'{model_func_name} ({param_str}): $\Delta$BIC={delta_bic:.1f}, lnL={loglik_max:.1f}'
+        label = f'{model_func_name} ({param_str}): $\Delta$BIC={delta_bic:.1f}'
         
         ax_i.plot(
             x_model, y_model,
@@ -702,9 +826,10 @@ def plot_bics_on_histogram(tier123_dir, model_bic_dict, color_dict,
             zorder=90
         )
         
+        ax_i.legend(loc='upper right', fontsize=8)
         # Update legend after each model is added
-        for ax_i in axs_list:
-            ax_i.legend(loc='upper right', fontsize=8)
+        #for ax_i in axs_list:
+        #    ax_i.legend(loc='upper right', fontsize=8)
 
     # Save the figure
     save_path = os.path.join(plot_save_dir, 'occurrence_ORD_BIC_models.png')

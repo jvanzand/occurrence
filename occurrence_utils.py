@@ -31,6 +31,8 @@ def cell_values(a_edges, m_edges, avg_map_fn_path):
     a_m_lims_pairs_roi_disordered = list(itt.product(m_lims_list, a_lims_list))
     a_m_lims_pairs = [pair[::-1] for pair in a_m_lims_pairs_roi_disordered]
     
+    #import pdb; pdb.set_trace()
+    
     ## Calculate the completeness in each cell. Preserve the order of the lims_pairs
     avg_interp = pickle.load(open(avg_map_fn_path, 'rb'))
     avg_compls = []
@@ -44,6 +46,9 @@ def cell_values(a_edges, m_edges, avg_map_fn_path):
                                 f"Could not compute cell completeness between"\
                                 f"a={a_lim} and M={m_lim}. Check for NaNs.")
         avg_compls.append(cell_compl)
+        
+    ## Avg completeness over the whole interval
+    avg_compl_single = cu.cell_completeness([a_edges[0], a_edges[-1]], [m_edges[0], m_edges[-1]], avg_interp)
     
 	
     num_cells = len(a_m_lims_pairs)
@@ -68,6 +73,7 @@ def cell_values(a_edges, m_edges, avg_map_fn_path):
                  'n_mbins':n_mbins, 
                  'a_m_lims_pairs':a_m_lims_pairs,
                  'avg_compls':avg_compls,
+                 'avg_compl_single':avg_compl_single,
                  'all_binsizes':all_binsizes,
                  'bin_centers':bin_center_array}
     
@@ -88,15 +94,15 @@ def assign_cells(a_list, m_list, a_m_lims_pairs):
     
     for i, ((a_lo, a_hi), (m_lo, m_hi)) in enumerate(a_m_lims_pairs):
         mask = (
-            (a_list >= a_lo) & (a_list < a_hi) &
-            (m_list >= m_lo) & (m_list < m_hi)
+            (a_list > a_lo) & (a_list <= a_hi) &
+            (m_list > m_lo) & (m_list <= m_hi)
         )
         lam_inds[mask] = i
     
     return lam_inds
 
 
-def summary_stats(chain_path, cell_dict, bin_lam_dict, m_unit='earth', verbose=False):
+def summary_stats(chain_path, cell_dict, bin_lam_dict, nstars, m_unit='earth', verbose=False):
     """
     Load chains and print out the occurrence rate,
     effective number of planets, and average
@@ -117,15 +123,30 @@ def summary_stats(chain_path, cell_dict, bin_lam_dict, m_unit='earth', verbose=F
     # Thin samples
     thin=10
     #import pdb; pdb.set_trace()
+    
+    ## Summary stats for individual cells
     ORD_samples = ORD_samples[::thin]
     OR_samples = ORD_samples*cell_dict['all_binsizes']
     
     ORD_summary_dict = summarize_chains(ORD_samples, rate_type='ORD', hdi_frac=0.68, grid_size=1000)
     OR_summary_dict = summarize_chains(OR_samples, rate_type='OR', hdi_frac=0.68, grid_size=1000)
-    summary_dict = {**ORD_summary_dict, **OR_summary_dict} # Combine to save both the OR and ORD
+    
     #import pdb; pdb.set_trace()
     
-
+    ## Summary stats for summed chains over all cells (integrated occurrence)
+    ORD_samples_single = ORD_samples.sum(axis=1)[:,None]
+    OR_samples_single = OR_samples.sum(axis=1)[:,None]
+    
+    ORD_summary_dict_single = summarize_chains(ORD_samples_single, rate_type='ORD_single', hdi_frac=0.68, grid_size=1000)
+    OR_summary_dict_single = summarize_chains(OR_samples_single, rate_type='OR_single', hdi_frac=0.68, grid_size=1000)
+    
+    ## Add single and integrated occurrences to summary dict
+    summary_dict = {**ORD_summary_dict, 
+                    **OR_summary_dict, 
+                    **ORD_summary_dict_single, 
+                    **OR_summary_dict_single} # Combine to save both the OR and ORD
+    
+    #import pdb; pdb.set_trace()
     cell_weights = []
     for cell_ind in range(cell_dict['num_cells']):
         #import pdb; pdb.set_trace()
@@ -139,8 +160,11 @@ def summary_stats(chain_path, cell_dict, bin_lam_dict, m_unit='earth', verbose=F
         cell_weights.append(cell_weight)
         # print(f"There are {cell_weight:.2f} effective planets in cell{cell_ind}")
     
+    summary_dict['nstars'] = nstars
     summary_dict['cell_weights'] = cell_weights
     summary_dict['cell_compls'] = cell_dict['avg_compls']
+    summary_dict['cell_compl_single'] = cell_dict['avg_compl_single']
+    
     
     ## Transfer these keys to summary_dict for plotting
     summary_dict['a_m_lims_pairs'] = cell_dict['a_m_lims_pairs']
@@ -176,7 +200,7 @@ def summary_stats(chain_path, cell_dict, bin_lam_dict, m_unit='earth', verbose=F
     return summary_dict
 
 
-def summarize_chains(samples, rate_type='ORD', hdi_frac=0.68, grid_size=1000):
+def summarize_chains(samples, rate_type='ORD', hdi_frac=0.68, grid_size=2000):
     """
     Compute mode and HDI for each parameter in MCMC chains.
 
@@ -191,32 +215,35 @@ def summarize_chains(samples, rate_type='ORD', hdi_frac=0.68, grid_size=1000):
             'mode', 'hdi_low', 'hdi_high'
     """
 
-    def compute_hdi(x, frac):
-        """Compute highest density interval (HDI)."""
-        x_sorted = np.sort(x)
-        N = len(x_sorted)
-        interval_idx = int(np.floor(frac * N))
-
-        widths = x_sorted[interval_idx:] - x_sorted[:N - interval_idx]
-        min_idx = np.argmin(widths)
-
-        return x_sorted[min_idx], x_sorted[min_idx + interval_idx]
-
     mode_list = []
     hdi_low_list = []
     hdi_high_list = []
 
     for i in range(samples.shape[1]):
-        chain = samples[:, i]
-
-        # --- Mode via KDE ---
-        kde = gaussian_kde(chain)
-        x_grid = np.linspace(chain.min(), chain.max(), grid_size)
-        pdf = kde(x_grid)
-        mode = x_grid[np.argmax(pdf)]
+        chain_unmasked = samples[:, i]
+        nanmask = ~np.isnan(chain_unmasked)
+        chain = chain_unmasked[nanmask]
+        
+        ### Take the middle 98% of the chain to remove chance outliers
+        #chain_lim_low, chain_lim_high = np.percentile(chain, [1, 99])
+        #clipped_chain = chain[(chain_lim_low<chain) & (chain<chain_lim_high)]
+        #chain = clipped_chain
 
         # --- HDI ---
         hdi_low, hdi_high = compute_hdi(chain, hdi_frac)
+        hdi_width = hdi_high-hdi_low # HDI width gives "scale" of chain range
+
+        # --- Mode via KDE ---
+        kde = gaussian_kde(chain)
+        x_grid = np.linspace(hdi_low-0.5*hdi_width, 
+                             hdi_high+0.5*hdi_width, 
+                             grid_size) # Only calc. over HDI, not min/max of chain (bc of outliers)
+        pdf = kde(x_grid)
+        mode = x_grid[np.argmax(pdf)]
+        
+        ## If the mode and HDI estimation fails using the KDE, just use percentiles
+        if hdi_low>mode or mode>hdi_high:
+            hdi_low, mode, hdi_high = np.percentile(chain, [0.5*(1-hdi_frac)*100, 50, (hdi_frac+0.5*(1-hdi_frac))*100])
         
         mode_list.append(mode)
         hdi_low_list.append(hdi_low)
@@ -228,10 +255,93 @@ def summarize_chains(samples, rate_type='ORD', hdi_frac=0.68, grid_size=1000):
 
     return summaries
 
+def compute_hdi(x, frac):
+    """Compute highest density interval (HDI)."""
+    x_sorted = np.sort(x)
+    N = len(x_sorted)
+    interval_idx = int(np.floor(frac * N))
+
+    widths = x_sorted[interval_idx:] - x_sorted[:N - interval_idx] # All widths contain the same # of values
+    min_idx = np.argmin(widths) # Smallest width that contains that # of values
+
+    return x_sorted[min_idx], x_sorted[min_idx + interval_idx]
 
 
+def latex_formatter(med, lower, upper):
+    """
+    Round a median value and its errors to
+    the appropriate precision based on the
+    error bars. Then format as a string.
+    
+    lower and upper should be the error bars.
+    Eg, if your measurement is 150^{+10.1}_{-8}, 
+    then the input values should be 150, 8, 10.1.
+    """
+    
+    if any(np.isnan([med, lower, upper])):
+        return "---"
+    
+    # Scientific notation branch
+    if med != 0 and abs(med) < 1e-2:
 
+        exponent = int(np.floor(np.log10(abs(med))))
+        scale = 10.0**exponent
 
+        med_scaled   = med   / scale
+        lower_scaled = lower / scale
+        upper_scaled = upper / scale
+
+        calc_num_sigfigs = (
+            lambda val: np.nan if val <= 0
+            else 1 if val == 1
+            else -int(np.floor(np.log10(val)))
+        )
+
+        min_err = np.min([lower_scaled, upper_scaled])
+        num_sigfigs = calc_num_sigfigs(min_err)
+
+        if np.isnan(num_sigfigs):
+            raise Exception(
+                "occurrence_utils.latex_formatter: "
+                "num_sigfigs is nan."
+            )
+
+        med_scaled, lower_scaled, upper_scaled = np.round(
+            [med_scaled, lower_scaled, upper_scaled],
+            num_sigfigs
+        )
+
+        format_precision = max(0, num_sigfigs)
+
+        fmtd_st = (
+            rf"$({med_scaled:.{format_precision}f}"
+            rf"^{{+{upper_scaled:.{format_precision}f}}}"
+            rf"_{{-{lower_scaled:.{format_precision}f}}})"
+            rf"\times10^{{{exponent}}}$"
+        )
+
+        return fmtd_st
+    
+    ## This function finds num of digits needed to represent val to 1 non-zero sigfig
+    ## E.g. 109 --> 100 (3 figs), 0.0025 --> 0.002 (3 figs), 10.423444445 --> 10 (2 figs)
+    calc_num_sigfigs = (lambda val: np.nan if val<=0 
+                                   else 1 if val==1
+                                   else -int(np.floor(np.log10(val))) )
+
+    min_err = np.min([lower, upper])
+    num_sigfigs = calc_num_sigfigs(min_err)
+    if np.isnan(num_sigfigs):
+        print("occurrence_utils.latex_formatter: num_sigfigs is nan. Probably negative err input. Consider higher grid_size in summarize_chains() function.")
+        return 'Err'
+    #try:
+    med_rounded, lower_rounded, upper_rounded = np.round([med, lower, upper], num_sigfigs)
+    #except:
+        #import pdb; pdb.set_trace()
+    format_precision = np.maximum(0, num_sigfigs) # If num_sigfigs is negative, set to 0
+
+    fmtd_st="${0:.{3}f}^{{+{1:.{3}f}}}_{{-{2:.{3}f}}}$".format(med_rounded, upper_rounded, lower_rounded, format_precision)
+    
+    return fmtd_st
 
 
 

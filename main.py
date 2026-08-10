@@ -10,6 +10,7 @@ import pickle
 from astropy import constants as c
 import multiprocessing as mp
 
+from occurrence import analysis_utils as au
 from occurrence import completeness_utils as cu
 from occurrence import sampling_utils as su
 from occurrence import occurrence_utils as ou
@@ -19,10 +20,42 @@ from occurrence import mcmc_powerlaw as mcmc_power
 
 from occurrence.completeness_utils import _process_single_star
 
-model_color_dict = {'pp1':'RoyalBlue',
-                    'pp2':'tomato',
-                    'step':'goldenrod',
-                    'escarpment':'forestgreen'}
+                    
+model_dict = {'flat':['FlatLine',
+                     1, 
+                     ['C'],
+                     'black',
+                     ],
+              'pp1':['PiecewisePower1',
+                     2, 
+                     ['y', 'b'],
+                     'cyan',
+                     ],
+              'pp2':['PiecewisePower2',
+                      4, 
+                     ['m1', 'm2', 'b1', '$\log_{10}(x_t)$'],
+                     'goldenrod',
+                     ],
+               'logG':['log_gaussian', 
+                      3,
+                     ['A', '$\mu$', '$\sigma$'],
+                     'tomato',
+                     ],
+              'step':['step', 
+                      3,
+                     ['C1', 'C2', '$\log_{10}(x_{t})$'],
+                     'forestgreen',
+                     ],
+              'escarpment':['escarpment',
+                            4, 
+                            ['C1', 'C2', '$\log_{10}(x_{t,1})$', '$\log_{10}(x_{t,2})$'],
+                            'RoyalBlue',
+                            ],
+              'bpl':['brokenpowerlaw', 
+                     4,
+                     ['C', '$\log_{10}(a_0)$', '$\\beta$', '$\gamma$'],
+                     'deeppink',
+                     ],}
 
 
 def prep_recoveries_files(tier1_dir,
@@ -178,7 +211,8 @@ def prep_post_draws(tier1_dir, tier2_dir,
     #### CUSTOMIZE your own sampler to match the posterior format ####
     ## The output of custom sampler should be a dict whose keys are companion names
     ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
-    post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=500, m_unit=m_unit) # First sample posteriors 
+    post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=500, m_unit=m_unit) # First sample posteriors
+    #from copy import deepcopy; pp_test = deepcopy(post_sample_dict)
     #import pdb; pdb.set_trace()
     ## If using mass ratio, convert masses to q
     #if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
@@ -195,12 +229,13 @@ def prep_post_draws(tier1_dir, tier2_dir,
                 
     #import pdb; pdb.set_trace()
     post_prior_sample_dict = su.interim_prior(post_sample_dict, prior_type='loguniform') # Then calculate prior at each draw. Each value is a 3xN array of SMA samples, mass samples, and prior values
+    #qq_test = deepcopy(post_prior_sample_dict)
     #import pdb; pdb.set_trace()
     # Now add on completeness values
     sampled_post_with_compls = su.include_post_completeness(post_prior_sample_dict,
                                                             star_df,
                                                             tier1_dir, tier2_dir)
-                                                                
+    #rr_test = deepcopy(sampled_post_with_compls)                                                  
     ## Saves dict with companion names as key names
     ## Each value is a 6xN array of:
     ## [a_list, m_list, avg_compls, single_star_compls,
@@ -282,19 +317,24 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
     ##     1) Calculate the lambda index of every a/m sample for every companion
     ##     2) Create subsets of the comp_samples and comp_ROIweights dicts for each stack_dim bin
     ##     3) Fill in bin_lam_dict, which has useful info for exp^-Lambda term of histogram likelihood
+    #import pdb; pdb.set_trace()
     for comp_name in comp_samples.keys():
         a_m_prior_compl = comp_samples[comp_name]
         a_list, m_list = a_m_prior_compl[:2] # First 2 sub-arrays are a/m lists
         compl_over_prior = comp_samples[comp_name][compl_ind]
+        #import pdb; pdb.set_trace()
         
         lam_inds = ou.assign_cells(a_list, m_list, cell_dict['a_m_lims_pairs']).astype(int) # Calculate lambda inds
+        try:
+            ROIweight = len(lam_inds[lam_inds>-0.5])/len(lam_inds) # Fraction of samples in full ROI
+        except:
+            print(f'main.py: ERROR - no m/a indices found for companion {comp_name}')
 
-        ROIweight = len(lam_inds[lam_inds>-0.5])/len(lam_inds) # Fraction of samples in full ROI
         comp_ROIweights[comp_name] = ROIweight # Put weights in separate dict
         
         
         if ROIweight==0: # Skip companions that fall outside the ROI. Their weights=0 anyway, but saves compute to remove
-            print(f'{comp_name} falls fully outside the ROI; dropping.')
+            #print(f'{comp_name} falls fully outside the ROI; dropping.')
             comps_outsideROI.append(comp_name)
             
         ## For companions with at least some samples in the ROI, prune the ones outside it
@@ -332,6 +372,9 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
             weight = lam_mask.sum()/total_sample_num # (Num. of samples in cell)/(tot. # of samples)
             
             bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"] = [compl_over_prior_in_cell_avg, weight]
+            
+            #if bin_ind==0 and weight>0.5:
+            #    print(f"{comp_name} is in 0 bin, weight={weight}")
             
     for comp_name in comps_outsideROI:
         del comp_samples[comp_name]
@@ -381,14 +424,15 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
     
         cell_dict = dict(np.load(cell_dict_path)) # Includes bin sizes and avg_cell_compls
         bin_lam_dict = dict(np.load(bin_lam_dict_path)) # Contains, for every cell and for every companion, all (compl/prior) values that fall in that cell, AND the fraction (aka weight). This is equivalent to the info. stored in sampled_post_prior_compl_lam.npz, but compressed and sorted by lambda index.
-    
+        #import pdb; pdb.set_trace()
+
         if run_mcmc:
             mcmc_hist.mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
                     save_path=saved_chains_dir+'chains_hist.npz', parallel=parallel,
-                    nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
+                    nwalkers=50, nsteps=2000, burnin=15000)
             
     ## After running MCMC for histogram, create summary products        
-    summary_stats(tier1_dir, tier2_dir, tier3_dir, verbose=False)
+    summary_stats(tier1_dir, tier2_dir, tier3_dir, nstars, verbose=False) # This command creates summary_dict
     
     
     pp_model_names = [model_name for model_name in run_models if 'hist' not in model_name]
@@ -404,7 +448,7 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
     
     elif stack_dim=='m':
         stack_nbins = hist_summary_dict['n_mbins']
-        nonstack_nbins = hist_summary_dict['n_mbins']
+        nonstack_nbins = hist_summary_dict['n_abins']
         nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,0][::stack_nbins]
 
     else:
@@ -418,18 +462,19 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
         ORD_vals = hist_summary_dict['mode_ORD'].reshape(nonstack_nbins,-1)[:,bin_idx]
         ORD_errs_high = hist_summary_dict['hdi_high_ORD'].reshape(nonstack_nbins,-1)[:,bin_idx] - ORD_vals
         ORD_errs_low = ORD_vals - hist_summary_dict['hdi_low_ORD'].reshape(nonstack_nbins,-1)[:,bin_idx]
-        ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
+        #ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
     
         hist_dict = {'bin_centers':nonstack_bin_centers,
                      'lims':(nonstack_edges[0][0], nonstack_edges[-1][-1]),
                      'ORD_vals':ORD_vals,
-                     'ORD_errs':ORD_errs,
+                     'ORD_errs_high':ORD_errs_high,
+                     'ORD_errs_low':ORD_errs_low,
                      }
         
         # Create distinguishing filename suffix for this bin
         # Format: _binX or _a0p1-1AU or _m1-2Mj, etc.
         bin_suffix = f'_bin{bin_idx}'
-        
+        #import pdb; pdb.set_trace()
         for model_name in pp_model_names:
         
             chain_path = saved_chains_dir + f'chains_{model_name}{bin_suffix}.npz'
@@ -437,14 +482,16 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
                             stack_dim,
                             stack_ind=bin_idx,
                             save_path=chain_path, parallel=parallel,
-                            nwalkers=nwalkers, nsteps=nsteps, burnin=burnin)
+                            nwalkers=50, nsteps=10000, burnin=320000)
         
     return
     
-def summary_stats(tier1_dir, tier2_dir, tier3_dir, verbose=False):
+def summary_stats(tier1_dir, tier2_dir, tier3_dir, nstars, verbose=False):
     """
-    Load MCMC chains and make diagnostic
-    plots of the results
+    Load MCMC chains and calculate/save
+    summary statistics, including occurrence rate,
+    effective number of planets, and average
+    completeness in each cell
     """
     
     load_save_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
@@ -457,7 +504,7 @@ def summary_stats(tier1_dir, tier2_dir, tier3_dir, verbose=False):
     
     cell_dict = dict(np.load(cell_dict_path)) # Includes bin sizes and avg_cell_compls
     bin_lam_dict = dict(np.load(bin_lam_dict_path)) # Contains, for every cell and for every companion, all (compl/prior) values that fall in that cell, AND the fraction (aka weight). This is equivalent to the info. stored in sampled_post_prior_compl_lam.npz, but compressed and sorted by lambda index.
-    summary_dict = ou.summary_stats(path_to_chains, cell_dict, bin_lam_dict, verbose=verbose)
+    summary_dict = ou.summary_stats(path_to_chains, cell_dict, bin_lam_dict, nstars, verbose=verbose)
     np.savez(save_summary_dict_path, **summary_dict) ## Cell-specific info
     
     return
@@ -470,6 +517,7 @@ def bic_compare(tier1_dir, tier2_dir, tier3_dir,
     """
     
     tier123_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
+    
     
     ## Retrieve summary info for histogram
     hist_summary_path = os.path.join(tier123_dir, 'saved_dicts/summary_dict.npz')
@@ -495,29 +543,40 @@ def bic_compare(tier1_dir, tier2_dir, tier3_dir,
         ORD_vals = hist_summary_dict['mode_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
         ORD_errs_high = hist_summary_dict['hdi_high_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind] - ORD_vals
         ORD_errs_low = ORD_vals - hist_summary_dict['hdi_low_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
-        ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
+        #ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
     
         hist_dict = {'bin_centers':nonstack_bin_centers,
                      'lims':(nonstack_edges[0][0], nonstack_edges[-1][-1]),
                      'ORD_vals':ORD_vals,
-                     'ORD_errs':ORD_errs,
+                     'ORD_errs_high':ORD_errs_high,
+                     'ORD_errs_low':ORD_errs_low,
                      }
+                     
+        flat_bic_outputs = mcmc_power.calculate_bic(tier123_dir, 'flat', 
+                                                    hist_dict, model_dict, 
+                                                    stack_ind, init_type='guess')
+        model_bic_output_dict[f'bic_outputs_flat_{stack_ind}'] = flat_bic_outputs
         
         for model_name in run_models:
             if model_name=='hist':
                 continue
-            single_model_bic_outputs = mcmc_power.calculate_bic(tier123_dir, model_name, hist_dict)
+            #import pdb; pdb.set_trace()
+            single_model_bic_outputs = mcmc_power.calculate_bic(tier123_dir, model_name, 
+                                                                hist_dict, model_dict, 
+                                                                stack_ind, init_type='chains')
             
             dict_key = f"bic_outputs_{model_name}_{stack_ind}"
             model_bic_output_dict[dict_key] = single_model_bic_outputs
 
+        #import pdb; pdb.set_trace()
     mcmc_power.plot_bics_on_histogram(tier123_dir, model_bic_output_dict, 
-                                      model_color_dict, stack_dim, m_unit)
+                                      model_dict, stack_dim, m_unit)
     
     return
     
 def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
                        nstars, run_models, plot_models,
+                       plot_hist_corner, plot_model_corners,
                        stack_dim, m_unit='earth', 
                        hist_title=''):
     """
@@ -540,8 +599,9 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
     cell_dict = dict(np.load(path_to_cell_dict)) # Includes bin sizes and avg_cell_compls
     save_corner_dir = os.path.join(plot_save_dir, 'corner_hist.png')
 
-    if not os.path.exists(save_corner_dir): # Corners are costly to plot; skip if exists
-        pu.plot_corner_from_file(path_to_hist_chains, plot_model='hist', outpath=save_corner_dir,
+    if plot_hist_corner:
+        pu.plot_corner_from_file(path_to_hist_chains, plot_model='hist', model_dict=model_dict,
+                                 outpath=save_corner_dir,
                                  thin=10, max_samples=50000)
 
 
@@ -559,7 +619,7 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
     y_col = 'inj_'+tier1_dir # e.g. inj_mtrue
     #import pdb; pdb.set_trace()
     pu.completeness_plotter(xgrid, ygrid, zgrid, plot_save_dir+"ROI_with_occurrence.png", 
-                            title=f'Occurrence Summary for {nstars} Stars', save_plot=True, 
+                            title=f'{nstars} Stars', save_plot=True, 
                             a_m_lims_pairs=cell_dict['a_m_lims_pairs'], summary_dict=summary_dict,
                             ycol=y_col, m_unit=m_unit)
     ############################################################
@@ -581,20 +641,21 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
     else:
         n_stack_bins = 1
     
-    plot_corner_names = [model_name for model_name in run_models if model_name!='hist']
-    for model_name in plot_corner_names:
+    if plot_model_corners:
+        plot_corner_names = [model_name for model_name in run_models if model_name!='hist']
+        for model_name in plot_corner_names:
 
-        ## Plot corner for power law model (one for each bin)
-        for bin_idx in range(n_stack_bins):
-            path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}_bin{bin_idx}.npz')
-            # Fallback to old naming if single-bin file doesn't exist
-            if not os.path.exists(path_to_power_chains):
-                path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}.npz')
-            save_corner_dir = os.path.join(plot_save_dir, f'corner_{model_name}_bin{bin_idx}.png')
+            ## Plot corner for power law model (one for each bin)
+            for bin_idx in range(n_stack_bins):
+                path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}_bin{bin_idx}.npz')
+                # Fallback to old naming if single-bin file doesn't exist
+                if not os.path.exists(path_to_power_chains):
+                    path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}.npz')
+                save_corner_dir = os.path.join(plot_save_dir, f'corner_{model_name}_bin{bin_idx}.png')
             
-            if os.path.exists(path_to_power_chains) and not os.path.exists(save_corner_dir):
-                pu.plot_corner_from_file(path_to_power_chains, plot_model=model_name, outpath=save_corner_dir,
-                                         thin=10, max_samples=50000)
+                if os.path.exists(path_to_power_chains):
+                    pu.plot_corner_from_file(path_to_power_chains, plot_model=model_name, model_dict=model_dict, 
+                                             outpath=save_corner_dir, thin=10, max_samples=50000)
         
                             
     if plot_models is None:
@@ -608,11 +669,44 @@ def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
                                           rate_type='ORD', title=hist_title, return_fig_ax=True,
                                           savepath=None, figsize=(6, 4))
         #import pdb; pdb.set_trace()
-        pu.plot_power(fig, ax, plot_models, model_color_dict,
+        pu.plot_power(fig, ax, plot_models, model_dict,
                       save_path=plot_save_dir+f'occurrence_ORD.png', 
                       stack_dim=stack_dim)
     
     return
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     
     

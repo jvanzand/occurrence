@@ -27,6 +27,7 @@ def post_sampler1(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
             sampled_a = np.array(post.sma_au.sample(num_samples, replace=True))
             sampled_m = np.array(post.mass_mearth.sample(num_samples, replace=True))
             
+            
             if m_unit=='jupiter':
                 sampled_m = sampled_m/Mj2Me # Convert M_earth to M_jupiter
 
@@ -61,9 +62,11 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
     for sys_name_lowercase in sysname_list:
         sys_name = cls_rename_fn(sys_name_lowercase)
         chain_file = os.path.join(companion_post_dir, sys_name+'.h5')
+
         if not os.path.exists(chain_file):
             continue
         # import pdb; pdb.set_trace()
+
         with h5py.File(chain_file, 'r') as f:
             #burned_and_checked.append(sys_name)
             cols = f["chains"].attrs["param_names"] # Use f['chains'].attrs.keys() to see that param_names is a key
@@ -89,6 +92,9 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
                 rand_inds = np.random.randint(0, new_nsteps, size=num_samples) # Inds to take random draws
                 a_chain = chain_dict[f'sau{comp_ind}'][rand_inds]
                 m_chain = chain_dict[f'msec{comp_ind}'][rand_inds]*m_conversion # Convert M_sun to Me or Mj
+                
+                #if '8765' in sys_name_lowercase:
+                #    import pdb; pdb.set_trace()
 
                 comp_name = sys_name_lowercase+'_'+str(comp_ind)
                 post_sample_dict[comp_name] = [a_chain, m_chain]
@@ -145,6 +151,7 @@ def include_post_completeness(sampled_post_dict, star_df,
         comp_list = star_df.query(f"star_name=='{star_name}'").comp_list.iloc[0] # List of comp names
         ## For every companion in the system, calculate the average compl over all stars AND the single-system compl
         # import pdb; pdb.set_trace()
+        manual_fill_comps = ['8765_0']
         for comp_name in comp_list:
             
             if comp_name not in sampled_post_dict.keys():
@@ -156,11 +163,38 @@ def include_post_completeness(sampled_post_dict, star_df,
             avg_compls = avg_compl_interp((a_m_prior[0], a_m_prior[1])) # interp_fn((a_list, m_list))
             single_star_compls = single_compl_interp((a_m_prior[0], a_m_prior[1]))
             
+            
+            Zbin_list=['107148_1', '156668_1', '16141_0', '177830_0', '218566_0', '24040_0',
+                       '3651_0', '3765_0', '75732_2', '757532_3', '7924_2', '147379a_0', 'hip57050_1']
+            """
+            if comp_name in Zbin_list:
+                arr = sampled_post_dict[comp_name]
+
+                mask = (
+                          (arr[0] >= 0.23) &
+                          (arr[0] <= 10) &
+                          (arr[1] >= 0.1) &
+                          (arr[1] <= 0.3)
+                           )
+                inds = np.where(mask)[0]
+                print(f"{comp_name}: Avg comp={avg_compls.mean():.3f}, Single comp={single_star_compls.mean():.3f}")
+                #import pdb; pdb.set_trace()
+            """
+            ## Companions that are clearly detectable, but so massive they fall outside the completeness range
+            if comp_name in manual_fill_comps:
+                single_star_compls = avg_compls
+            
             ## The likelihood later requires completeness/single_system_prior. So compute that now.
             compl_over_prior_avg = avg_compls/a_m_prior[2]
             compl_over_prior_single = single_star_compls/a_m_prior[2]
             
+            #avg_compls = np.ones(avg_compls.shape)*1e-5
+            #single_star_compls = np.ones(single_star_compls.shape)*1e-6
+            #compl_over_prior_avg = avg_compls
+            #compl_over_prior_single = single_star_compls
+            
             nan_mask = (~np.isnan(compl_over_prior_avg)) & (~np.isnan(compl_over_prior_single))
+            
             
             # Updated array includes a_samples, m_samples, average completenesses, single star completenesses, compl_over_prior_avg, compl_over_prior_single.
             # Probably the only compl array I'll use is compl_over_prior_single. compl_over_prior_avg is to test whether using avg completeness changes the answer. The two completeness arrays are for testing/sanity checks.
@@ -170,7 +204,7 @@ def include_post_completeness(sampled_post_dict, star_df,
             sampled_post_dict[comp_name] = masked_array
 
             
-            #import pdb; pdb.set_trace()
+    #import pdb; pdb.set_trace()
     
     return sampled_post_dict
     
