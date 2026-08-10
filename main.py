@@ -60,8 +60,6 @@ model_dict = {'flat':['FlatLine',
 
 def prep_recoveries_files(tier1_dir,
                           star_df,
-                          #convert_recs_msini_mtrue=False,
-                          #convert_recs_m_q=False,
                           msini_rec_dir_to_make_mtrue,
                           m_dir_to_make_q,
                           recoveries_m_unit='earth'):
@@ -104,7 +102,6 @@ def prep_recoveries_files(tier1_dir,
             rec_file.to_csv(msini_recoveries_save_file, index=False)
             #import pdb; pdb.set_trace()
     
-    #if convert_recs_m_q:
     if 'q' in tier1_dir: # If tier1_dir is qsini or qtrue, then convert m to q
         for i in range(len(star_df)):
             row = star_df.iloc[i]
