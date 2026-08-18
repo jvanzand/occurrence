@@ -28,7 +28,9 @@ plt.style.use(os.path.join(occurrence_path, 'matplotlibrc'))
   
 
     
-def make_tier1(tier1_config, star_df_full, recoveries_dir, recoveries_m_unit):
+def make_tier1(tier1_config, star_df_full, recoveries_dir, 
+               recoveries_mtype='mtrue', 
+               avg_map_only=False):
     """
     Makes only the tier1 dict
     """
@@ -39,22 +41,31 @@ def make_tier1(tier1_config, star_df_full, recoveries_dir, recoveries_m_unit):
     m_dir_to_make_q = os.path.join(t1.t1_dir, f"m{t1.true_or_sini}_recoveries")
     path_to_recoveries = os.path.join(t1.t1_dir, f"{y_param}_recoveries")
     
+    ## Optionally use only one recoveries file to represent completeness for the whole sample
+    if avg_map_only:
+        Mstar = star_df_full.Mstar.mean()
+        cols = star_df_full.columns
+        avg_df = pd.DataFrame([['average', Mstar, [], 0]], columns=cols)
+        star_df_full = avg_df
+    
     t1_exists = os.path.exists(t1.t1_dir)
     if not t1_exists:
         main.prep_recoveries_files(tier1_dir=t1.t1_dir,
                                    star_df=star_df_full,
-                                   msini_rec_dir_to_make_mtrue=recoveries_dir,
+                                   master_rec_dir=recoveries_dir,
+                                   recoveries_mtype=recoveries_mtype,
                                    m_dir_to_make_q=m_dir_to_make_q,
-                                   recoveries_m_unit=recoveries_m_unit)
-        
+                                   )
+        #import pdb; pdb.set_trace()
         main.prep_maps(tier1_dir=t1.t1_dir,
                        star_df=star_df_full,
                        path_to_recoveries=path_to_recoveries,
-                       m_unit=t1.mass_unit)
+                       m_unit=t1.mass_unit,
+                       avg_map_only=avg_map_only)
     return
 
 
-def make_tier2(tier2_config, star_df_full):
+def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func, avg_map_only=False):
     """
     Makes only the tier2 dict
     """
@@ -68,11 +79,20 @@ def make_tier2(tier2_config, star_df_full):
         star_df = star_df_full
     nstars = len(star_df)
     
-    if t2.t1_true_or_sini=='true':
-        comp_post_dir='/data/user/judahvz/planet_bd/orvara/judah/burned_chains_am_only/'
-    elif t2.t1_true_or_sini=='sini':
-        comp_post_dir='/data/user/judahvz/planet_bd/orvara/judah/burned_chains_amsini_only/'
-        #raise Exception('sini not yet fixed. Resolve problem in burned_chains_amsini_only/msini_chain_maker. Jul2 notes.')
+    # Make star_df_map either with all recoveries files or just with avg
+    if avg_map_only:
+        Mstar = star_df_full.Mstar.mean()
+        cols = star_df_full.columns
+        avg_df = pd.DataFrame([['average', Mstar, [], 0]], columns=cols)
+        star_df_compl = avg_df
+    else:
+        star_df_compl = star_df_full
+    
+    #if t2.t1_true_or_sini=='true':
+    #    comp_post_dir='/data/user/judahvz/planet_bd/orvara/judah/burned_chains_am_only/'
+    #elif t2.t1_true_or_sini=='sini':
+    #    comp_post_dir='/data/user/judahvz/planet_bd/orvara/judah/burned_chains_amsini_only/'
+
     y_param = f"{t2.t1_m_or_q}{t2.t1_true_or_sini}"
     saved_maps_dir = os.path.join(t2.t1_dir, f"saved_maps_{y_param}")
     ycol = f"inj_{y_param}"
@@ -82,16 +102,17 @@ def make_tier2(tier2_config, star_df_full):
     if not t2_exists:
         main.make_average_map(tier1_dir=t2.t1_dir,
                               tier2_dir=t2.t2_dir,
-                              star_df=star_df,
+                              star_df=star_df_compl,
                               ycol=ycol,
                               m_unit=t2.t1_mass_unit)
 
         main.prep_post_draws(tier1_dir=t2.t1_dir,
                              tier2_dir=t2.t2_dir,
                              star_df=star_df, comp_post_dir=comp_post_dir,
-                             saved_maps_dir=saved_maps_dir, m_unit=t2.t1_mass_unit)
+                             sampling_func=sampling_func,
+                             saved_maps_dir=saved_maps_dir, m_unit=t2.t1_mass_unit,
+                             avg_map_only=avg_map_only)
                              
-        #print("DIRS??", t2.t1_dir, t2.t2_dir)
         ## Plot companion catalog
         catalog_path = os.path.join(t2.t1_dir, t2.t2_dir, 'sampled_post_prior_compl.npz')
         plot_save_path = os.path.join(t2.t1_dir, t2.t2_dir, 'catalog_and_completeness.png')          
@@ -242,14 +263,18 @@ def make_tier3(tier3_config, star_df_full):
 
 def run_multiple(tier1_list, tier2_list, tier3_list,
                  a_edges, m_edges,
-                 recoveries_dir, recoveries_m_unit,
+                 recoveries_dir,
+                 recoveries_mtype,
                  star_df,
                  tier2_df_cuts_dict,
+                 comp_post_dir,
+                 sampling_func,
                  run_mcmc, run_bic_compare,
                  run_models_list,
                  plot_models_list,
                  stack_dim,
                  m_unit,
+                 avg_map_only,
                  plot_only,
                  do_single_cells):
     """
@@ -356,28 +381,34 @@ def run_multiple(tier1_list, tier2_list, tier3_list,
     #star_df_full = make_star_df()
     star_df_full = star_df
 
-    
     ## Now create all tier1 directories in parallel, bc they don't depend on each other
     if len(tier1_configs) > 1:
-        run_parallel(make_tier1, [tier1_configs, star_df_full, recoveries_dir, recoveries_m_unit], "tier1")
+        print("RUNNING parallel tier1")
+        arg_list = [star_df_full, recoveries_dir, recoveries_mtype, avg_map_only]
+        run_parallel(make_tier1, tier1_configs, arg_list, "tier1")
     else:
         print("RUNNING single tier1")
-        make_tier1(next(iter(tier1_configs.values())), star_df_full, recoveries_dir, recoveries_m_unit)
+        make_tier1(next(iter(tier1_configs.values())), star_df_full, recoveries_dir, 
+                                                       recoveries_mtype, 
+                                                       avg_map_only)
     
    
 
     ## Now create all tier2 directories in parallel
     #import pdb; pdb.set_trace()
     if len(tier2_configs) > 1:
-        run_parallel(make_tier2, [tier2_configs, star_df_full], "tier2")
+        print("RUNNING parallel tier2")
+        arg_list = [star_df_full, comp_post_dir, sampling_func, avg_map_only]
+        run_parallel(make_tier2, tier2_configs, arg_list, "tier2")
     else:
         print("RUNNING single tier2")
-        make_tier2(next(iter(tier2_configs.values())), star_df_full)
+        make_tier2(next(iter(tier2_configs.values())), star_df_full, comp_post_dir, sampling_func, avg_map_only)
 
 
     ## Now create all tier3 directories in parallel
     if len(tier3_configs) > 1:
-        run_parallel(make_tier3, [tier3_configs, star_df_full], "tier3")
+        print("RUNNING parallel tier3")
+        run_parallel(make_tier3, tier3_configs, [star_df_full], "tier3")
     else:
         print("RUNNING single tier3")
         make_tier3(next(iter(tier3_configs.values())), star_df_full)         
@@ -388,13 +419,10 @@ def run_multiple(tier1_list, tier2_list, tier3_list,
 
 
 
-
-def run_parallel_(func, configs, star_df, label):
+def run_parallel(func, configs, shared_args, label):
     """
-    Run func(config, star_df) for each config in parallel.
-
-    Raises the first exception encountered after printing the
-    associated configuration and traceback.
+    Run func(config, *shared_args) once for each configuration in configs
+    using multiple processes.
     """
 
     print(f"RUNNING parallel {label}")
@@ -402,61 +430,25 @@ def run_parallel_(func, configs, star_df, label):
     with ProcessPoolExecutor() as executor:
 
         futures = {
-            executor.submit(func, cfg, star_df): name
-            for name, cfg in configs.items()
+            executor.submit(func, config, *shared_args): name
+            for name, config in configs.items()
         }
 
         for future in as_completed(futures):
+
             name = futures[future]
-            try:
-                future.result()
-                print(f"Finished {name}")
-            except Exception:
-                print(f"\n run.py: ERROR while processing '{name}'")
-                print("Configuration:")
-                print(configs[name])
-                traceback.print_exc()
-                raise
-    return        
-
-
-def run_parallel(func, arg_list, label):
-    """
-    Run func(*args) for each item in arg_list in parallel.
-
-    The first argument in each args tuple is assumed to be a
-    configuration object containing the job name.
-
-    Raises the first exception encountered after printing the
-    associated configuration and traceback.
-    """
-
-    print(f"RUNNING parallel {label}")
-
-    with ProcessPoolExecutor() as executor:
-
-        futures = {
-            executor.submit(func, *args): args
-            for args in arg_list
-        }
-
-        for future in as_completed(futures):
-            args = futures[future]
-            config = args[0]
-            name = config.items()[0]
+            config = configs[name]
 
             try:
                 future.result()
                 print(f"Finished {name}")
 
             except Exception:
-                print(f"\n run.py: ERROR while processing '{name}'")
+                print(f"\nrun.py: ERROR while processing '{name}'")
                 print("Configuration:")
                 print(config)
                 traceback.print_exc()
                 raise
-
-    return
 
 
 

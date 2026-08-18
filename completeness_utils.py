@@ -229,11 +229,13 @@ def _process_single_star(args):
     Helper function for parallel map creation.
     Wraps single_map_maker() above
     """
-    row, path_to_recoveries, maps_save_path, maps_ycol, m_unit = args
+    row, path_to_recoveries, maps_save_path, maps_ycol, m_unit, avg_map_only = args
 
     starname = row.star_name
     mstar = row.Mstar
     
+    if avg_map_only:
+        starname='average'
 
     single_recoveries_path = os.path.join(
         path_to_recoveries, f'{starname}_recoveries.csv'
@@ -316,7 +318,7 @@ def recs_msini_converter(recoveries_path, save_file):
 
     return
 
-def recs_mass_ratio_converter(recoveries_path, save_file, mstar, m_unit='earth'):
+def recs_mass_ratio_converter(recoveries_path, save_file, mstar):
     """
     Convert a recoveries.csv file from Msini or Mtrue to
     mass ratio (M/Mstar) by dividing every injection by
@@ -345,12 +347,8 @@ def recs_mass_ratio_converter(recoveries_path, save_file, mstar, m_unit='earth')
     else:
         raise Exception("recoveries.csv must contain either 'inj_msini' or 'inj_mtrue' column")
         
-    if m_unit=='earth':
-        mstar = mstar*c.M_sun.cgs.value/c.M_earth.cgs.value
-    elif m_unit=='jupiter':
-        mstar = mstar*c.M_sun.cgs.value/c.M_jup.cgs.value
-    else:
-        raise Exception('completeness_utils.recs_mass_ratio_converter: Specify a mass unit for recoveries.csv')
+    ## Assuming recoveries file is in earth masses, calculate mstar in m_earth
+    mstar = mstar*c.M_sun.cgs.value/c.M_earth.cgs.value
     
     
     recs_orig[qcol] = recs_orig[mass_col]/mstar

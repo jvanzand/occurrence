@@ -60,9 +60,10 @@ model_dict = {'flat':['FlatLine',
 
 def prep_recoveries_files(tier1_dir,
                           star_df,
-                          msini_rec_dir_to_make_mtrue,
-                          m_dir_to_make_q,
-                          recoveries_m_unit='earth'):
+                          master_rec_dir,
+                          recoveries_mtype,
+                          m_dir_to_make_q=None
+                          ):
     """
     Prepare recoveries.csv files for occurrence
     calculations.
@@ -83,45 +84,73 @@ def prep_recoveries_files(tier1_dir,
     """
 
     #import pdb; pdb.set_trace()
+    
+    if recoveries_mtype=='msini':
 
-    if 'true' in tier1_dir: # If tier1_dir is mtrue or qtrue, then convert msini to mtrue
+        if 'true' in tier1_dir: # If tier1_dir is mtrue or qtrue, then convert msini to mtrue
+            for starname in star_df.star_name:
+                recoveries_file = os.path.join(master_rec_dir, starname+'_recoveries.csv')
+                mtrue_recoveries_save_file = os.path.join(tier1_dir, 'mtrue_recoveries/', starname+'_recoveries.csv')
+            
+                cu.recs_msini_converter(recoveries_file, mtrue_recoveries_save_file)
+            
+        else:
+            os.makedirs('msini/msini_recoveries/', exist_ok=True)
+            keep_cols = ['inj_msini', 'inj_au', 'inj_e', 'recovered']
+            for starname in star_df.star_name:
+                recoveries_file = os.path.join(master_rec_dir, starname+'_recoveries.csv')
+                msini_recoveries_save_file = os.path.join(tier1_dir, 'msini_recoveries/', starname+'_recoveries.csv')
+            
+                rec_file = pd.read_csv(recoveries_file)[keep_cols]
+                rec_file.to_csv(msini_recoveries_save_file, index=False)
+                #import pdb; pdb.set_trace()
+    
+        if 'q' in tier1_dir: # If tier1_dir is qsini or qtrue, then convert m to q
+            for i in range(len(star_df)):
+                row = star_df.iloc[i]
+                starname = row.star_name
+                mstar = row.Mstar
+            
+                dirname = tier1_dir+'_recoveries'
+            
+                q_recoveries_save_file = os.path.join(tier1_dir, dirname, starname+'_recoveries.csv')
+                recoveries_file = os.path.join(m_dir_to_make_q, starname+'_recoveries.csv')
+            
+                cu.recs_mass_ratio_converter(recoveries_file, q_recoveries_save_file, mstar)
+            
+    elif recoveries_mtype=='mtrue':
+        os.makedirs(os.path.join(tier1_dir, 'mtrue_recoveries/'))
+        if 'sini' in tier1_dir:
+            raise Exception("main.prep_recoveries_files: Cannot calculate Msini completeness from Mtrue recoveries files")
+
         for starname in star_df.star_name:
-            recoveries_file = os.path.join(msini_rec_dir_to_make_mtrue, starname+'_recoveries.csv')
+            recoveries_file = os.path.join(master_rec_dir, starname+'_recoveries.csv')
             mtrue_recoveries_save_file = os.path.join(tier1_dir, 'mtrue_recoveries/', starname+'_recoveries.csv')
             
-            cu.recs_msini_converter(recoveries_file, mtrue_recoveries_save_file)
-            
-    else:
-        os.makedirs('msini/msini_recoveries/', exist_ok=True)
-        keep_cols = ['inj_msini', 'inj_au', 'inj_e', 'recovered']
-        for starname in star_df.star_name:
-            recoveries_file = os.path.join(msini_rec_dir_to_make_mtrue, starname+'_recoveries.csv')
-            msini_recoveries_save_file = os.path.join(tier1_dir, 'msini_recoveries/', starname+'_recoveries.csv')
-            
-            rec_file = pd.read_csv(recoveries_file)[keep_cols]
-            rec_file.to_csv(msini_recoveries_save_file, index=False)
-            #import pdb; pdb.set_trace()
+            rec_file = pd.read_csv(recoveries_file)
+            rec_file.to_csv(mtrue_recoveries_save_file, index=False)
     
-    if 'q' in tier1_dir: # If tier1_dir is qsini or qtrue, then convert m to q
-        for i in range(len(star_df)):
-            row = star_df.iloc[i]
-            starname = row.star_name
-            mstar = row.Mstar
+        if 'q' in tier1_dir: # If tier1_dir is qtrue, then convert m to q
+            for i in range(len(star_df)):
+                row = star_df.iloc[i]
+                starname = row.star_name
+                mstar = row.Mstar
             
-            #dirname = 'qtrue_recoveries' if 'inj_mtrue' in pd.read_csv(recoveries_file) else 'qsini_recoveries'
-            dirname = tier1_dir+'_recoveries'
+                dirname = tier1_dir+'_recoveries'
             
-            q_recoveries_save_file = os.path.join(tier1_dir, dirname, starname+'_recoveries.csv')
-            recoveries_file = os.path.join(m_dir_to_make_q, starname+'_recoveries.csv')
+                q_recoveries_save_file = os.path.join(tier1_dir, dirname, starname+'_recoveries.csv')
+                recoveries_file = os.path.join(m_dir_to_make_q, starname+'_recoveries.csv')
             
-            cu.recs_mass_ratio_converter(recoveries_file, q_recoveries_save_file, mstar, m_unit=recoveries_m_unit)
+                cu.recs_mass_ratio_converter(recoveries_file, q_recoveries_save_file, mstar)
+            
             
     return
 
 def prep_maps(tier1_dir,
               star_df,
               path_to_recoveries,
-              m_unit='earth'):
+              m_unit='earth',
+              avg_map_only=False):
     """
     Prepare both single-system and average completeness 
     maps and calculate corresponding interpolation
@@ -150,18 +179,19 @@ def prep_maps(tier1_dir,
     maps_save_label = 'saved_maps_'+tier1_dir
     maps_save_path = os.path.join(tier1_dir, maps_save_label)
     maps_ycol = f"inj_{tier1_dir}"
+    #import pdb; pdb.set_trace()
     
     ncores = np.min([mp.cpu_count(), 30])
     args_list = [
-        (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit)
+        (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit, avg_map_only)
         for _, row in star_df.iterrows()
         ]
 
     with mp.Pool(ncores) as pool:
         pool.map(_process_single_star, args_list)
     
-    #if make_interps:
-    ## Make and save idividual interp functions for sensitivity maps
+    
+    ## Make and save individual interp functions for sensitivity maps
     cu.build_interpolators(maps_save_path, star_df.star_name.to_list())
     
     return
@@ -185,8 +215,10 @@ def make_average_map(tier1_dir, tier2_dir,
     
 def prep_post_draws(tier1_dir, tier2_dir,
                     star_df, comp_post_dir,
+                    sampling_func,
                     saved_maps_dir=None, m_unit='earth',
-                    fig_title='Catalog Posteriors'):
+                    fig_title='Catalog Posteriors',
+                    avg_map_only=False):
 
     """
     Sample from companion posteriors according to user-specified
@@ -203,12 +235,22 @@ def prep_post_draws(tier1_dir, tier2_dir,
               companions orbiting that star. mstar is in solar masses
         comp_post_dir (str): Path to companion posteriors. Naming
             convention depends on custom post sampling function
+        sampling_func (function): Function from sampling_utils.py
+                             that samples posteriors
     """
+    
+    #if avg_map_only:
+    #    Mstar = star_df.Mstar.mean()
+    #    cols = star_df.columns
+    #    avg_df = pd.DataFrame([['average', Mstar, [], 0]], columns=cols)
+    #    star_df_compl = avg_df
+    #else:
+    #    star_df_compl=star_df
         
     #### CUSTOMIZE your own sampler to match the posterior format ####
     ## The output of custom sampler should be a dict whose keys are companion names
     ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
-    post_sample_dict = su.post_sampler2(comp_post_dir, star_df, num_samples=500, m_unit=m_unit) # First sample posteriors
+    post_sample_dict = sampling_func(comp_post_dir, star_df, num_samples=500, m_unit=m_unit) # First sample posteriors
     #from copy import deepcopy; pp_test = deepcopy(post_sample_dict)
     #import pdb; pdb.set_trace()
     ## If using mass ratio, convert masses to q
@@ -231,7 +273,8 @@ def prep_post_draws(tier1_dir, tier2_dir,
     # Now add on completeness values
     sampled_post_with_compls = su.include_post_completeness(post_prior_sample_dict,
                                                             star_df,
-                                                            tier1_dir, tier2_dir)
+                                                            tier1_dir, tier2_dir,
+                                                            avg_map_only=avg_map_only)
     #rr_test = deepcopy(sampled_post_with_compls)                                                  
     ## Saves dict with companion names as key names
     ## Each value is a 6xN array of:
@@ -291,6 +334,7 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
     # Make cell_dict, which contains useful cell info
     cell_dict = ou.cell_values(a_edges, m_or_q_edges, avg_map_fn_path)
     comp_samples = dict(np.load(comp_samples_path)) # Load companion samples
+    #import pdb; pdb.set_trace()
     total_sample_num = np.shape((comp_samples[list(comp_samples.keys())[0]]))[1] # Record sample num before arrays change len
 
     comp_ROIweights = {}
@@ -426,7 +470,7 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
         if run_mcmc:
             mcmc_hist.mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
                     save_path=saved_chains_dir+'chains_hist.npz', parallel=parallel,
-                    nwalkers=50, nsteps=2000, burnin=15000)
+                    nwalkers=50, nsteps=2000, burnin=4000)
             
     ## After running MCMC for histogram, create summary products        
     summary_stats(tier1_dir, tier2_dir, tier3_dir, nstars, verbose=False) # This command creates summary_dict
@@ -479,7 +523,7 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
                             stack_dim,
                             stack_ind=bin_idx,
                             save_path=chain_path, parallel=parallel,
-                            nwalkers=50, nsteps=10000, burnin=320000)
+                            nwalkers=50, nsteps=5000, burnin=300000)
         
     return
     

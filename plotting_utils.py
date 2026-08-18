@@ -76,6 +76,13 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
         a_m_lims_pairs = summary_dict['a_m_lims_pairs']
         print(f"Occurrence-annotated completeness map saved to: {save_path}")
         #import pdb; pdb.set_trace()
+        ## If only a bins, rotate text for better readability
+        if summary_dict['n_mbins']==1:
+            rotation=90
+            fontsize=9
+        else:
+            rotation=0
+            fontsize=11
         
         for i, a_m_lims in enumerate(a_m_lims_pairs): 
             
@@ -113,7 +120,8 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
                 x_center,y_center,
                 text,
                 ha='center',va='center',
-                fontsize=11, zorder=102)
+                fontsize=fontsize, rotation=rotation,
+                zorder=102)
         zoom=True
 
     if zoom==True and a_m_lims_pairs is not None:
@@ -918,6 +926,12 @@ def plot_power(fig, ax, model_func_names, model_dict, save_path, stack_dim='m', 
                 
                 #param_name_list = ['BP1', 'BP2', 'slope']
                 param_name_list = ['$\log_{10}$(BP1)', '$\log_{10}$(BP2)', 'slope']
+                
+            if model_func_name=='bpl':
+                #import pdb; pdb.set_trace()
+                log_a0_samples = model_samples[:,1]
+                param_dict = ou.summarize_chains(log_a0_samples[:,None], rate_type='model', grid_size=2000)
+                param_name_list = ['$\log_{10}(a_0)$']
             
             param_str_list=[]
             for i in range(len(list(param_dict.values())[0])):
@@ -1302,7 +1316,7 @@ def multiple_hist_dist(tier1_list, tier2_types, tier3_list,
                  
                  label_t2 = '$M_{star}$' if t2_type=='Mstar' \
                       else '[Fe/H]' if t2_type=='FeH' \
-                      else '$lR^{\prime}_{HK}$' if t2_type=='Act' \
+                      else '$\log R^{\prime}_{HK}$' if t2_type=='Act' \
                       else None
                  label1 = 'High '+label_t2
                  label2 = 'Low '+label_t2

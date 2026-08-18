@@ -174,6 +174,7 @@ def loglik_hist(lam, nstars, comp_names, bin_lam_dict, num_cells, all_binsizes, 
             cop_and_weight = bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"]
 
             if cop_and_weight[1]==0: # Skip if weight=0 (companion does not overlap the bin)
+                # copica = compl_over_prior_in_cell_avg
                 # print(f'If weight is 0 then copica should be NaN: {comp_over_prior_avg}')
                 continue
 

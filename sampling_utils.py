@@ -101,9 +101,40 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
     #unchecked = [sysname for sysname in burned_files if sysname not in burned_and_checked]
     #import pdb; pdb.set_trace()
     return post_sample_dict
+
+
+def post_sampler3(companion_post_dir, star_df, num_samples=1000, m_unit='earth'):
+    """
+    Sampler for Lammers+Winn2026 mock Gaia planet catalog
+    """
+    import ast
     
+    post_sample_dict = {}
+    #import pdb; pdb.set_trace()
+    companion_cat = pd.read_csv(companion_post_dir) # For Lammers, all comp info is in one df
+    companion_cat['comp_list'] = companion_cat['comp_list'].apply(ast.literal_eval) # Correct "['star_name']" issue
+    for i in range(len(star_df)):
+        row = star_df.iloc[i]
+        
+        if row.comp_num==1:
+            comp_row = companion_cat.query("star_name=='{}'".format(row.star_name))
+            comp_name = comp_row.comp_list.to_list()[0][0]
+            
+            #import pdb; pdb.set_trace()
+            sampled_a = np.random.normal(comp_row.sma_au, comp_row.sma_err_au, size=num_samples)
+            sampled_m = np.random.normal(comp_row.planet_mass_mj, comp_row.planet_mass_mj, size=num_samples)
+            
+            if m_unit=='earth':
+                sampled_m = sampled_m*Mj2Me # Convert M_jupiter to M_earth
+            #import pdb; pdb.set_trace()
+            post_sample_dict[comp_name] = np.array([sampled_a, sampled_m])
+            print(f"Done with {comp_name}")
+    #import pdb; pdb.set_trace()
+        
     
-    
+    return post_sample_dict
+
+
 def interim_prior(post_sample_dict, prior_type='loguniform'):
     """
     Given a set of posterior samples,
@@ -126,7 +157,8 @@ def interim_prior(post_sample_dict, prior_type='loguniform'):
 
 
 def include_post_completeness(sampled_post_dict, star_df,
-                              tier1_dir, tier2_dir):
+                              tier1_dir, tier2_dir,
+                              avg_map_only=False):
     """
     Given a dictionary with companion posterior
     samples, calculate the completeness at each
@@ -141,11 +173,15 @@ def include_post_completeness(sampled_post_dict, star_df,
     avg_compl_interp_str = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
     avg_compl_interp = pickle.load(open(avg_compl_interp_str, 'rb'))
     saved_maps_dir = os.path.join(tier1_dir, f"saved_maps_{tier1_dir}")
-    # import pdb; pdb.set_trace()
+    #import pdb; pdb.set_trace()
     for star_name in star_df.star_name:
-        
-        ## Load single-system interpolation function
-        single_compl_interp_str = os.path.join(saved_maps_dir, star_name, 'interp_fn.pkl')
+        if avg_map_only==False:
+            ## Load single-system interpolation function
+            single_compl_interp_str = os.path.join(saved_maps_dir, star_name, 'interp_fn.pkl')
+        else:
+            ## Load the same avg function for every star
+            single_compl_interp_str = os.path.join(saved_maps_dir, 'average', 'interp_fn.pkl')
+            
         single_compl_interp = pickle.load(open(single_compl_interp_str, 'rb'))
         
         comp_list = star_df.query(f"star_name=='{star_name}'").comp_list.iloc[0] # List of comp names
@@ -164,22 +200,7 @@ def include_post_completeness(sampled_post_dict, star_df,
             single_star_compls = single_compl_interp((a_m_prior[0], a_m_prior[1]))
             
             
-            Zbin_list=['107148_1', '156668_1', '16141_0', '177830_0', '218566_0', '24040_0',
-                       '3651_0', '3765_0', '75732_2', '757532_3', '7924_2', '147379a_0', 'hip57050_1']
-            """
-            if comp_name in Zbin_list:
-                arr = sampled_post_dict[comp_name]
 
-                mask = (
-                          (arr[0] >= 0.23) &
-                          (arr[0] <= 10) &
-                          (arr[1] >= 0.1) &
-                          (arr[1] <= 0.3)
-                           )
-                inds = np.where(mask)[0]
-                print(f"{comp_name}: Avg comp={avg_compls.mean():.3f}, Single comp={single_star_compls.mean():.3f}")
-                #import pdb; pdb.set_trace()
-            """
             ## Companions that are clearly detectable, but so massive they fall outside the completeness range
             if comp_name in manual_fill_comps:
                 single_star_compls = avg_compls
@@ -188,10 +209,6 @@ def include_post_completeness(sampled_post_dict, star_df,
             compl_over_prior_avg = avg_compls/a_m_prior[2]
             compl_over_prior_single = single_star_compls/a_m_prior[2]
             
-            #avg_compls = np.ones(avg_compls.shape)*1e-5
-            #single_star_compls = np.ones(single_star_compls.shape)*1e-6
-            #compl_over_prior_avg = avg_compls
-            #compl_over_prior_single = single_star_compls
             
             nan_mask = (~np.isnan(compl_over_prior_avg)) & (~np.isnan(compl_over_prior_single))
             
