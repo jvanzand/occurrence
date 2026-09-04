@@ -723,6 +723,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         max_y_allstack = np.max([ax[i].get_ylim()[1] for i in range(len(ax))])
         for ax_i in ax:
             ax_i.set_ylim(min_y_allstack, max_y_allstack)
+        
     
     fig.tight_layout(rect=[0,0,1,0.95])
     
@@ -966,6 +967,15 @@ def plot_power(fig, ax, model_func_names, model_dict, save_path, stack_dim='m', 
         ax_i.legend(loc='upper right', fontsize=10)
         ax_i.set_xlim(xlim)
         ax_i.set_ylim(ylim)
+        
+    proposal_tweaks=True
+    if proposal_tweaks:
+        new_labels = ['escarpment', 'escarpment']
+        for ax_idx, ax_i in enumerate(axs_list):
+            handles, labels = ax_i.get_legend_handles_labels()
+            #ax_i.legend(handles, new_labels, fontsize=18)
+            ax_i.get_legend().remove()
+            ax_i.set_ylabel('Planets per star per bin size')
 
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(save_path, dpi=300)
