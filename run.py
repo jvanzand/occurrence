@@ -10,7 +10,7 @@ import traceback
 from copy import deepcopy
 
 
-github_path = '/data/user/judahvz/GitHub/'
+github_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 occurrence_path = os.path.join(github_path, 'occurrence/')
 sys.path.insert(0, github_path)
 from occurrence import analysis_utils as au

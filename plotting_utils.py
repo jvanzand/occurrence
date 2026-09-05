@@ -968,7 +968,7 @@ def plot_power(fig, ax, model_func_names, model_dict, save_path, stack_dim='m', 
         ax_i.set_xlim(xlim)
         ax_i.set_ylim(ylim)
         
-    proposal_tweaks=True
+    proposal_tweaks=False
     if proposal_tweaks:
         new_labels = ['escarpment', 'escarpment']
         for ax_idx, ax_i in enumerate(axs_list):

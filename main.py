@@ -523,7 +523,7 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
                             stack_dim,
                             stack_ind=bin_idx,
                             save_path=chain_path, parallel=parallel,
-                            nwalkers=50, nsteps=5000, burnin=300000)
+                            nwalkers=50, nsteps=5000, burnin=30000)
         
     return
     
