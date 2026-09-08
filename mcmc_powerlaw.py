@@ -2,12 +2,26 @@
 import os
 import numpy as np
 from pathlib import Path
+from dataclasses import dataclass
+from typing import Callable, Tuple
 
 import emcee
 import multiprocessing as mp
 from scipy.optimize import minimize
 
 import matplotlib.pyplot as plt
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    """Functions and display metadata associated with one model."""
+
+    function: Callable
+    ndim: int
+    parameter_names: Tuple[str, ...]
+    color: str
+    initializer: Callable
+    prior: Callable
 
 def mcmc(hist_dict,
          model_func_name,
@@ -20,87 +34,31 @@ def mcmc(hist_dict,
          save_path="chains.npz",
          random_seed=None,
          ):
-    """
-    Run MCMC to compute occurrence rates
-    Start by extracting and manipulating ingredients 
-    to feed to log-likelihood
-    
-    Arguments:
-        nstars (int): Number of host stars in sample
-        comp_names_inROI (list of str): List of names of
-            companions that fall in the ROI. Must correspond 
-            to keys in bin_lam_dict
-        cell_dict (dict): Dictionary containing useful info
-            related to cell sizes, avg completeness, etc.
-        bin_lam_dict (dict): Compressed representation of
-            posterior samples, with completeness, priors,
-            and lambda indices accounted for. Keys look like
-            'planetXX_cellYY_compl_over_prior' and
-            'planetXX_cellYY_weight'. Thus, with Np companions
-            and Nc cells, there are 2*Np*Nc keys in the dict.
-            'compl_over_prior' is an array of floats, and 'weight'
-            is a single float.
-        
-        nwalkers (int): Number of walkers
-        nsteps (int): Number of production steps
-        burnin (int): Number of burn-in steps
-        parallel (bool): Use multiprocessing if True
-        save_path (str): Where to save chains
-        random_seed (int or None)
-            
+    """Fit a registered model to histogram summaries with ``emcee``.
+
+    ``hist_dict`` contains bin centers, occurrence-rate densities, asymmetric
+    uncertainties, and the fitted domain. Supplying ``random_seed`` makes
+    initialization and sampling reproducible without changing unseeded runs.
     """
     os.makedirs(Path(save_path).parent, exist_ok=True)
-    # import pdb; pdb.set_trace()
-    
-    ## Choose ndim and function based on name
-    if model_func_name=='pp1':
-        model_func = PiecewisePower1
-        ndim = 2
-    elif model_func_name=='pp2':
-        model_func = PiecewisePower2
-        ndim = 4
-    elif model_func_name=='logG':
-        model_func = log_gaussian
-        ndim = 3
-    elif model_func_name=='step':
-        model_func = step
-        ndim = 3
-    elif model_func_name=='escarpment':
-        model_func = escarpment
-        ndim = 4
-    elif model_func_name == 'bpl':
-        model_func = brokenpowerlaw
-        ndim = 4
-    else:
-        raise ValueError(f"Unknown model: {model_func_name}")
-        
-    
-    ############################################################################ 
-    ##############################################################################
-    #import pdb; pdb.set_trace()
-    
-    loglik_args = (
-        hist_dict,
-        model_func,
-        model_func_name
-    )
-    
-    
-    # ---- Initialize walkers ----
-    theta_init = initial_params(model_func_name, hist_dict)
-    
+    model_spec = get_model_spec(model_func_name)
+    rng = np.random.RandomState(random_seed) if random_seed is not None else np.random
+    loglik_args = (hist_dict, model_spec.function, model_func_name)
 
-    # Small Gaussian ball around initial guess
-    pos = theta_init + 1e-3 * np.random.randn(nwalkers, ndim)
+    theta_init = initial_params(model_func_name, hist_dict, random_state=rng)
+    pos = theta_init + 1e-3 * rng.randn(nwalkers, model_spec.ndim)
     
     
     # ---- Set up sampler ----
     if parallel:
         with mp.Pool() as pool:
             sampler = emcee.EnsembleSampler(
-                nwalkers, ndim, loglik_power,
+                nwalkers, model_spec.ndim, loglik_power,
                 args=loglik_args, pool=pool
             )
+
+            if random_seed is not None:
+                sampler.random_state = rng.get_state()
 
             # Burn-in
             pos, _, _ = sampler.run_mcmc(pos, burnin, progress=True)
@@ -110,8 +68,11 @@ def mcmc(hist_dict,
             sampler.run_mcmc(pos, nsteps, progress=True)
 
     else:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, loglik_power,
+        sampler = emcee.EnsembleSampler(nwalkers, model_spec.ndim, loglik_power,
                                         args=loglik_args)
+
+        if random_seed is not None:
+            sampler.random_state = rng.get_state()
 
         # Burn-in
         pos, _, _ = sampler.run_mcmc(pos, burnin, progress=True)
@@ -346,311 +307,222 @@ def escarpment(theta, AorM):
 
 def brokenpowerlaw(theta, AorM):
     C, log_a0, beta, gamma = theta
-    a0 = np.exp(log_a0)
+    a0 = 10**log_a0
     return C*AorM**beta * (1 - np.exp(-(AorM/a0)**gamma))
 
 
 
-def initial_params(model_func_name, hist_dict):
-    """
-    Generate initial parameter guesses
-    for a model function. Initial guesses
-    for each function are empirical, and
-    the function is identified by ndim
-    """
-    
+def _init_flat(hist_dict, random_state):
+    return np.array([np.mean(hist_dict['ORD_vals'])])
+
+
+def _init_pp1(hist_dict, random_state):
+    min_xval, max_xval = hist_dict['lims']
+    ORD_vals = hist_dict['ORD_vals']
+    slope = ((ORD_vals[-1] - ORD_vals[0]) /
+             (np.log10(max_xval) - np.log10(min_xval)))
+    intercept = ORD_vals[-1] - slope*np.log10(max_xval)
+    return np.array([slope, intercept])
+
+
+def _init_pp2(hist_dict, random_state):
     bin_centers = hist_dict['bin_centers']
     min_xval, max_xval = hist_dict['lims']
     ORD_vals = hist_dict['ORD_vals']
-    
-    
-    if model_func_name=='flat':
-        
-        C = np.mean(ORD_vals)
-        p0 = [C]
-        
-        
-    elif model_func_name=='pp1':
-        
-        ## pp1 takes the form lam(x) = slope*ln(x)+b
-        ## Initial guess: line connecting the extreme points
-        slope = (ORD_vals[-1]-ORD_vals[0])/(np.log10(max_xval)-np.log10(min_xval)) # slope = delta_y/delta_x
-        b = ORD_vals[-1]-slope*np.log10(max_xval) # b = y1-slope*x1
-        #import pdb; pdb.set_trace()
-        
-        p0 = [slope, b]
-
-        print(f"Initial params: slope={slope:.3f} and b={b:.3f}")
-        
-    
-    elif model_func_name=='pp2':
-        #import pdb; pdb.set_trace()
-        
-        ## Idea: divide the histogram down the middle and fit a line to each half
-        center_val = (min_xval*max_xval)**0.5
-        center_bin_ind = np.argmin(abs(bin_centers/center_val-1)) # Find the nearest bin center in log space
-        center_ORD = ORD_vals[center_bin_ind]
-        
-        slope1 = (center_ORD-ORD_vals[0])/(np.log10(center_val)-np.log10(min_xval)) # slope = delta_y/delta_x
-        b1 = center_ORD-slope1*np.log10(center_val) # b = y1-slope*x1
-        
-        slope2 = (ORD_vals[-1]-center_ORD)/(np.log10(max_xval)-np.log10(center_val)) # slope = delta_y/delta_x
-        #b2 = ORD_vals[-1]-slope1*np.log10(max_xval) # b = y1-slope*x1
-        log_breakpoint = np.log10(center_val)
-
-        p0 = [slope1, slope2, b1, log_breakpoint]
-    
-    
-    elif model_func_name=='logG':
-
-        A = np.mean(ORD_vals)
-        mu = np.mean(np.log10(bin_centers)) # Take log-mean
-        sigma = np.log10((bin_centers[-1]/bin_centers[0])**(1/4)) # Fraction of the total
-        
-        p0 = [A, mu, sigma]
-    
-    elif model_func_name=='step':
-        
-        center_val = (min_xval*max_xval)**0.5
-        log_breakpoint = np.log10(center_val)
-        C1 = min(ORD_vals)
-        C2 = max(ORD_vals)
-        
-        
-        p0 = [C1, C2, log_breakpoint]
-    
-    elif model_func_name=='escarpment':
-    
-        ## Idea: divide the histogram into even thirds. Fit a line to the middle third and set the
-        ##       height of the first and last at the corresponding levels.
-        
-        
-        # Domain in log-space
-        log_min = np.log10(min_xval)
-        log_max = np.log10(max_xval)
-
-        # Breakpoints at thirds
-        log_bp1 = log_min + (log_max - log_min)/3
-        log_bp2 = log_min + 2*(log_max - log_min)/3
-
-        # Select bins in middle third
-        middle_mask = (
-            (np.log10(bin_centers) >= log_bp1) &
-            (np.log10(bin_centers) <= log_bp2)
-        )
-
-        middle_x = np.log10(bin_centers[middle_mask])
-        middle_y = ORD_vals[middle_mask]
-
-        # Fit line to middle section
-        slope_mid, intercept_mid = np.polyfit(middle_x, middle_y, 1)
-
-        # Flat levels determined by evaluating the middle line
-        # at the breakpoints
-        C1 = slope_mid*log_bp1 + intercept_mid
-        C2 = slope_mid*log_bp2 + intercept_mid
-        
-        if C1<0 or C1>1:
-            C1 = np.median(ORD_vals)
-        if C2<0 or C2>1:
-            C2 = np.median(ORD_vals)
-
-        # Parameter vector
-        p0 = [C1, C2, log_bp1, log_bp2]
-        
-    elif model_func_name=='bpl':
-
-        C = np.max(ORD_vals)
-        log_a0 = np.log10((min_xval*max_xval)**0.5) # Middle of the domain
-        beta = np.random.uniform(-0.5, 0.5)
-        gamma = np.random.uniform(-0.5, 0.5)
-        
-        p0 = [C, log_a0, beta, gamma]
-    
-    return p0
+    center_val = (min_xval*max_xval)**0.5
+    center_bin_ind = np.argmin(abs(bin_centers/center_val - 1))
+    center_ORD = ORD_vals[center_bin_ind]
+    slope1 = ((center_ORD - ORD_vals[0]) /
+              (np.log10(center_val) - np.log10(min_xval)))
+    intercept = center_ORD - slope1*np.log10(center_val)
+    slope2 = ((ORD_vals[-1] - center_ORD) /
+              (np.log10(max_xval) - np.log10(center_val)))
+    return np.array([slope1, slope2, intercept, np.log10(center_val)])
 
 
-def log_prior(model_func_name, theta, AorM_min, AorM_max):
-    """
-    Calculate the log-prior for model parameters.
-    
-    Uses uniform priors within allowed bounds (log-prior = 0 if valid, 
-    -inf if invalid). Constraints are determined by the same logic as 
-    initial_params().
-    
-    Arguments:
-        model_func_name (str): Name of model function ('pp1', 'pp2', 'escarpment')
-        theta (array-like): Model parameters
-        AorM_list (array-like): Fine grid of a or m values (for determining bounds)
-        dlogAorM (float): Log spacing of grid
-    
-    Returns:
-        log_prior (float): Log of prior probability (0 for uniform within bounds, 
-                          -inf for parameters outside allowed bounds)
-    """
-    
-    if model_func_name == 'flat':
-    
-        if FlatLine(theta, AorM_min)<0:
-            return -np.inf
-        return 0.0
-    
-    elif model_func_name == 'pp1':
-        
-        # Check if parameters are within bounds
-        extreme_val1 = PiecewisePower1(theta, AorM_min)
-        extreme_val2 = PiecewisePower1(theta, AorM_max)
-        
-        if extreme_val1<0 or extreme_val2<0:
-            return -np.inf
-        if extreme_val1>1 or extreme_val2>1:
-            return -np.inf
-        
-        return 0.0
-    
-    elif model_func_name == 'pp2':
-        m1, m2, b, log_xt = theta
-        minL, maxL = np.log10(AorM_min), np.log10(AorM_max)
-        
-        extreme_val1 = PiecewisePower2(theta, AorM_min)
-        extreme_val2 = PiecewisePower2(theta, AorM_max)
-        extreme_val3 = PiecewisePower2(theta, 10**(log_xt))
-        
+def _init_log_gaussian(hist_dict, random_state):
+    bin_centers = hist_dict['bin_centers']
+    amplitude = np.mean(hist_dict['ORD_vals'])
+    mu = np.mean(np.log10(bin_centers))
+    sigma = np.log10((bin_centers[-1]/bin_centers[0])**0.25)
+    return np.array([amplitude, mu, sigma])
 
-        if extreme_val1<0 or extreme_val2<0 or extreme_val3<0:
-            return -np.inf
-        if log_xt<minL or log_xt>maxL:
-            return -np.inf
-        if abs(m1)>100 or abs(m2)>100:
-            return -np.inf
-        
-        # Log-uniform prior on absolute value of slopes
-        logprior=0
-        logprior -= np.log10(abs(m1))
-        logprior -= np.log10(abs(m2))
-        
-        return logprior
-        
-    elif model_func_name=='logG':
-        
-        A, mu, sigma = theta
-        
-        
-        if A<0 or A>10*AorM_max:
-            return -np.inf
-        if mu<np.log10(AorM_min)-15 or mu>np.log10(AorM_max)+15:
-            return -np.inf
-        if abs(sigma)>np.log10(AorM_max/AorM_min):
-            return -np.inf
-        if sigma<0:
-            return -np.inf
-            
-        return 0.0
-            
-        
-    
-    elif model_func_name == 'step':
-        C1, C2, log_bp = theta
-        bp = 10**(log_bp)
-        
-        if C1<0 or C2<0:
-            return -np.inf
-        if C1>1 or C2>1:
-            return -np.inf
-        # Check that bp is within bounds
-        if bp<AorM_min or bp>AorM_max:
-            return -np.inf
-        
-        return 0.0
-    
-    elif model_func_name == 'escarpment':
-        C1, C2, log_bp1, log_bp2 = theta
-        bp1, bp2 = 10**(log_bp1), 10**(log_bp2)
-        
-        if C1<0 or C2<0:
-            return -np.inf
-        if C1>1 or C2>1:
-            return -np.inf
-        # Check that bp1 < bp2
-        if bp1 >= bp2:
-            return -np.inf
-        if bp1<AorM_min or bp1>AorM_max:
-            return -np.inf
-        if bp2<AorM_min or bp2>AorM_max:
-            return -np.inf
-        
-        return 0.0
-        
-    elif model_func_name == 'bpl':
-        C, log_a0, beta, gamma = theta
-        a0 = 10**(log_a0)
-        
-        if C<=0:
-            return -np.inf
-        if C>2:
-            return -np.inf
-        if abs(log_a0)>10:
-            return -np.inf
-        if abs(beta)>4:
-            return -np.inf
-        if abs(gamma)>4:
-            return -np.inf
-        return 0.0
-    
-    else:
+
+def _init_step(hist_dict, random_state):
+    min_xval, max_xval = hist_dict['lims']
+    ORD_vals = hist_dict['ORD_vals']
+    return np.array([
+        np.min(ORD_vals),
+        np.max(ORD_vals),
+        np.log10((min_xval*max_xval)**0.5),
+    ])
+
+
+def _init_escarpment(hist_dict, random_state):
+    bin_centers = hist_dict['bin_centers']
+    min_xval, max_xval = hist_dict['lims']
+    ORD_vals = hist_dict['ORD_vals']
+    log_min, log_max = np.log10(min_xval), np.log10(max_xval)
+    log_bp1 = log_min + (log_max - log_min)/3
+    log_bp2 = log_min + 2*(log_max - log_min)/3
+    middle_mask = (
+        (np.log10(bin_centers) >= log_bp1) &
+        (np.log10(bin_centers) <= log_bp2)
+    )
+    slope, intercept = np.polyfit(
+        np.log10(bin_centers[middle_mask]), ORD_vals[middle_mask], 1
+    )
+    C1 = slope*log_bp1 + intercept
+    C2 = slope*log_bp2 + intercept
+    median_ORD = np.median(ORD_vals)
+    C1 = median_ORD if C1 < 0 or C1 > 1 else C1
+    C2 = median_ORD if C2 < 0 or C2 > 1 else C2
+    return np.array([C1, C2, log_bp1, log_bp2])
+
+
+def _init_broken_powerlaw(hist_dict, random_state):
+    min_xval, max_xval = hist_dict['lims']
+    return np.array([
+        np.max(hist_dict['ORD_vals']),
+        np.log10((min_xval*max_xval)**0.5),
+        random_state.uniform(-0.5, 0.5),
+        random_state.uniform(-0.5, 0.5),
+    ])
+
+
+def _prior_flat(theta, x_min, x_max):
+    return -np.inf if FlatLine(theta, x_min) < 0 else 0.0
+
+
+def _prior_pp1(theta, x_min, x_max):
+    endpoints = [PiecewisePower1(theta, x_min), PiecewisePower1(theta, x_max)]
+    return -np.inf if min(endpoints) < 0 or max(endpoints) > 1 else 0.0
+
+
+def _prior_pp2(theta, x_min, x_max):
+    m1, m2, _, log_xt = theta
+    values = [
+        PiecewisePower2(theta, x_min),
+        PiecewisePower2(theta, x_max),
+        PiecewisePower2(theta, 10**log_xt),
+    ]
+    if min(values) < 0 or not np.log10(x_min) <= log_xt <= np.log10(x_max):
+        return -np.inf
+    if abs(m1) > 100 or abs(m2) > 100:
+        return -np.inf
+    return -np.log10(abs(m1)) - np.log10(abs(m2))
+
+
+def _prior_log_gaussian(theta, x_min, x_max):
+    amplitude, mu, sigma = theta
+    if amplitude < 0 or amplitude > 10*x_max:
+        return -np.inf
+    if mu < np.log10(x_min) - 15 or mu > np.log10(x_max) + 15:
+        return -np.inf
+    if sigma < 0 or sigma > np.log10(x_max/x_min):
+        return -np.inf
+    return 0.0
+
+
+def _prior_step(theta, x_min, x_max):
+    C1, C2, log_bp = theta
+    breakpoint = 10**log_bp
+    if C1 < 0 or C2 < 0 or C1 > 1 or C2 > 1:
+        return -np.inf
+    return 0.0 if x_min <= breakpoint <= x_max else -np.inf
+
+
+def _prior_escarpment(theta, x_min, x_max):
+    C1, C2, log_bp1, log_bp2 = theta
+    bp1, bp2 = 10**log_bp1, 10**log_bp2
+    if C1 < 0 or C2 < 0 or C1 > 1 or C2 > 1:
+        return -np.inf
+    if bp1 >= bp2:
+        return -np.inf
+    return 0.0 if x_min <= bp1 <= x_max and x_min <= bp2 <= x_max else -np.inf
+
+
+def _prior_broken_powerlaw(theta, x_min, x_max):
+    C, log_a0, beta, gamma = theta
+    if C <= 0 or C > 2:
+        return -np.inf
+    if abs(log_a0) > 10 or abs(beta) > 4 or abs(gamma) > 4:
+        return -np.inf
+    return 0.0
+
+
+MODEL_REGISTRY = {
+    'flat': ModelSpec(FlatLine, 1, ('C',), 'black', _init_flat, _prior_flat),
+    'pp1': ModelSpec(PiecewisePower1, 2, ('y', 'b'), 'cyan', _init_pp1, _prior_pp1),
+    'pp2': ModelSpec(
+        PiecewisePower2, 4,
+        ('m1', 'm2', 'b1', r'$\log_{10}(x_t)$'), 'goldenrod',
+        _init_pp2, _prior_pp2,
+    ),
+    'logG': ModelSpec(
+        log_gaussian, 3, ('A', r'$\mu$', r'$\sigma$'), 'tomato',
+        _init_log_gaussian, _prior_log_gaussian,
+    ),
+    'step': ModelSpec(
+        step, 3, ('C1', 'C2', r'$\log_{10}(x_t)$'), 'forestgreen',
+        _init_step, _prior_step,
+    ),
+    'escarpment': ModelSpec(
+        escarpment, 4,
+        ('C1', 'C2', r'$\log_{10}(x_{t,1})$', r'$\log_{10}(x_{t,2})$'),
+        'RoyalBlue', _init_escarpment, _prior_escarpment,
+    ),
+    'bpl': ModelSpec(
+        brokenpowerlaw, 4,
+        ('C', r'$\log_{10}(a_0)$', r'$\beta$', r'$\gamma$'), 'deeppink',
+        _init_broken_powerlaw, _prior_broken_powerlaw,
+    ),
+}
+
+# Backward-compatible plotting metadata. New code should use MODEL_REGISTRY.
+model_dict = {
+    name: [spec.function.__name__, spec.ndim, list(spec.parameter_names), spec.color]
+    for name, spec in MODEL_REGISTRY.items()
+}
+
+
+def get_model_spec(model_func_name):
+    """Return the registered specification for ``model_func_name``."""
+    try:
+        return MODEL_REGISTRY[model_func_name]
+    except KeyError:
         raise ValueError(f"Unknown model: {model_func_name}")
 
 
-def print_power_hard_coded(nstars, comp_names_inROI, model_func, model_func_name,
-                          ROIsamples_dict, ROIweights_dict,
-                          dlogAorM, fine_list_AorM, fine_compl_AorM,
-                          AorM_min, AorM_max,
-                          AorM_ind, parameter_sets):
-    """
-    Print hard-coded power law parameter sets with their likelihoods.
-    
-    Arguments:
-        nstars (int): Number of host stars
-        comp_names_inROI (list of str): Companion names in region of interest
-        model_func : The model function (e.g., PiecewisePower1, PiecewisePower2)
-        model_func_name (str): Name of model function for label formatting
-        ROIsamples_dict (dict): ROI sample data for companions
-        ROIweights_dict (dict): ROI weights for companions
-        dlogAorM (float): Log spacing of parameter grid
-        fine_list_AorM (array): Fine grid of parameter values
-        fine_compl_AorM (array): Fine grid of completeness values
-        AorM_ind (int): Index indicating dimension (0 for 'a', 1 for 'm')
-        parameter_sets (list): List of parameter tuples to evaluate
-    """
-    
+def initial_params(model_func_name, hist_dict, random_state=None):
+    """Generate the legacy histogram-based initial guess for a model."""
+    rng = np.random if random_state is None else random_state
+    return get_model_spec(model_func_name).initializer(hist_dict, rng)
+
+
+def log_prior(model_func_name, theta, AorM_min, AorM_max):
+    """Evaluate the registered model's legacy parameter prior."""
+    return get_model_spec(model_func_name).prior(theta, AorM_min, AorM_max)
+
+
+def print_power_hard_coded(hist_dict, model_func_name, parameter_sets):
+    """Print legacy histogram likelihoods for supplied parameter vectors."""
     print("\n" + "="*60)
     print(f"Hard-coded {model_func_name} Parameter Likelihoods")
     print("="*60)
- 
-     
-    try:
-        model_info = model_dict[model_func_name]
-        param_names = model_info[2]
 
-    except:
-        param_names = [f'p{i}' for i in range(len(parameter_sets[0]))]
-    
-    # Calculate likelihood for each parameter set
+    model_spec = get_model_spec(model_func_name)
     for i, theta in enumerate(parameter_sets):
-        loglik = loglik_power(theta, nstars, comp_names_inROI, model_func,
-                              model_func_name,
-                              ROIsamples_dict, ROIweights_dict,
-                              dlogAorM, fine_list_AorM, fine_compl_AorM,
-                              AorM_min, AorM_max,
-                              AorM_ind)
-        
-        # Format parameter string
-        param_str = ', '.join([f"{name}={val:7.3f}" for name, val in zip(param_names, theta)])
+        loglik = loglik_power(
+            theta, hist_dict, model_spec.function, model_func_name
+        )
+        param_str = ', '.join(
+            f"{name}={val:7.3f}"
+            for name, val in zip(model_spec.parameter_names, theta)
+        )
         print(f"Set {i+1}: {param_str}  →  lnL = {loglik:10.2f}")
-    
+
     print("="*60 + "\n")
-    
-    return
 
 
 
@@ -686,12 +558,9 @@ def calculate_bic(tier123_dir, model_func_name,
         params_mle (ndarray): Parameters at maximum likelihood
     """
     
-    try:
-        model_info = model_dict[model_func_name]
-        model_func = eval(model_info[0])
-        ndim = model_info[1]
-    except:
-        raise ValueError(f"Cannot calculate BIC for model: {model_func_name}. Ensure it's in model_dict")
+    model_spec = get_model_spec(model_func_name)
+    model_func = model_spec.function
+    ndim = model_spec.ndim
 
     # Set up arguments for optimization
     optim_args = (
@@ -798,13 +667,10 @@ def plot_bics_on_histogram(tier123_dir, model_bic_dict, model_dict,
         model_func_name, bic, loglik_max, params_mle = model_bic_dict[key]
         delta_bic = flat_bic-bic
             
-        try:
-            model_info = model_dict[model_func_name]
-            model_func = eval(model_info[0])
-            param_names = model_info[2]
-            color = model_info[3]
-        except:
-            raise ValueError(f"Unknown model: {model_func_name}")
+        model_spec = get_model_spec(model_func_name)
+        model_func = model_spec.function
+        param_names = model_spec.parameter_names
+        color = model_spec.color
         
         ## Plot model on the desired axes
         xlim = xlim_list[ax_idx]
@@ -841,9 +707,6 @@ def plot_bics_on_histogram(tier123_dir, model_bic_dict, model_dict,
     print(f"Saved to: {save_path}\n")
     
     return
-
-
-
 
 
 

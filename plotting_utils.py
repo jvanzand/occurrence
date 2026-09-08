@@ -823,15 +823,10 @@ def plot_power(fig, ax, model_func_names, model_dict, save_path, stack_dim='m', 
                 continue
         
             # --- Model selection ---
-                
-            try:
-                #import pdb; pdb.set_trace()
-                model_info = model_dict[model_func_name]
-                model_func = eval('mcmc_power.'+model_info[0])
-                param_names = model_info[2]
-                plot_clr = model_info[3]
-            except:
-                raise ValueError(f"Cannot calculate BIC for model: {model_func_name}")
+            model_spec = mcmc_power.get_model_spec(model_func_name)
+            model_func = model_spec.function
+            param_names = model_spec.parameter_names
+            plot_clr = model_spec.color
         
             # Load the chain file for this bin
             chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}_bin{bin_idx}.npz')
@@ -1358,4 +1353,3 @@ def multiple_hist_dist(tier1_list, tier2_types, tier3_list,
         
         
   
-

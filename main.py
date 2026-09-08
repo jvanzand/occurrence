@@ -21,41 +21,8 @@ from occurrence import mcmc_powerlaw as mcmc_power
 from occurrence.completeness_utils import _process_single_star
 
                     
-model_dict = {'flat':['FlatLine',
-                     1, 
-                     ['C'],
-                     'black',
-                     ],
-              'pp1':['PiecewisePower1',
-                     2, 
-                     ['y', 'b'],
-                     'cyan',
-                     ],
-              'pp2':['PiecewisePower2',
-                      4, 
-                     ['m1', 'm2', 'b1', '$\log_{10}(x_t)$'],
-                     'goldenrod',
-                     ],
-               'logG':['log_gaussian', 
-                      3,
-                     ['A', '$\mu$', '$\sigma$'],
-                     'tomato',
-                     ],
-              'step':['step', 
-                      3,
-                     ['C1', 'C2', '$\log_{10}(x_{t})$'],
-                     'forestgreen',
-                     ],
-              'escarpment':['escarpment',
-                            4, 
-                            ['C1', 'C2', '$\log_{10}(x_{t,1})$', '$\log_{10}(x_{t,2})$'],
-                            'RoyalBlue',
-                            ],
-              'bpl':['brokenpowerlaw', 
-                     4,
-                     ['C', '$\log_{10}(a_0)$', '$\\beta$', '$\gamma$'],
-                     'deeppink',
-                     ],}
+# Backward-compatible plotting metadata derived from the central registry.
+model_dict = mcmc_power.model_dict
 
 
 def prep_recoveries_files(tier1_dir,
@@ -441,7 +408,8 @@ def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
 def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
              run_models, a_edges, m_edges, stack_dim,
              nstars, parallel=False,
-             nwalkers=50, nsteps=5000, burnin=1000):
+             nwalkers=50, nsteps=5000, burnin=1000,
+             random_seed=None):
     """
     Entry point for MCMC occurrence calculation.
     Collects pre-computed materials to feed to MCMC.
@@ -470,7 +438,8 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
         if run_mcmc:
             mcmc_hist.mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
                     save_path=saved_chains_dir+'chains_hist.npz', parallel=parallel,
-                    nwalkers=50, nsteps=2000, burnin=4000)
+                    nwalkers=nwalkers, nsteps=nsteps, burnin=burnin,
+                    random_seed=random_seed)
             
     ## After running MCMC for histogram, create summary products        
     summary_stats(tier1_dir, tier2_dir, tier3_dir, nstars, verbose=False) # This command creates summary_dict
@@ -523,7 +492,8 @@ def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
                             stack_dim,
                             stack_ind=bin_idx,
                             save_path=chain_path, parallel=parallel,
-                            nwalkers=50, nsteps=5000, burnin=30000)
+                            nwalkers=nwalkers, nsteps=nsteps, burnin=burnin,
+                            random_seed=random_seed)
         
     return
     

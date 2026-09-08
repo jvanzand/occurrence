@@ -183,7 +183,10 @@ def make_tier3(tier3_config, star_df_full):
                       m_edges=t3.m_or_q_edges,
                       stack_dim=t3.stack_dim,
                       nstars=nstars, parallel=False,
-                      nwalkers=50, nsteps=6000, burnin=2000)
+                      nwalkers=t3.nwalkers,
+                      nsteps=t3.nsteps,
+                      burnin=t3.burnin,
+                      random_seed=t3.random_seed)
         
         
         #if t3.plot.summary_stats:
@@ -276,7 +279,11 @@ def run_multiple(tier1_list, tier2_list, tier3_list,
                  m_unit,
                  avg_map_only,
                  plot_only,
-                 do_single_cells):
+                 do_single_cells,
+                 nwalkers=50,
+                 nsteps=6000,
+                 burnin=2000,
+                 random_seed=None):
     """
     Create/organize the parameters to
     run multiple experiments
@@ -347,6 +354,10 @@ def run_multiple(tier1_list, tier2_list, tier3_list,
                               'plot_models':plot_models_list,
                               'stack_dim':stack_dim,
                               'plot_only':plot_only,
+                              'nwalkers':nwalkers,
+                              'nsteps':nsteps,
+                              'burnin':burnin,
+                              'random_seed':random_seed,
                               't1_mass_unit':mass_unit,
                               't2_star_df_query':t2_subdict['star_df_query'],
                               't1_dir':t1_val,
@@ -365,6 +376,10 @@ def run_multiple(tier1_list, tier2_list, tier3_list,
                                          'plot_models':[],
                                          'stack_dim':stack_dim,
                                          'plot_only':plot_only,
+                                         'nwalkers':nwalkers,
+                                         'nsteps':nsteps,
+                                         'burnin':burnin,
+                                         'random_seed':random_seed,
                                          't1_mass_unit':mass_unit,
                                          't2_star_df_query':t2_subdict['star_df_query'],
                                          't1_dir':t1_val,
@@ -449,7 +464,6 @@ def run_parallel(func, configs, shared_args, label):
                 print(config)
                 traceback.print_exc()
                 raise
-
 
 
 

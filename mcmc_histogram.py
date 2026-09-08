@@ -47,8 +47,9 @@ def mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
     os.makedirs(Path(save_path).parent, exist_ok=True)
     # import pdb; pdb.set_trace()
 
+    rng = np.random.RandomState(random_seed) if random_seed is not None else np.random
+
     ## Unpack params
-    # lam = np.random.uniform(0.001, 0.05, size=cell_dict['num_cells'])
     num_cells = cell_dict['num_cells']
     all_binsizes = cell_dict['all_binsizes']
     avg_cell_compls = cell_dict['avg_compls']
@@ -56,10 +57,10 @@ def mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
     ndim = num_cells
     # ---- Initialize walkers ----
     # Start near small positive values (your prior range)
-    lam_init = np.random.uniform(0.001, 0.05, size=ndim)
+    lam_init = rng.uniform(0.001, 0.05, size=ndim)
 
     # Small Gaussian ball around initial guess
-    pos = lam_init + 1e-3 * np.random.randn(nwalkers, ndim)
+    pos = lam_init + 1e-3 * rng.randn(nwalkers, ndim)
 
     # Enforce positivity (important for your likelihood)
     pos = np.clip(pos, 1e-6, None)
@@ -79,9 +80,12 @@ def mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
     if parallel:
         with mp.Pool() as pool:
             sampler = emcee.EnsembleSampler(
-                nwalkers, ndim, loglik,
+                nwalkers, ndim, loglik_hist,
                 args=loglik_args, pool=pool
             )
+
+            if random_seed is not None:
+                sampler.random_state = rng.get_state()
 
             # Burn-in
             pos, _, _ = sampler.run_mcmc(pos, burnin, progress=True)
@@ -93,6 +97,9 @@ def mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
     else:
         sampler = emcee.EnsembleSampler(nwalkers, ndim, loglik_hist,
                                         args=loglik_args)
+
+        if random_seed is not None:
+            sampler.random_state = rng.get_state()
 
         # Burn-in
         pos, _, _ = sampler.run_mcmc(pos, burnin, progress=True)
