@@ -103,7 +103,6 @@ def average_map(maps_dir, avg_map_dir, star_subset, ycol='inj_msini', m_unit='ea
 
         xgrid = np.load(os.path.join(subdir_path, "xgrid.npy"))
         ygrid = np.load(os.path.join(subdir_path, "ygrid.npy"))
-        #import pdb; pdb.set_trace()
         xinds = np.where((xgrid.min() < parent_xgrid) & (xgrid.max() > parent_xgrid))[0]
         yinds = np.where((ygrid.min() < parent_ygrid) & (ygrid.max() > parent_ygrid))[0]
 
@@ -159,7 +158,8 @@ def average_map(maps_dir, avg_map_dir, star_subset, ycol='inj_msini', m_unit='ea
 
 def single_map_maker(system_name, recoveries_path, save_dir, mstar, 
                      ycol='inj_msini', m_unit='earth', 
-                     fill_nans=True, trends_count=False):
+                     fill_nans=True, trends_count=False,
+                     save_plot=False):
     """
     Calculate completeness map from a recoveries.csv file
     and save the map, plus x, y, and z grids used to plot.
@@ -207,8 +207,7 @@ def single_map_maker(system_name, recoveries_path, save_dir, mstar,
     
 
     
-    save_single_plots=True
-    if save_single_plots:
+    if save_plot:
         fig = cplt.completeness_plot(title=system_name,
                                      xlabel=xlabel,
                                      ylabel=ylabel)
@@ -229,7 +228,8 @@ def _process_single_star(args):
     Helper function for parallel map creation.
     Wraps single_map_maker() above
     """
-    row, path_to_recoveries, maps_save_path, maps_ycol, m_unit, avg_map_only = args
+    (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit,
+     avg_map_only, save_single_plots) = args
 
     starname = row.star_name
     mstar = row.Mstar
@@ -249,34 +249,9 @@ def _process_single_star(args):
         mstar,
         ycol=maps_ycol,
         m_unit=m_unit,
-        fill_nans=True
+        fill_nans=True,
+        save_plot=save_single_plots,
     )
-    
-    return
-
-
-def recoveries_combiner(recoveries_path, sys_names, save_dir):
-    """
-	Combine recoveries dfs from a set of individual 
-    recoveries files
-    
-    Arguments:
-        recoveries_path (str): Path to directory containing individual recoveries files
-        sys_names (list): List of systems to be included in combined recoveries file
-    
-    """
-    combined_recs = pd.DataFrame({})
-    for sys_name in sys_names:
-        recs_orig = pd.read_csv(recoveries_path+f'{sys_name}_recoveries.csv')
-		
-        ## Append to master csv file
-        combined_recs = combined_recs.append(recs_orig)
-			
-    print("Master recs is long", len(combined_recs))
-
-    # Leave all masses in original units (default: M_earth)
-    os.makedirs(save_dir, exist_ok=True)
-    combined_recs.to_csv(os.path.join(save_dir, 'combined_recs.csv'), index=False)
     
     return
 
@@ -309,7 +284,6 @@ def recs_msini_converter(recoveries_path, save_file):
     ecc = recs_orig['inj_e'].repeat(ndraws)
     recovered = recs_orig['recovered'].repeat(ndraws)
 
-    # import pdb; pdb.set_trace()
     labels = ['inj_mtrue', 'inj_au', 'inj_e', 'recovered'] # Leave msini label for compatibility
     vals = [m_true, au, ecc, recovered]
     mtrue_recs = pd.DataFrame({label:val for label, val in zip(labels,vals)})
@@ -387,7 +361,6 @@ def cell_completeness(xlims, ylims, interp_fn):
             interp_val = interp_fn((xval, yval))
             if np.isnan(interp_val):
                 warnings.warn("NaN encountered in completeness_utils.cell_completeness")
-                # import pdb; pdb.set_trace()
                 total += 1 # Assume NaNs are encountered in high-mass regions where q~1
             else:
                 total += interp_val
@@ -461,8 +434,6 @@ def fill_completeness_nans(A, direction='high-mass'):
         A[fill_mask] = 0
 
     return A
-
-
 
 
 

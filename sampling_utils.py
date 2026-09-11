@@ -65,7 +65,6 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
 
         if not os.path.exists(chain_file):
             continue
-        # import pdb; pdb.set_trace()
 
         with h5py.File(chain_file, 'r') as f:
             #burned_and_checked.append(sys_name)
@@ -94,12 +93,10 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
                 m_chain = chain_dict[f'msec{comp_ind}'][rand_inds]*m_conversion # Convert M_sun to Me or Mj
                 
                 #if '8765' in sys_name_lowercase:
-                #    import pdb; pdb.set_trace()
 
                 comp_name = sys_name_lowercase+'_'+str(comp_ind)
                 post_sample_dict[comp_name] = [a_chain, m_chain]
     #unchecked = [sysname for sysname in burned_files if sysname not in burned_and_checked]
-    #import pdb; pdb.set_trace()
     return post_sample_dict
 
 
@@ -110,7 +107,6 @@ def post_sampler3(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
     import ast
     
     post_sample_dict = {}
-    #import pdb; pdb.set_trace()
     companion_cat = pd.read_csv(companion_post_dir) # For Lammers, all comp info is in one df
     companion_cat['comp_list'] = companion_cat['comp_list'].apply(ast.literal_eval) # Correct "['star_name']" issue
     for i in range(len(star_df)):
@@ -120,36 +116,31 @@ def post_sampler3(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
             comp_row = companion_cat.query("star_name=='{}'".format(row.star_name))
             comp_name = comp_row.comp_list.to_list()[0][0]
             
-            #import pdb; pdb.set_trace()
             sampled_a = np.random.normal(comp_row.sma_au, comp_row.sma_err_au, size=num_samples)
             sampled_m = np.random.normal(comp_row.planet_mass_mj, comp_row.planet_mass_mj, size=num_samples)
             
             if m_unit=='earth':
                 sampled_m = sampled_m*Mj2Me # Convert M_jupiter to M_earth
-            #import pdb; pdb.set_trace()
             post_sample_dict[comp_name] = np.array([sampled_a, sampled_m])
             print(f"Done with {comp_name}")
-    #import pdb; pdb.set_trace()
         
     
     return post_sample_dict
 
 
 def interim_prior(post_sample_dict, prior_type='loguniform'):
-    """
-    Given a set of posterior samples,
-    calculate the interim prior associated with each
-    and update the input dictionary.
-    
-    Assumes the input dictionary has columns of
-    'comp_name', 'a_list', and 'm_list'
+    """Append interim-prior densities in logarithmic coordinates.
+
+    A prior uniform in ``log10(a)`` and ``log10(m)`` has constant density
+    with respect to ``dlog10(a) dlog10(m)``. Its normalization is irrelevant
+    to parameter inference here, so the stored constant is one.
     """
 
     if prior_type=='loguniform':
         
         for comp_name in post_sample_dict.keys():
             a_m_samples = post_sample_dict[comp_name]
-            prior_array = 1/a_m_samples[0] * 1/a_m_samples[1]
+            prior_array = np.ones_like(a_m_samples[0], dtype=float)
             
             post_sample_dict[comp_name] = np.vstack([a_m_samples, prior_array])
 
@@ -173,7 +164,6 @@ def include_post_completeness(sampled_post_dict, star_df,
     avg_compl_interp_str = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
     avg_compl_interp = pickle.load(open(avg_compl_interp_str, 'rb'))
     saved_maps_dir = os.path.join(tier1_dir, f"saved_maps_{tier1_dir}")
-    #import pdb; pdb.set_trace()
     for star_name in star_df.star_name:
         if avg_map_only==False:
             ## Load single-system interpolation function
@@ -186,7 +176,6 @@ def include_post_completeness(sampled_post_dict, star_df,
         
         comp_list = star_df.query(f"star_name=='{star_name}'").comp_list.iloc[0] # List of comp names
         ## For every companion in the system, calculate the average compl over all stars AND the single-system compl
-        # import pdb; pdb.set_trace()
         manual_fill_comps = ['8765_0']
         for comp_name in comp_list:
             
@@ -210,18 +199,16 @@ def include_post_completeness(sampled_post_dict, star_df,
             compl_over_prior_single = single_star_compls/a_m_prior[2]
             
             
-            nan_mask = (~np.isnan(compl_over_prior_avg)) & (~np.isnan(compl_over_prior_single))
-            
-            
-            # Updated array includes a_samples, m_samples, average completenesses, single star completenesses, compl_over_prior_avg, compl_over_prior_single.
-            # Probably the only compl array I'll use is compl_over_prior_single. compl_over_prior_avg is to test whether using avg completeness changes the answer. The two completeness arrays are for testing/sanity checks.
+            # Preserve every posterior draw, including draws with undefined
+            # completeness. Downstream analyses can apply the mask appropriate
+            # to their ROI and selected completeness treatment without changing
+            # the original Monte Carlo normalization.
             new_array = [a_m_prior[:2], avg_compls, single_star_compls,
-                         compl_over_prior_avg, compl_over_prior_single]
-            masked_array = np.vstack(new_array)[:,nan_mask]
-            sampled_post_dict[comp_name] = masked_array
+                         compl_over_prior_avg, compl_over_prior_single,
+                         a_m_prior[2]]
+            sampled_post_dict[comp_name] = np.vstack(new_array)
 
             
-    #import pdb; pdb.set_trace()
     
     return sampled_post_dict
     

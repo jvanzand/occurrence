@@ -8,13 +8,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as ptch
 from matplotlib.ticker import FixedLocator, NullLocator, FormatStrFormatter, FuncFormatter
-from astropy import constants as c
-
 from pathlib import Path
 import itertools as itt
-
-from occurrence import analysis_utils as au
-from occurrence import occurrence_utils as ou
 
 
 def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True, 
@@ -42,7 +37,6 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
     fifty = plt.contour(xgrid, ygrid, zgrid, [0.5])
 
     
-    #import pdb; pdb.set_trace()
     ax = plt.gca()
     ax.set_xscale('log')
     ax.set_yscale('log')
@@ -75,7 +69,6 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
     if summary_dict is not None and a_m_lims_pairs is not None:
         a_m_lims_pairs = summary_dict['a_m_lims_pairs']
         print(f"Occurrence-annotated completeness map saved to: {save_path}")
-        #import pdb; pdb.set_trace()
         ## If only a bins, rotate text for better readability
         if summary_dict['n_mbins']==1:
             rotation=90
@@ -109,7 +102,6 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
                 f"N_eff = {weight:.2f}\n"
                 f"C = {compl:.2f}"
             )
-            # import pdb; pdb.set_trace()
             a_log_width = alims[1]/alims[0]
             m_log_width = mlims[1]/mlims[0]
             # Place text at center of rectangle
@@ -132,7 +124,6 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
         max_m_cell = a_m_lims_pairs[-1][1][-1] # Last cell, m pair, second element
         plt.xlim([min_a_cell, max_a_cell])
         plt.ylim([min_m_cell, max_m_cell])
-        #import pdb; pdb.set_trace()
 
     
     title_size = 20
@@ -216,7 +207,6 @@ def plot_catalog(tier1_dir, tier2_dir,
     xgrid = np.load(avg_comp_path+"parent_xgrid.npy")
     ygrid = np.load(avg_comp_path+"parent_ygrid.npy")
     zgrid = np.load(avg_comp_path+"parent_zgrid.npy")
-    # import pdb; pdb.set_trace()
     
     #### Restructure a_edges and m_edges to make lims_pairs ####
     if a_edges is not None and m_edges is not None:
@@ -231,7 +221,6 @@ def plot_catalog(tier1_dir, tier2_dir,
     else:
         a_m_lims_pairs = None
 
-    #import pdb; pdb.set_trace()
     ## Normally, you plot completeness using recoveries.csv, which has ycol in it
     ## Here, we are plotting from the x/y/z grids, so we have to provide ycol 'manually'
     ycol = 'inj_'+tier1_dir
@@ -249,11 +238,9 @@ def plot_catalog(tier1_dir, tier2_dir,
     
     ax = plt.gca()
     for cn in comp_names:
-        #import pdb; pdb.set_trace()
         a_m_samples = sampled_post_prior_compl_dict[cn]
         
         if star_df is not None:
-            #import pdb; pdb.set_trace()
             a_m_samples = np.mean(a_m_samples, axis=1)[:2]
             cps_ident = cn.split('_')[0] # remove '_0', '_1', etc.
             star_row = star_df.query(f"cps_identifier==@cps_ident")[star_param].values
@@ -284,7 +271,6 @@ def plot_catalog(tier1_dir, tier2_dir,
         star_sub_df = star_df[star_df['cps_identifier'].isin(comp_host_names)]
         norm = matplotlib.colors.Normalize(vmin=star_sub_df[star_param].min(),
                                            vmax=star_sub_df[star_param].max())
-        #import pdb; pdb.set_trace()
         cmap = plt.get_cmap(star_cmap)
         cmap.set_bad('gray')
         
@@ -298,7 +284,6 @@ def plot_catalog(tier1_dir, tier2_dir,
         from mpl_toolkits.axes_grid1 import make_axes_locatable
         import matplotlib as mpl
 
-        #import pdb; pdb.set_trace()
         try:
             cbar_ax = comp_fig.axes[1]
             cbar_ax.yaxis.label.set_size(new_labelsize)
@@ -334,7 +319,6 @@ def plot_catalog(tier1_dir, tier2_dir,
         ax.tick_params(axis='both', labelsize=new_ticksize)
         
         ax.grid(False)
-        #import pdb; pdb.set_trace()
         
 
     
@@ -357,20 +341,21 @@ def plot_catalog(tier1_dir, tier2_dir,
 
 def plot_corner_from_file(
     path_to_chains,
-    plot_model,
-    model_dict,
+    model_name=None,
     outpath="corner.png",
     param_names=None,
     thin=10,
-    max_samples=50000):
+    max_samples=50000,
+    reference_values=None,
+    reference_color=None):
     """
-    Load MCMC chains from .npz file and generate a corner plot.
-    Handles both histogram and power law models.
+    Load direct-fit MCMC chains from an NPZ file and generate a corner plot.
+    Handles piecewise and registered parametric models.
 
     Arguments:
         path_to_chains (str): Path to saved .npz file
-        plot_model (str): Model type ('hist' or power law model name like 'pp1')
-        plot_dim (str): Dimension being plotted ('a' or 'm'), used for power law models
+        model_name (str): Registered parametric model name. Not needed when
+            ``param_names`` and ``reference_color`` are supplied directly.
         outpath (str): Output filename for plot
         param_names (list of str): Labels for parameters (if None, auto-generate based on model)
         thin (int): Thinning factor
@@ -395,14 +380,23 @@ def plot_corner_from_file(
         samples = samples[inds]
 
     ndim = samples.shape[1]
+    model_spec = None
+    if model_name is not None:
+        from occurrence import mcmc_powerlaw
+        model_spec = mcmc_powerlaw.get_model_spec(model_name)
 
     # Determine parameter names based on model
     if param_names is None:
-        try:
-            model_info = model_dict[plot_model]
-            param_names = model_info[2]
-        except:
+        if model_name is None:
             param_names = [f"$\\theta_{{{i}}}$" for i in range(ndim)]
+        else:
+            param_names = model_spec.parameter_names
+
+    if reference_color is None:
+        reference_color = (
+            "black" if model_name is None else
+            model_spec.color
+        )
 
     # Make corner plot
     fig = corner.corner(
@@ -411,6 +405,8 @@ def plot_corner_from_file(
         show_titles=True,
         title_fmt=".3f",
         title_kwargs={"fontsize": 10},
+        truths=reference_values,
+        truth_color=reference_color,
     )
 
     plt.savefig(outpath, dpi=200, bbox_inches="tight")
@@ -527,7 +523,6 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
             #xunit_label = f'[{m_unit_label}]'
             #xlabel = xparam_label+' '+xunit_label
             xlabel = mlabel
-            #import pdb; pdb.set_trace()
             
             ## For labeling stack dimension
             yparam_label = 'SMA'
@@ -572,9 +567,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
             ax.set_ylim(0, max(ax.get_ylim()[1], 1.1 * top))
             
         # Add right-side vertical label showing SMA or Mass range for this subplot
-        #import pdb; pdb.set_trace()
         twin_axis_formatter = lambda value: str(int(value)) if float(value).is_integer() else f"{value:.1f}"
-        #import pdb; pdb.set_trace()
         y_lo, y_hi = y_edges
         
 
@@ -773,511 +766,6 @@ def make_bar_vals(x_pairs, y_vals):
 
 
 
-def plot_power(fig, ax, model_func_names, model_dict, save_path, stack_dim='m', n_draws=150):
-    """
-    Over-plot the max-likelihood model AND random posterior draws.
-
-    Parameters
-    ----------
-    stack_dim : str
-        Dimension along which histograms are stacked ('a' or 'm').
-        Used to determine which chain file corresponds to each axis.
-    n_draws : int
-        Number of posterior samples to plot (low-opacity)
-    """
-
-    from occurrence import mcmc_powerlaw as mcmc_power
-
-    plot_dir = os.path.dirname(save_path)
-    load_dir = os.path.dirname(plot_dir)
-    
-    
-    # --- Handle axes ---
-    if isinstance(ax, np.ndarray):
-        axs_list = ax.flatten().tolist()
-    elif isinstance(ax, list):
-        axs_list = ax
-    else:
-        axs_list = [ax]
-    
-    # Determine number of bins from the number of axes
-    # When there are multiple stacked histograms, each axis corresponds to one bin
-    n_bins = len(axs_list)
-
-    # --- Plot ---
-    for ax_idx, ax_i in enumerate(axs_list):
-        # Determine which bin this axis corresponds to
-        # The axes are reversed in plot_occurrence_hist, so the mapping is:
-        # ax_idx 0 -> highest bin index (n_bins - 1)
-        # ax_idx 1 -> bin index (n_bins - 2)
-        # etc.
-        #bin_idx = n_bins - 1 - ax_idx
-        bin_idx = ax_idx
-        
-        if ax_idx==0:
-            xlim = ax_i.get_xlim()
-            ylim = ax_i.get_ylim()
-        #import pdb; pdb.set_trace()
-        for model_func_name in model_func_names:
-            if model_func_name=='hist':
-                continue
-        
-            # --- Model selection ---
-            model_spec = mcmc_power.get_model_spec(model_func_name)
-            model_func = model_spec.function
-            param_names = model_spec.parameter_names
-            plot_clr = model_spec.color
-        
-            # Load the chain file for this bin
-            chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}_bin{bin_idx}.npz')
-        
-            # Check if file exists; if not, try the old naming scheme (single bin)
-            if not os.path.exists(chain_file):
-                chain_file = os.path.join(load_dir, 'saved_chains', f'chains_{model_func_name}.npz')
-        
-            data = np.load(chain_file)
-            flat_chains = data['flat_chains']
-            flat_log_probs = data['flat_log_probs']
-
-            # --- Max likelihood ---
-            ml_idx = np.argmax(flat_log_probs)
-            ml_params = flat_chains[ml_idx]
-            print(f"BIN {bin_idx} MAX LIKE:", ", ".join(f"{p:.3f}" for p in ml_params))
-
-            # --- Random posterior draws ---
-            rng = np.random.default_rng()
-            draw_indices = rng.choice(len(flat_chains), size=n_draws, replace=False)
-            posterior_draws = flat_chains[draw_indices]
-
-            x_model = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 2000)
-
-            # Plot posterior draws (underneath)
-            for theta in posterior_draws:
-                y_draw = model_func(theta, x_model)
-                ax_i.plot(
-                    x_model, y_draw,
-                    color=plot_clr,
-                    alpha=0.08,        # low opacity
-                    linewidth=1.0,
-                    zorder=10
-                )
-
-
-            #import pdb; pdb.set_trace()
-            ## Calculate derived params for each function
-            
-            full_len = flat_chains.shape[0]
-            if full_len>20000: # Don't need huge chains to get summary stats. Take the end.
-                model_samples = flat_chains[full_len-10000:,:] # 'burn in' until only 10k samples left
-            else:
-                model_samples = flat_chains
-            
-            
-            if model_func_name=='logG':
-                
-                ## Here, we just want the median of the distribution, which is exp(mu). Plot only the central value
-                #import pdb; pdb.set_trace()
-                log_median_samples = model_samples[:,1]
-                #param_dict = ou.summarize_chains(log_median_samples[:,None], rate_type='model')
-                
-                #param_mode = np.exp(param_dict['mode_model'][0]) # Exponentiate AFTER getting mode to avoid skewing
-                #param_str_list = [f'exp($\mu$)={fmt_float_or_sci(param_mode)}']
-                
-                ## Remove chance outliers
-
-                #median_samples = log_median_samples
-                #minv = np.percentile(median_samples, 5, axis=0)
-                #maxv = np.percentile(median_samples, 95, axis=0)
-                #median_samples_trimmed = median_samples[(median_samples>minv)&(median_samples<maxv)]
-                
-                median_samples = log_median_samples
-                #import pdb; pdb.set_trace()
-                
-                #median_samples = 10**log_median_samples
-                
-                param_dict = ou.summarize_chains(median_samples[:,None], rate_type='model', grid_size=2000)
-                #param_name_list = ['10$^{\mu}$']
-                param_name_list = ['$\mu$']
-                #import pdb; pdb.set_trace()
-                
-                
-            if model_func_name=='escarpment':
-                #import pdb; pdb.set_trace()
-                ## For escarpment, params are [C1, C2, log10BP1, log10BP2]
-                ## Here, we want a handful of parameters
-                #bp1_samples = 10**model_samples[:,2]
-                #bp2_samples = 10**model_samples[:,3]
-                log_bp1_samples = model_samples[:,2]
-                log_bp2_samples = model_samples[:,3]
-                
-                ## slope is (y2-y1)/(x2-x1)
-                #slope_samples = (model_samples[:,1]-model_samples[:,0])/(model_samples[:,3]-model_samples[:,2])
-                #all_samples = np.vstack([bp1_samples, bp2_samples, slope_samples]).T
-                slope_samples = (model_samples[:,1]-model_samples[:,0])/(model_samples[:,3]-model_samples[:,2])
-                all_samples = np.vstack([log_bp1_samples, log_bp2_samples, slope_samples]).T
-                
-                #import pdb; pdb.set_trace()
-                param_dict = ou.summarize_chains(all_samples, rate_type='model')
-                #import pdb; pdb.set_trace()
-                
-                #param_name_list = ['BP1', 'BP2', 'slope']
-                param_name_list = ['$\log_{10}$(BP1)', '$\log_{10}$(BP2)', 'slope']
-                
-            if model_func_name=='bpl':
-                #import pdb; pdb.set_trace()
-                log_a0_samples = model_samples[:,1]
-                param_dict = ou.summarize_chains(log_a0_samples[:,None], rate_type='model', grid_size=2000)
-                param_name_list = ['$\log_{10}(a_0)$']
-            
-            param_str_list=[]
-            for i in range(len(list(param_dict.values())[0])):
-        
-                param_name = param_name_list[i]
-                param_mode = param_dict['mode_model'][i]
-                param_err_low = param_mode - param_dict['hdi_low_model'][i]
-                param_err_high = param_dict['hdi_high_model'][i] - param_mode
-                
-                param_val_str = ou.latex_formatter(param_mode, param_err_low, param_err_high)
-                
-                param_str = f'{param_name}={param_val_str}'
-                
-                param_str_list.append(param_str)
-                
-
-                #import pdb; pdb.set_trace()
-                
-            legend_label = model_func_name+'\n'+'\n'.join(param_str_list)
-            # Plot max-likelihood (on top)
-            y_model = model_func(ml_params, x_model)
-            ax_i.plot(
-                x_model, y_model,
-                color=plot_clr,
-                linewidth=2.5,
-                label=legend_label,
-                #label=f'{model_func_name}: '+f', '.join([f"{name}={val:.2f}" for name, val in zip(param_names, ml_params)]),
-                #label=f'{model_func_name} ML',
-                zorder=100
-            )
-
-        ax_i.legend(loc='upper right', fontsize=10)
-        ax_i.set_xlim(xlim)
-        ax_i.set_ylim(ylim)
-        
-    proposal_tweaks=False
-    if proposal_tweaks:
-        new_labels = ['escarpment', 'escarpment']
-        for ax_idx, ax_i in enumerate(axs_list):
-            handles, labels = ax_i.get_legend_handles_labels()
-            #ax_i.legend(handles, new_labels, fontsize=18)
-            ax_i.get_legend().remove()
-            ax_i.set_ylabel('Planets per star per bin size')
-
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(save_path, dpi=300)
-    plt.close(fig)
-
-    print(f"Saved with posterior draws to: {save_path}")
-    return
-
-
-
-def plot_comparison_violins(
-    ORD1_array, ORD2_array,
-    label1, label2,
-    hist_dict,
-    diff_exceedance_frac, diff_zscore,
-    shape_exceedance_frac, shape_zscore,
-    best_fit_ratio,
-    stack_dim,
-    plot_title,
-    save_path,
-    m_type,
-    m_unit
-    ):
-    """
-    Create split violin plots comparing ORD1 and ORD2 distributions
-    in each histogram bin.
-
-    Parameters
-    ----------
-    ORD1_array : ndarray
-        Shape = (Nsamples1, Nbins)
-
-    ORD2_array : ndarray
-        Shape = (Nsamples2, Nbins)
-
-    Notes
-    -----
-    Each bin gets a split violin:
-        - left half  = ORD1 samples
-        - right half = ORD2 samples
-    """
-
-    import numpy as np
-    import matplotlib.pyplot as plt
-    
-    label_size=22
-
-    # -------------------------
-    # Validate inputs
-    # -------------------------
-    if ORD1_array.ndim != 2 or ORD2_array.ndim != 2:
-        raise ValueError("ORD arrays must be 2D")
-
-    if ORD1_array.shape[1] != ORD2_array.shape[1]:
-        raise ValueError(
-            "ORD1_array and ORD2_array must have same number of bins"
-        )
-
-    Nbins = ORD1_array.shape[1]
-
-    # -------------------------
-    # Histogram geometry
-    # -------------------------
-    if stack_dim == 'a':
-        stack_ind = 1
-        n_nonstack_bins = hist_dict['n_abins']
-        xlabel = 'Mass'
-
-    elif stack_dim == 'm':
-        stack_ind = 0
-        n_nonstack_bins = hist_dict['n_mbins']
-        xlabel = 'SMA [AU]'
-
-    hist_lims_pairs = (
-        hist_dict['a_m_lims_pairs'][:, stack_ind][::n_nonstack_bins]
-    )
-
-    bin_centers = (
-        hist_lims_pairs[:, 0] * hist_lims_pairs[:, 1]
-    ) ** 0.5
-
-    # -------------------------
-    # Labels
-    # -------------------------
-    ylabel = 'Occurrence rate density\n[Planets/star/$\Delta \log_{10}(\omega)$]'
-
-    # -------------------------
-    # Figure
-    # -------------------------
-    fig, ax = plt.subplots(figsize=(7, 5))
-
-    # -------------------------
-    # Violin widths
-    # -------------------------
-    bin_widths = (
-        hist_lims_pairs[:, 1] - hist_lims_pairs[:, 0]
-    )
-
-    violin_widths = 0.35 * bin_widths
-
-    # -------------------------
-    # Build split violins
-    # -------------------------
-    all_vals = []
-
-    for i in range(Nbins):
-    
-        violin_width = violin_widths[i]
-
-        left_data = ORD1_array[:, i]
-        right_data = ORD2_array[:, i]
-
-        all_vals.extend(left_data)
-        all_vals.extend(right_data)
-
-        pos = bin_centers[i]
-
-        # -------------------------
-        # Left violin (ORD1)
-        # -------------------------
-        vp_left = ax.violinplot(
-            left_data,
-            positions=[pos],
-            widths=violin_width,
-            showmeans=False,
-            showmedians=False,
-            showextrema=False,
-        )
-
-        for body in vp_left['bodies']:
-
-            verts = body.get_paths()[0].vertices
-
-            # Keep only LEFT half
-            verts[:, 0] = np.minimum(verts[:, 0], pos)
-
-            body.set_facecolor('green')
-            body.set_edgecolor('black')
-            body.set_alpha(0.7)
-
-        # -------------------------
-        # Right violin (ORD2)
-        # -------------------------
-        vp_right = ax.violinplot(
-            right_data,
-            positions=[pos],
-            widths=violin_width,
-            showmeans=False,
-            showmedians=False,
-            showextrema=False,
-        )
-
-        for body in vp_right['bodies']:
-
-            verts = body.get_paths()[0].vertices
-
-            # Keep only RIGHT half
-            verts[:, 0] = np.maximum(verts[:, 0], pos)
-
-            body.set_facecolor('magenta')
-            body.set_edgecolor('black')
-            body.set_alpha(0.7)
-            
-        # -------------------------
-        # Another Right violin (ORD2 * c)
-        # -------------------------
-        vp_right = ax.violinplot(
-            right_data*best_fit_ratio,
-            positions=[pos],
-            widths=violin_width,
-            showmeans=False,
-            showmedians=False,
-            showextrema=False,
-        )
-
-        for body in vp_right['bodies']:
-
-            verts = body.get_paths()[0].vertices
-
-            # Keep only RIGHT half
-            verts[:, 0] = np.maximum(verts[:, 0], pos)
-
-            body.set_facecolor('magenta')
-            body.set_edgecolor('black')
-            body.set_alpha(0.2)
-        #import pdb; pdb.set_trace()
-
-        # -------------------------
-        # Annotate P(ORD1 > ORD2)
-        # -------------------------
-        y_text = max(
-            np.nanmax(left_data),
-            np.nanmax(right_data)
-        )
-
-        y_range = np.nanmax(all_vals) - np.nanmin(all_vals)
-
-        #ax.text(
-        #    pos,
-        #    y_text + 0.03 * y_range,
-        #    f"{frac_greater_array[i]:.3f}",
-        #    ha='center',
-        #    va='bottom',
-        #    fontsize=16,
-        #    color='black',
-        #)
-
-    # -------------------------
-    # Axes formatting
-    # -------------------------
-    ax.set_xscale('log')
-
-    bin_edges = np.unique(hist_lims_pairs.flatten())
-
-    ax.set_xticks(bin_edges)
-    
-    
-    # Set ticks at bin edges and format
-    
-    tick_label_fmt_fn = int_or_one_decimal if m_type == 'm' \
-                       else sci_no_leading_zero if m_type == 'q' \
-                       else None
-
-    
-    ax.xaxis.set_major_locator(FixedLocator(bin_edges))
-    ax.xaxis.set_major_formatter(FuncFormatter(tick_label_fmt_fn))
-    ax.xaxis.set_minor_locator(NullLocator())
-    ax.tick_params(axis='both', which='major', labelsize=14)
-    
-
-    if m_type == 'q':
-
-        plt.setp(ax.get_xticklabels(), rotation=90, ha='left')
-
-        ax.set_xlabel(r'M$_c$/M$_{\star}$', fontsize=label_size)
-
-    elif m_type == 'm':
-
-        x_unit = (
-            '[$M_{\oplus}$]'
-            if m_unit == 'earth'
-            else '[$M_{Jup}$]'
-        )
-
-        ax.set_xlabel(r'M$_c$ ' + x_unit, fontsize=label_size)
-
-    ax.xaxis.set_minor_locator(plt.NullLocator())
-
-    # -------------------------
-    # Y limits
-    # -------------------------
-    all_vals = np.array(all_vals)
-
-    ymin = np.nanmin(all_vals)
-    ymax = np.nanmax(all_vals)
-
-    yrange = ymax - ymin
-
-    ax.set_ylim(
-        ymin - 0.05 * yrange,
-        ymax + 0.15 * yrange,
-    )
-
-    # -------------------------
-    # Labels
-    # -------------------------
-    ax.set_ylabel(ylabel, fontsize=label_size)
-
-    ax.set_title(plot_title, fontsize=12)
-
-    # Manual legend
-    import matplotlib
-    from matplotlib.patches import Patch
-
-    legend_handles = [
-        Patch(facecolor='green', edgecolor='black', label=f'{label1}', alpha=0.7),
-        Patch(facecolor='magenta', edgecolor='black', label=f'{label2}', alpha=0.7),
-        Patch(facecolor='magenta', edgecolor='black', label=f'c$\\times${label2}', alpha=0.2),
-    ]
-
-    legend = ax.legend(handles=legend_handles, fontsize=16)
-    
-    ## Annotate with exceedance fractions
-    #import pdb; pdb.set_trace()
-    
-    annot_str = (
-        f"Pval for null hypothesis 'A=B': "
-            f"{fmt_float_or_sci(diff_exceedance_frac)} ({diff_zscore:.2f}$\\sigma$)\n"
-        f"Pval for null hypothesis 'A=cB': "
-            f"{fmt_float_or_sci(shape_exceedance_frac)} ({shape_zscore:.2f}$\\sigma$)\n"
-            f"                          c={best_fit_ratio:.2f}"
-            )
-            
-    offset = matplotlib.text.OffsetFrom(legend, (1.0, 0.0))
-    ax.annotate(annot_str, xy=(0,0),size=14,
-                xycoords='figure fraction', xytext=(0,-20), textcoords=offset, 
-                horizontalalignment='right', verticalalignment='top')
-
-    fig.tight_layout()
-
-    fig.savefig(save_path, dpi=300)
-    plt.close()
-
-    return
-
-
-
 def sci_no_leading_zero(x, pos):
     if x == 0:
         return "0"
@@ -1303,53 +791,3 @@ def int_or_one_decimal(x, pos):
     else:
         return f"{x:.1f}"
         
-def fmt_float_or_sci(x):
-    return f"{x:.1e}" if abs(x) < 0.005 else f"{x:.2f}" 
-        
-def multiple_hist_dist(tier1_list, tier2_types, tier3_list,
-                       stack_dim, m_unit):
-    """
-    Iterate over arguments to run au.hist_dist
-    multiple times
-    """
-    
-    for t1_val in tier1_list:
-        for t2_type in tier2_types:
-            for t3_val in tier3_list:
-                 tier123_dir1 = os.path.join(t1_val, 'high'+t2_type, t3_val)
-                 tier123_dir2 = os.path.join(t1_val, 'low'+t2_type, t3_val)
-                 
-                 label_t2 = '$M_{star}$' if t2_type=='Mstar' \
-                      else '[Fe/H]' if t2_type=='FeH' \
-                      else '$\log R^{\prime}_{HK}$' if t2_type=='Act' \
-                      else None
-                 label1 = 'High '+label_t2
-                 label2 = 'Low '+label_t2
-                 
-                 au.hist_dist(tier123_dir1=tier123_dir1,
-                              tier123_dir2=tier123_dir2,
-                              label1=label1,
-                              label2=label2,
-                              stack_dim=stack_dim,
-                              m_unit=m_unit,
-                              make_plot=True)
-                 #import pdb; pdb.set_trace()
-                     
-    return
-
-
-
-
-
-
-
-
-
-        
-        
-        
-        
-        
-        
-        
-  

@@ -9,7 +9,6 @@ import numpy as np
 from astropy import constants as c
 from astropy import units as u
 from scipy.optimize import root
-import warnings
 
 K_0 = 28.4329
 

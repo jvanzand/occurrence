@@ -4,26 +4,19 @@
 ## already done. Then do an occurrence fit.
 
 import os
+import glob
 import numpy as np
 import pandas as pd
 import pickle
-from astropy import constants as c
 import multiprocessing as mp
 
-from occurrence import analysis_utils as au
 from occurrence import completeness_utils as cu
 from occurrence import sampling_utils as su
-from occurrence import occurrence_utils as ou
 from occurrence import plotting_utils as pu
-from occurrence import mcmc_histogram as mcmc_hist
-from occurrence import mcmc_powerlaw as mcmc_power
+from occurrence import direct_fit_utils as dfu
+from occurrence import mcmc_direct
 
 from occurrence.completeness_utils import _process_single_star
-
-                    
-# Backward-compatible plotting metadata derived from the central registry.
-model_dict = mcmc_power.model_dict
-
 
 def prep_recoveries_files(tier1_dir,
                           star_df,
@@ -50,7 +43,6 @@ def prep_recoveries_files(tier1_dir,
                           can be used to calculate mass ratio q
     """
 
-    #import pdb; pdb.set_trace()
     
     if recoveries_mtype=='msini':
 
@@ -70,7 +62,6 @@ def prep_recoveries_files(tier1_dir,
             
                 rec_file = pd.read_csv(recoveries_file)[keep_cols]
                 rec_file.to_csv(msini_recoveries_save_file, index=False)
-                #import pdb; pdb.set_trace()
     
         if 'q' in tier1_dir: # If tier1_dir is qsini or qtrue, then convert m to q
             for i in range(len(star_df)):
@@ -117,7 +108,8 @@ def prep_maps(tier1_dir,
               star_df,
               path_to_recoveries,
               m_unit='earth',
-              avg_map_only=False):
+              avg_map_only=False,
+              save_single_plots=False):
     """
     Prepare both single-system and average completeness 
     maps and calculate corresponding interpolation
@@ -146,11 +138,15 @@ def prep_maps(tier1_dir,
     maps_save_label = 'saved_maps_'+tier1_dir
     maps_save_path = os.path.join(tier1_dir, maps_save_label)
     maps_ycol = f"inj_{tier1_dir}"
-    #import pdb; pdb.set_trace()
     
-    ncores = np.min([mp.cpu_count(), 30])
+    if mp.cpu_count()>100:
+        ncores=30
+    else:
+        ncores = int(mp.cpu_count()/2)
+
     args_list = [
-        (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit, avg_map_only)
+        (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit,
+         avg_map_only, save_single_plots)
         for _, row in star_df.iterrows()
         ]
 
@@ -219,7 +215,6 @@ def prep_post_draws(tier1_dir, tier2_dir,
     ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
     post_sample_dict = sampling_func(comp_post_dir, star_df, num_samples=500, m_unit=m_unit) # First sample posteriors
     #from copy import deepcopy; pp_test = deepcopy(post_sample_dict)
-    #import pdb; pdb.set_trace()
     ## If using mass ratio, convert masses to q
     #if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
     if 'q' in tier1_dir:
@@ -229,14 +224,11 @@ def prep_post_draws(tier1_dir, tier2_dir,
             mstar = row.Mstar.values
                 
             old_samples = post_sample_dict[comp_name]
-            #import pdb; pdb.set_trace()
             new_samples = np.array([old_samples[0], old_samples[1]/mstar]) # Same 'a' samples; convert m-->q
             post_sample_dict[comp_name] = new_samples
                 
-    #import pdb; pdb.set_trace()
     post_prior_sample_dict = su.interim_prior(post_sample_dict, prior_type='loguniform') # Then calculate prior at each draw. Each value is a 3xN array of SMA samples, mass samples, and prior values
     #qq_test = deepcopy(post_prior_sample_dict)
-    #import pdb; pdb.set_trace()
     # Now add on completeness values
     sampled_post_with_compls = su.include_post_completeness(post_prior_sample_dict,
                                                             star_df,
@@ -244,484 +236,318 @@ def prep_post_draws(tier1_dir, tier2_dir,
                                                             avg_map_only=avg_map_only)
     #rr_test = deepcopy(sampled_post_with_compls)                                                  
     ## Saves dict with companion names as key names
-    ## Each value is a 6xN array of:
+    ## Each value is a 7xN array, with prior densities defined relative to
+    ## dlog10(a) dlog10(m), of:
     ## [a_list, m_list, avg_compls, single_star_compls,
-    ##  compl_over_prior_avg, compl_over_prior_single]
+    ##  compl_over_prior_avg, compl_over_prior_single, interim_prior]
     ## Probably the only compl array I'll use is compl_over_prior_single. compl_over_prior_avg is to test whether using avg completeness changes the answer. The two completeness arrays are for testing/sanity checks.
     saved_dict_dir = os.path.join(tier1_dir, tier2_dir, 'sampled_post_prior_compl.npz')
     np.savez(saved_dict_dir, **sampled_post_with_compls)
-    #import pdb; pdb.set_trace()
         
         
     return
     
     
-def prep_occurrence_materials(tier1_dir, tier2_dir, tier3_dir,
-                              a_edges, m_or_q_edges, stack_dim,
-                              star_df, 
-                              compl_type='single',
-                              m_unit='earth',
-                              fig_title='Companions in Occurrence Region'):
-    
+def prep_direct_fit_materials(
+        tier1_dir,
+        tier2_dir,
+        tier3_dir,
+        x_bounds,
+        stack_bounds,
+        star_df,
+        completeness_type='single',
+        integration_resolution=(100, 100),
+        use_average_completeness=True,
+        interim_prior_fn=None):
+    """Prepare unbinned samples and survey exposure for a direct fit.
+
+    This Stage 2 entry point supports the current ``(a, mass)`` catalog order
+    and one rectangular stack interval. It writes ``direct_fit_data.npz`` but
+    does not evaluate a likelihood or run MCMC. The average-map exposure is
+    the default because some individual maps may contain NaNs in the ROI;
+    individual-map summation remains available with strict validation.
     """
-    Prepare inputs to occurrence calculation framework. Specifically:
-    - Make cell_dict, which contains useful grid-specific info, like
-      individual cell bounds, avg completeness in each cell, and all
-      cell sizes
-    - Add lambda indices to companion sample catalog. That is, assign
-      to every a/m pair the index of the occurrence cell it falls in
-    - Make bin_lam_dict. This holds two useful ingredients for the
-      likelihood: all (compl/prior) values that fall in each bin for
-      each companion, AND the fraction (aka weight) for each bin/comp
-      pair
-    
-    Arguments:
-	a_edges/m_or_q_edges (np arrays): Arrays defining bin edges, like 
-		                     array([0.8, 1.6, 3.2])
-        star_df (dataframe): Pandas df with columns 'star_name', 'mstar',
-              and 'comp_list'. comp_list is a list of the names of all 
-              companions orbiting that star. mstar is in solar masses
-        comp_sample_path (str): Path to a file containing a dictionary with
-                                companion samples. Each key is a companion
-                                name and each value is a list of 6 elements:
-                                [a_list, m_list, avg_compls, single_star_compls,
-                                 compl_over_prior_avg, compl_over_prior_single]
-        avg_map_fn_path (str): Path to interpolation function representing the
-                               average completeness map over all systems in question
-        compl_type (str): Either 'avg' or 'single' to determine which completeness
-                          map draws to use. 'single' is generally the most correct;
-                          it associates each draw with the completeness of its
-                          original map. 'avg' is more for testing/comparison
-    """
-    
-    ## Define paths to companion samples and average map
-    comp_samples_path=os.path.join(tier1_dir, tier2_dir, 'sampled_post_prior_compl.npz')
-    avg_map_fn_path=os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
-                      
-    # Make cell_dict, which contains useful cell info
-    cell_dict = ou.cell_values(a_edges, m_or_q_edges, avg_map_fn_path)
-    comp_samples = dict(np.load(comp_samples_path)) # Load companion samples
-    #import pdb; pdb.set_trace()
-    total_sample_num = np.shape((comp_samples[list(comp_samples.keys())[0]]))[1] # Record sample num before arrays change len
+    catalog_path = os.path.join(
+        tier1_dir, tier2_dir, 'sampled_post_prior_compl.npz'
+    )
+    companions = dfu.load_catalog(
+        catalog_path=catalog_path,
+        x_bounds=x_bounds,
+        stack_bounds=stack_bounds,
+        completeness_type=completeness_type,
+        interim_prior_fn=interim_prior_fn,
+    )
 
-    comp_ROIweights = {}
-    comps_outsideROI = []
-    
-    ## Prepare bin pairs in case of 2D fit
-    if stack_dim=='a':
-        stack_edges = a_edges
-        array_ind = 0
-    elif stack_dim=='m':
-        stack_edges = m_or_q_edges
-        array_ind = 1
-    stack_bin_limit_pairs = [[stack_edges[i], stack_edges[i+1]] for i in range(len(stack_edges)-1)]
-    
-        
-    # 4th element of catalog_dict is average completeness/prior (for testing)
-    # 5th element of catalog_dict is single system completeness/prior (most correct)
-    compl_ind = 4 if compl_type=='avg' else 5 if compl_type=='single' else 5 # Default to 5 anyway
-    bin_lam_dict = {}
-    ## In this loop:
-    ##     1) Calculate the lambda index of every a/m sample for every companion
-    ##     2) Create subsets of the comp_samples and comp_ROIweights dicts for each stack_dim bin
-    ##     3) Fill in bin_lam_dict, which has useful info for exp^-Lambda term of histogram likelihood
-    #import pdb; pdb.set_trace()
-    for comp_name in comp_samples.keys():
-        a_m_prior_compl = comp_samples[comp_name]
-        a_list, m_list = a_m_prior_compl[:2] # First 2 sub-arrays are a/m lists
-        compl_over_prior = comp_samples[comp_name][compl_ind]
-        #import pdb; pdb.set_trace()
-        
-        lam_inds = ou.assign_cells(a_list, m_list, cell_dict['a_m_lims_pairs']).astype(int) # Calculate lambda inds
-        try:
-            ROIweight = len(lam_inds[lam_inds>-0.5])/len(lam_inds) # Fraction of samples in full ROI
-        except:
-            print(f'main.py: ERROR - no m/a indices found for companion {comp_name}')
-
-        comp_ROIweights[comp_name] = ROIweight # Put weights in separate dict
-        
-        
-        if ROIweight==0: # Skip companions that fall outside the ROI. Their weights=0 anyway, but saves compute to remove
-            #print(f'{comp_name} falls fully outside the ROI; dropping.')
-            comps_outsideROI.append(comp_name)
-            
-        ## For companions with at least some samples in the ROI, prune the ones outside it
-        lamROI_mask = lam_inds>-0.5
-
-        a_m_prior_compl_lam = np.vstack([a_m_prior_compl, lam_inds]) # Append lambda inds to array
-        a_m_prior_compl_lam = a_m_prior_compl_lam[:, lamROI_mask] # Remove any vals outside ROI
-        comp_samples[comp_name] = a_m_prior_compl_lam # New dict entry is the updated array
-        
-        
-        ## Now fill in bin_lam_dict, which has useful info for exp^-Lambda term of histogram likelihood
-        ## Check for companions that have lots of NaN completeness values
-        ## Should not be a problem for real companions
-        lam_nancount = np.isnan(compl_over_prior).sum()
-        if lam_nancount>10:
-            sysname = star_df[star_df["comp_list"].apply(lambda x: comp_name in x)].star_name.iloc[0]
-            #import pdb; pdb.set_trace()
-            if lam_nancount>999:
-                print(f'main.prep_occurrence_materials: \n'
-                      f'{comp_name} in system {sysname} has {lam_nancount}/{len(compl_over_prior)} sample NaNs. \n'
-                      f'    Likely it is mostly outside the ROI, with the few in-ROI samples in NaN regions of the \n'
-                      f'    host star map.')
-            else:
-                print(f'main.prep_occurrence_materials: \n'
-                      f'{comp_name} in system {sysname} has {lam_nancount}/{len(compl_over_prior)} sample NaNs')
-        
-        
-        for bin_ind in range(cell_dict['num_cells']):
-            
-            lam_mask = lam_inds==bin_ind # All locations where the lambda index equals the current bin
-            compl_over_prior_in_cell_avg = np.nanmean(compl_over_prior[lam_mask]) # Pre-compute avg. for likelihood. Use nanmean() for now to catch samples in NaN space. Should not be a problem for real companions
-            if np.isnan(compl_over_prior_in_cell_avg): # Last catch for really bad systems. Delete later.
-                compl_over_prior_in_cell_avg=0
-            
-            weight = lam_mask.sum()/total_sample_num # (Num. of samples in cell)/(tot. # of samples)
-            
-            bin_lam_dict[f"{comp_name}_cell{bin_ind}_compl_over_prior_avg_and_weight"] = [compl_over_prior_in_cell_avg, weight]
-            
-            #if bin_ind==0 and weight>0.5:
-            #    print(f"{comp_name} is in 0 bin, weight={weight}")
-            
-    for comp_name in comps_outsideROI:
-        del comp_samples[comp_name]
-    
-    
-    print("Companions at least partially in ROI: ", len(comp_samples))
-    #import pdb; pdb.set_trace()
-
-
-    saved_dicts_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir, 'saved_dicts/')
-    os.makedirs(saved_dicts_dir, exist_ok=True)
-
-    np.savez(saved_dicts_dir+'cell_dict.npz', **cell_dict) ## Cell-specific info
-    np.savez(saved_dicts_dir+'sampled_post_prior_compl_lam_inROI.npz', **comp_samples) # Sample-specific info
-    np.savez(saved_dicts_dir+'comp_ROIweights.npz', **comp_ROIweights) # Fraction of each comp that falls in ROI
-    np.savez(saved_dicts_dir+'bin_lam_dict.npz', **bin_lam_dict) # Pre-computed info for hist likelihood
-
-
-    return
-    
-    
-    
-def run_mcmc(tier1_dir, tier2_dir, tier3_dir,
-             run_models, a_edges, m_edges, stack_dim,
-             nstars, parallel=False,
-             nwalkers=50, nsteps=5000, burnin=1000,
-             random_seed=None):
-    """
-    Entry point for MCMC occurrence calculation.
-    Collects pre-computed materials to feed to MCMC.
-    """
-    saved_chains_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir, 'saved_chains/')
-    os.makedirs(saved_chains_dir, exist_ok=True)
-    
-    
-    tier123_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
-    
-
-    samples_inROI_path = os.path.join(tier123_dir, 'saved_dicts/sampled_post_prior_compl_lam_inROI.npz')
-    samples_inROI = dict(np.load(samples_inROI_path))
-    comp_names_inROI = list(samples_inROI.keys())
-    
-    ## Handle hist separately because it uses different pre-computed values
-    if 'hist' in run_models:
-            
-        cell_dict_path = os.path.join(tier123_dir, 'saved_dicts/cell_dict.npz')
-        bin_lam_dict_path = os.path.join(tier123_dir, 'saved_dicts/bin_lam_dict.npz')
-    
-        cell_dict = dict(np.load(cell_dict_path)) # Includes bin sizes and avg_cell_compls
-        bin_lam_dict = dict(np.load(bin_lam_dict_path)) # Contains, for every cell and for every companion, all (compl/prior) values that fall in that cell, AND the fraction (aka weight). This is equivalent to the info. stored in sampled_post_prior_compl_lam.npz, but compressed and sorted by lambda index.
-        #import pdb; pdb.set_trace()
-
-        if run_mcmc:
-            mcmc_hist.mcmc(nstars, comp_names_inROI, cell_dict, bin_lam_dict,
-                    save_path=saved_chains_dir+'chains_hist.npz', parallel=parallel,
-                    nwalkers=nwalkers, nsteps=nsteps, burnin=burnin,
-                    random_seed=random_seed)
-            
-    ## After running MCMC for histogram, create summary products        
-    summary_stats(tier1_dir, tier2_dir, tier3_dir, nstars, verbose=False) # This command creates summary_dict
-    
-    
-    pp_model_names = [model_name for model_name in run_models if 'hist' not in model_name]
-    
-    ## Retrieve summary info for histogram
-    hist_summary_path = os.path.join(tier123_dir, 'saved_dicts/summary_dict.npz')
-    hist_summary_dict = dict(np.load(hist_summary_path))
-        
-    if stack_dim=='a':
-        stack_nbins = hist_summary_dict['n_abins']
-        nonstack_nbins = hist_summary_dict['n_mbins']
-        nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,1][::stack_nbins]
-    
-    elif stack_dim=='m':
-        stack_nbins = hist_summary_dict['n_mbins']
-        nonstack_nbins = hist_summary_dict['n_abins']
-        nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,0][::stack_nbins]
-
+    if use_average_completeness:
+        average_path = os.path.join(
+            tier1_dir, tier2_dir, 'avg_map', 'interp_fn.pkl'
+        )
+        with open(average_path, 'rb') as stream:
+            average_completeness = pickle.load(stream)
+        exposure = dfu.build_exposure_grid(
+            x_bounds=x_bounds,
+            stack_bounds=stack_bounds,
+            resolution=integration_resolution,
+            average_completeness=average_completeness,
+            nstars=len(star_df),
+        )
     else:
-        raise ValueError(f"stack_dim must be 'a' or 'm', got {stack_dim}")
-    
-    nonstack_bin_centers = (nonstack_edges[:,1]*nonstack_edges[:,0])**0.5
-    
-    # Iterate over bins in the stack_dim direction
-    for bin_idx in range(stack_nbins):
-            
-        ORD_vals = hist_summary_dict['mode_ORD'].reshape(nonstack_nbins,-1)[:,bin_idx]
-        ORD_errs_high = hist_summary_dict['hdi_high_ORD'].reshape(nonstack_nbins,-1)[:,bin_idx] - ORD_vals
-        ORD_errs_low = ORD_vals - hist_summary_dict['hdi_low_ORD'].reshape(nonstack_nbins,-1)[:,bin_idx]
-        #ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
-    
-        hist_dict = {'bin_centers':nonstack_bin_centers,
-                     'lims':(nonstack_edges[0][0], nonstack_edges[-1][-1]),
-                     'ORD_vals':ORD_vals,
-                     'ORD_errs_high':ORD_errs_high,
-                     'ORD_errs_low':ORD_errs_low,
-                     }
-        
-        # Create distinguishing filename suffix for this bin
-        # Format: _binX or _a0p1-1AU or _m1-2Mj, etc.
-        bin_suffix = f'_bin{bin_idx}'
-        #import pdb; pdb.set_trace()
-        for model_name in pp_model_names:
-        
-            chain_path = saved_chains_dir + f'chains_{model_name}{bin_suffix}.npz'
-            mcmc_power.mcmc(hist_dict, model_name,
-                            stack_dim,
-                            stack_ind=bin_idx,
-                            save_path=chain_path, parallel=parallel,
-                            nwalkers=nwalkers, nsteps=nsteps, burnin=burnin,
-                            random_seed=random_seed)
-        
-    return
-    
-def summary_stats(tier1_dir, tier2_dir, tier3_dir, nstars, verbose=False):
-    """
-    Load MCMC chains and calculate/save
-    summary statistics, including occurrence rate,
-    effective number of planets, and average
-    completeness in each cell
-    """
-    
-    load_save_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
-    
-    cell_dict_path = os.path.join(load_save_dir, 'saved_dicts/cell_dict.npz')
-    bin_lam_dict_path = os.path.join(load_save_dir, 'saved_dicts/bin_lam_dict.npz')
-    path_to_chains = os.path.join(load_save_dir, 'saved_chains/chains_hist.npz')
-    save_summary_dict_path = os.path.join(load_save_dir, 'saved_dicts/summary_dict.npz')
-    
-    
-    cell_dict = dict(np.load(cell_dict_path)) # Includes bin sizes and avg_cell_compls
-    bin_lam_dict = dict(np.load(bin_lam_dict_path)) # Contains, for every cell and for every companion, all (compl/prior) values that fall in that cell, AND the fraction (aka weight). This is equivalent to the info. stored in sampled_post_prior_compl_lam.npz, but compressed and sorted by lambda index.
-    summary_dict = ou.summary_stats(path_to_chains, cell_dict, bin_lam_dict, nstars, verbose=verbose)
-    np.savez(save_summary_dict_path, **summary_dict) ## Cell-specific info
-    
-    return
-    
-def bic_compare(tier1_dir, tier2_dir, tier3_dir, 
-                run_models, stack_dim, m_unit):
-    """
-    Calculate BIC for provided models and 
-    plot max-likelihood params over pre-calculated histogram
-    """
-    
-    tier123_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
-    
-    
-    ## Retrieve summary info for histogram
-    hist_summary_path = os.path.join(tier123_dir, 'saved_dicts/summary_dict.npz')
-    hist_summary_dict = dict(np.load(hist_summary_path))
-        
-    if stack_dim=='a':
-        stack_nbins = hist_summary_dict['n_abins']
-        nonstack_nbins = hist_summary_dict['n_mbins']
-        nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,1][::stack_nbins]
-    
-    elif stack_dim=='m':
-        stack_nbins = hist_summary_dict['n_mbins']
-        nonstack_nbins = hist_summary_dict['n_mbins']
-        nonstack_edges = hist_summary_dict['a_m_lims_pairs'][:,0][::stack_nbins]
+        tier1_label = os.path.basename(os.path.normpath(tier1_dir))
+        maps_dir = os.path.join(tier1_dir, f'saved_maps_{tier1_label}')
+        interpolators = []
+        for star_name in star_df.star_name:
+            interp_path = os.path.join(maps_dir, star_name, 'interp_fn.pkl')
+            with open(interp_path, 'rb') as stream:
+                interpolators.append(pickle.load(stream))
+        exposure = dfu.build_exposure_grid(
+            x_bounds=x_bounds,
+            stack_bounds=stack_bounds,
+            resolution=integration_resolution,
+            completeness_interpolators=interpolators,
+        )
+
+    save_path = os.path.join(
+        tier1_dir, tier2_dir, tier3_dir, 'saved_dicts', 'direct_fit_data.npz'
+    )
+    dfu.save_direct_fit_data(save_path, companions, exposure)
+    return save_path
+
+
+def plot_direct_piecewise(
+        tier1_dir,
+        tier2_dir,
+        tier3_dir,
+        nstars,
+        stack_dim,
+        m_unit='earth',
+        mtype=None,
+        title='Direct piecewise-constant fit',
+        plot_occurrence=True,
+        plot_density=True,
+        plot_corner=True,
+        plot_catalog_roi=False,
+        plot_roi_occurrence=False):
+    """Load and plot a saved direct piecewise-constant fit."""
+    base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
+    if mtype is None:
+        mtype = os.path.basename(os.path.normpath(tier1_dir))
+    return mcmc_direct.plot_piecewise_results(
+        direct_fit_path=os.path.join(
+            base_dir, 'saved_dicts', 'direct_fit_data.npz'
+        ),
+        chain_path=os.path.join(
+            base_dir, 'saved_chains', 'chains_direct_piecewise.npz'
+        ),
+        output_dir=os.path.join(base_dir, 'plots'),
+        nstars=nstars,
+        stack_dim=stack_dim,
+        m_unit=m_unit,
+        mtype=mtype,
+        title=title,
+        plot_occurrence=plot_occurrence,
+        plot_density=plot_density,
+        plot_corner=plot_corner,
+        plot_catalog_roi=plot_catalog_roi,
+        plot_roi_occurrence=plot_roi_occurrence,
+        tier1_dir=tier1_dir,
+        tier2_dir=tier2_dir,
+    )
+
+
+def plot_direct_smooth(
+        tier1_dir,
+        tier2_dir,
+        tier3_dir,
+        model_name,
+        stack_dim,
+        a_edges,
+        m_edges,
+        m_unit='earth',
+        title='Direct smooth-model fit',
+        plot_occurrence=True,
+        plot_cumulative=False,
+        plot_density=True,
+        plot_corner=True,
+        model_plot_style='credible',
+        n_posterior_draws=100,
+        plot_random_seed=None):
+    """Load, plot, and save one smooth direct model."""
+    import matplotlib.pyplot as plt
+
+    base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
+    # Saved material bounds identify only the outer range. Chain discovery is
+    # intentionally filename-based so plotting also works after a fit-only run.
+    chain_dir = os.path.join(base_dir, 'saved_chains')
+    chain_paths = glob.glob(
+        os.path.join(chain_dir, f'chains_direct_{model_name}_bin*.npz')
+    )
+    chain_paths.sort(
+        key=lambda path: int(os.path.splitext(path)[0].rsplit('bin', 1)[1])
+    )
+    if not chain_paths:
+        raise FileNotFoundError(
+            f"no saved direct {model_name} chains in {chain_dir!r}"
+        )
+    figures = {}
+    if plot_density:
+        figures['density'] = plt.subplots(figsize=(6, 4))
+    if plot_occurrence:
+        figures['occurrence'] = plt.subplots(figsize=(6, 4))
+    if plot_cumulative:
+        figures['cumulative'] = plt.subplots(figsize=(6, 4))
+    model_edges = m_edges if stack_dim == 'a' else a_edges
+    paths = mcmc_direct.add_smooth_model_to_figures(
+        chain_paths=chain_paths,
+        model_name=model_name,
+        figures=figures,
+        output_dir=os.path.join(base_dir, 'plots'),
+        stack_dim=stack_dim,
+        m_unit=m_unit,
+        title=title,
+        plot_occurrence=plot_occurrence,
+        plot_cumulative=plot_cumulative,
+        plot_density=plot_density,
+        plot_corner=plot_corner,
+        model_plot_style=model_plot_style,
+        n_posterior_draws=n_posterior_draws,
+        plot_random_seed=plot_random_seed,
+        model_edges=model_edges,
+    )
+    paths.update(mcmc_direct.save_direct_model_figures(
+        figures=figures, output_dir=os.path.join(base_dir, 'plots'),
+        stack_dim=stack_dim, model_edges=model_edges, title=title,
+        m_unit=m_unit,
+    ))
+    return paths
+
+
+def plot_direct_models(
+        tier1_dir,
+        tier2_dir,
+        tier3_dir,
+        nstars,
+        stack_dim,
+        a_edges,
+        m_edges,
+        plot_models,
+        m_unit='earth',
+        title='Direct occurrence fit',
+        plot_occurrence=True,
+        plot_cumulative=False,
+        plot_density=True,
+        plot_corner=True,
+        plot_catalog_roi=False,
+        plot_roi_occurrence=False,
+        model_plot_style='credible',
+        n_posterior_draws=100,
+        plot_random_seed=None):
+    """Plot selected direct models together while retaining separate corners."""
+    selected = list(plot_models)
+    supported = {'piecewise', 'logG', 'escarpment', 'sigmoid', 'bpl'}
+    unknown = set(selected) - supported
+    if unknown:
+        raise ValueError(f"unsupported direct plot models: {sorted(unknown)}")
+    if selected == ['piecewise']:
+        return plot_direct_piecewise(
+            tier1_dir=tier1_dir, tier2_dir=tier2_dir, tier3_dir=tier3_dir,
+            nstars=nstars, stack_dim=stack_dim,
+            m_unit=m_unit, title=title, plot_occurrence=plot_occurrence,
+            plot_density=plot_density, plot_corner=plot_corner,
+            plot_catalog_roi=plot_catalog_roi,
+            plot_roi_occurrence=plot_roi_occurrence,
+        )
+    if len(selected) == 1 and selected[0] != 'piecewise':
+        return plot_direct_smooth(
+            tier1_dir=tier1_dir, tier2_dir=tier2_dir, tier3_dir=tier3_dir,
+            model_name=selected[0],
+            stack_dim=stack_dim, a_edges=a_edges, m_edges=m_edges,
+            m_unit=m_unit,
+            title=title, plot_occurrence=plot_occurrence,
+            plot_cumulative=plot_cumulative,
+            plot_density=plot_density, plot_corner=plot_corner,
+            model_plot_style=model_plot_style,
+            n_posterior_draws=n_posterior_draws,
+            plot_random_seed=plot_random_seed,
+        )
+    base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
+    base_figures = {}
+    model_edges = m_edges if stack_dim == 'a' else a_edges
+    paths = {}
+    if 'piecewise' in selected:
+        direct_fit_path = os.path.join(
+            base_dir, 'saved_dicts', 'direct_fit_data.npz'
+        )
+        piecewise_chain = os.path.join(
+            base_dir, 'saved_chains', 'chains_direct_piecewise.npz'
+        )
+        summary_path = os.path.join(
+            base_dir, 'saved_dicts', 'summary_dict_direct_piecewise.npz'
+        )
+        summary = mcmc_direct.summarize_piecewise_file(
+            direct_fit_path, piecewise_chain, nstars, save_path=summary_path
+        )
+        mtype = os.path.basename(os.path.normpath(tier1_dir))
+        if plot_density:
+            base_figures['density'] = pu.plot_occurrence_hist(
+                summary, stack_dim=stack_dim, m_unit=m_unit, mtype=mtype,
+                rate_type='ORD', title=title, return_fig_ax=True,
+            )
+            _label_piecewise_axes(base_figures['density'][1])
+        if plot_cumulative:
+            base_figures['cumulative'] = mcmc_direct.piecewise_cumulative_figure(
+                piecewise_chain, stack_dim=stack_dim, title=title, m_unit=m_unit,
+            )
+        paths['piecewise'] = mcmc_direct.plot_piecewise_results(
+            direct_fit_path, piecewise_chain, os.path.join(base_dir, 'plots'),
+            nstars, stack_dim, m_unit=m_unit, mtype=mtype, title=title,
+            plot_occurrence=False, plot_density=False, plot_corner=plot_corner,
+            plot_catalog_roi=plot_catalog_roi,
+            plot_roi_occurrence=plot_roi_occurrence,
+            tier1_dir=tier1_dir, tier2_dir=tier2_dir,
+            summary=summary,
+        )
     else:
-        raise ValueError(f"stack_dim must be 'a' or 'm', got {stack_dim}")
-
-    nonstack_bin_centers = (nonstack_edges[:,1]*nonstack_edges[:,0])**0.5
-    
-    model_bic_output_dict = {}
-    for stack_ind in range(stack_nbins):
-        
-        ORD_vals = hist_summary_dict['mode_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
-        ORD_errs_high = hist_summary_dict['hdi_high_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind] - ORD_vals
-        ORD_errs_low = ORD_vals - hist_summary_dict['hdi_low_ORD'].reshape(nonstack_nbins,-1)[:,stack_ind]
-        #ORD_errs = 0.5*(ORD_errs_high+ORD_errs_low)
-    
-        hist_dict = {'bin_centers':nonstack_bin_centers,
-                     'lims':(nonstack_edges[0][0], nonstack_edges[-1][-1]),
-                     'ORD_vals':ORD_vals,
-                     'ORD_errs_high':ORD_errs_high,
-                     'ORD_errs_low':ORD_errs_low,
-                     }
-                     
-        flat_bic_outputs = mcmc_power.calculate_bic(tier123_dir, 'flat', 
-                                                    hist_dict, model_dict, 
-                                                    stack_ind, init_type='guess')
-        model_bic_output_dict[f'bic_outputs_flat_{stack_ind}'] = flat_bic_outputs
-        
-        for model_name in run_models:
-            if model_name=='hist':
-                continue
-            #import pdb; pdb.set_trace()
-            single_model_bic_outputs = mcmc_power.calculate_bic(tier123_dir, model_name, 
-                                                                hist_dict, model_dict, 
-                                                                stack_ind, init_type='chains')
-            
-            dict_key = f"bic_outputs_{model_name}_{stack_ind}"
-            model_bic_output_dict[dict_key] = single_model_bic_outputs
-
-        #import pdb; pdb.set_trace()
-    mcmc_power.plot_bics_on_histogram(tier123_dir, model_bic_output_dict, 
-                                      model_dict, stack_dim, m_unit)
-    
-    return
-    
-def make_results_plots(tier1_dir, tier2_dir, tier3_dir,
-                       nstars, run_models, plot_models,
-                       plot_hist_corner, plot_model_corners,
-                       stack_dim, m_unit='earth', 
-                       hist_title=''):
-    """
-    Load MCMC chains and make diagnostic
-    plots of the results
-    """
-    
-    
-    load_save_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
-    plot_save_dir = os.path.join(load_save_dir, 'plots/')
-    
-
-    ## Make corner and completeness plot from histogram  ##
-    ########################################################
-    path_to_cell_dict = os.path.join(load_save_dir, 'saved_dicts/cell_dict.npz')
-    path_to_hist_chains = os.path.join(load_save_dir, 'saved_chains/chains_hist.npz') 
-    path_to_summary = os.path.join(load_save_dir, 'saved_dicts/summary_dict.npz')
-
-    ## Start with corner plot for histogram model ##
-    cell_dict = dict(np.load(path_to_cell_dict)) # Includes bin sizes and avg_cell_compls
-    save_corner_dir = os.path.join(plot_save_dir, 'corner_hist.png')
-
-    if plot_hist_corner:
-        pu.plot_corner_from_file(path_to_hist_chains, plot_model='hist', model_dict=model_dict,
-                                 outpath=save_corner_dir,
-                                 thin=10, max_samples=50000)
+        import matplotlib.pyplot as plt
+        if plot_density:
+            base_figures['density'] = plt.subplots(figsize=(6, 4))
+        if plot_cumulative:
+            base_figures['cumulative'] = plt.subplots(figsize=(6, 4))
+    for model_name in [name for name in selected if name != 'piecewise']:
+        chain_dir = os.path.join(base_dir, 'saved_chains')
+        chain_paths = glob.glob(os.path.join(
+            chain_dir, f'chains_direct_{model_name}_bin*.npz'
+        ))
+        chain_paths.sort(
+            key=lambda path: int(os.path.splitext(path)[0].rsplit('bin', 1)[1])
+        )
+        if not chain_paths:
+            raise FileNotFoundError(
+                f"no saved direct {model_name} chains in {chain_dir!r}"
+            )
+        paths[model_name] = mcmc_direct.add_smooth_model_to_figures(
+            chain_paths=chain_paths, model_name=model_name,
+            figures=base_figures, output_dir=os.path.join(base_dir, 'plots'),
+            stack_dim=stack_dim, m_unit=m_unit, title=title,
+            plot_occurrence=False, plot_cumulative=plot_cumulative,
+            plot_density=plot_density, plot_corner=plot_corner,
+            model_plot_style=model_plot_style,
+            n_posterior_draws=n_posterior_draws,
+            plot_random_seed=plot_random_seed,
+            model_edges=model_edges,
+        )
+    paths['combined'] = mcmc_direct.save_direct_model_figures(
+        figures=base_figures, output_dir=os.path.join(base_dir, 'plots'),
+        stack_dim=stack_dim, model_edges=model_edges, title=title,
+        m_unit=m_unit,
+    )
+    return paths
 
 
-
-    ## Now plot completeness map + catalog + derived occurrence rates + eff pl. + avg. compl.
-    avg_comp_path = os.path.join(tier1_dir, tier2_dir, 'avg_map/')
-    xgrid = np.load(avg_comp_path+"parent_xgrid.npy")
-    ygrid = np.load(avg_comp_path+"parent_ygrid.npy")
-    zgrid = np.load(avg_comp_path+"parent_zgrid.npy")
-
-    summary_dict = dict(np.load(path_to_summary))
-
-
-    ## Plot completeness map with grid cells and occurrence rate annotations
-    y_col = 'inj_'+tier1_dir # e.g. inj_mtrue
-    #import pdb; pdb.set_trace()
-    pu.completeness_plotter(xgrid, ygrid, zgrid, plot_save_dir+"ROI_with_occurrence.png", 
-                            title=f'{nstars} Stars', save_plot=True, 
-                            a_m_lims_pairs=cell_dict['a_m_lims_pairs'], summary_dict=summary_dict,
-                            ycol=y_col, m_unit=m_unit)
-    ############################################################
-    ############################################################
-
-    #import pdb; pdb.set_trace()
-    ## Plot occurrence histogram in OR and ORD
-    pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
-                            rate_type='OR', title=hist_title,
-                            savepath=plot_save_dir+f'occurrence_OR.png', figsize=(6, 4))
-                            
-    # Determine number of stack_dim bins to create corner plots for each
-    if stack_dim == 'a':
-        #n_stack_bins = len(a_edges) - 1
-        n_stack_bins = summary_dict['n_abins']
-    elif stack_dim == 'm':
-        #n_stack_bins = len(m_edges) - 1
-        n_stack_bins = summary_dict['n_mbins']
-    else:
-        n_stack_bins = 1
-    
-    if plot_model_corners:
-        plot_corner_names = [model_name for model_name in run_models if model_name!='hist']
-        for model_name in plot_corner_names:
-
-            ## Plot corner for power law model (one for each bin)
-            for bin_idx in range(n_stack_bins):
-                path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}_bin{bin_idx}.npz')
-                # Fallback to old naming if single-bin file doesn't exist
-                if not os.path.exists(path_to_power_chains):
-                    path_to_power_chains = os.path.join(load_save_dir, f'saved_chains/chains_{model_name}.npz')
-                save_corner_dir = os.path.join(plot_save_dir, f'corner_{model_name}_bin{bin_idx}.png')
-            
-                if os.path.exists(path_to_power_chains):
-                    pu.plot_corner_from_file(path_to_power_chains, plot_model=model_name, model_dict=model_dict, 
-                                             outpath=save_corner_dir, thin=10, max_samples=50000)
-        
-                            
-    if plot_models is None:
-        pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
-                                rate_type='ORD', title=hist_title,
-                                savepath=plot_save_dir+f'occurrence_ORD.png', figsize=(6, 4))
-        
-    else:
-
-        fig, ax = pu.plot_occurrence_hist(summary_dict, stack_dim=stack_dim, m_unit=m_unit, mtype=tier1_dir,
-                                          rate_type='ORD', title=hist_title, return_fig_ax=True,
-                                          savepath=None, figsize=(6, 4))
-        #import pdb; pdb.set_trace()
-        pu.plot_power(fig, ax, plot_models, model_dict,
-                      save_path=plot_save_dir+f'occurrence_ORD.png', 
-                      stack_dim=stack_dim)
-    
-    return
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+def _label_piecewise_axes(axes):
+    """Label the black histogram trace on combined direct-model plots."""
+    for axis in np.atleast_1d(axes):
+        if axis.lines:
+            axis.lines[0].set_label('piecewise')
     
     
     

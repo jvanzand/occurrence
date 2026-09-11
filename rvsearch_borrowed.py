@@ -131,7 +131,6 @@ class Completeness(object):
                     z[j, i] = float(len(boxgood))/len(boxall)
                     last = float(len(boxgood))/len(boxall)
                 else:
-                    # import pdb; pdb.set_trace()
                     z[j, i] = np.nan
 
         self.grid = (xgrid, ygrid, z)
@@ -144,7 +143,6 @@ class Completeness(object):
             z = z_fill_both
             
             # import matplotlib.pyplot as plt
-            # import pdb; pdb.set_trace()
 
         return (xgrid, ygrid, z)
 
@@ -301,7 +299,6 @@ class CompletenessPlots(object):
         ax = pl.gca()
         ax.set_xscale('log')
         ax.set_yscale('log')
-        #import pdb; pdb.set_trace()
 
 
         ### IRRELEVANT for general occurrence work. Not interested in single system detections.

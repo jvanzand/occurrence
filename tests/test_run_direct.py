@@ -1,0 +1,309 @@
+"""Tests for multi-configuration direct-fit orchestration."""
+
+import pandas as pd
+import pytest
+
+from occurrence import main
+from occurrence import run
+
+
+def test_run_direct_multiple_applies_tier2_cuts_and_plot_controls(
+        tmp_path, monkeypatch):
+    """Each Tier 2 subset should run and plot with its selected star count."""
+    prep_calls = []
+    fit_calls = []
+    plot_calls = []
+
+    def fake_prep(**kwargs):
+        prep_calls.append(kwargs)
+        return "materials.npz"
+
+    def fake_fit(**kwargs):
+        fit_calls.append(kwargs)
+        return object()
+
+    def fake_plot(**kwargs):
+        plot_calls.append(kwargs)
+        return {"occurrence": "occurrence.png"}
+
+    monkeypatch.setattr(main, "prep_direct_fit_materials", fake_prep)
+    monkeypatch.setattr(run.mcmc_direct, "fit_piecewise_file", fake_fit)
+    monkeypatch.setattr(main, "plot_direct_piecewise", fake_plot)
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mtrue").mkdir()
+    stars = pd.DataFrame({
+        "star_name": ["a", "b", "c"],
+        "Mstar": [0.8, 1.1, 1.3],
+    })
+    cuts = {
+        "allstars": [{"star_df_query": None}, "All Stars"],
+        "highMstar": [{"star_df_query": "Mstar > 1"}, "High Mass"],
+    }
+
+    results = run.run_direct_multiple(
+        tier1_list=["mtrue"],
+        tier2_list=["allstars", "highMstar"],
+        tier3_list=["direct"],
+        a_edges=[0.1, 10.0],
+        m_edges=[0.4, 1.0, 10.0],
+        star_df=stars,
+        tier2_df_cuts_dict=cuts,
+        run_models_list=["piecewise"],
+        plot_models_list=["piecewise"],
+        stack_dim="a",
+        plot_occurrence=True,
+        plot_density=False,
+        plot_corner=True,
+        plot_catalog_roi=True,
+        plot_roi_occurrence=True,
+    )
+
+    assert [result["nstars"] for result in results] == [3, 2]
+    assert [len(call["star_df"]) for call in prep_calls] == [3, 2]
+    assert len(fit_calls) == 2
+    assert [call["nstars"] for call in plot_calls] == [3, 2]
+    assert all(call["plot_density"] is False for call in plot_calls)
+    assert all(call["plot_catalog_roi"] is True for call in plot_calls)
+    assert all(call["plot_roi_occurrence"] is True for call in plot_calls)
+
+
+def test_run_direct_multiple_prepares_missing_tier2(tmp_path, monkeypatch):
+    """Missing Tier 2 products should be created before direct fitting."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mtrue").mkdir()
+    tier2_calls = []
+    monkeypatch.setattr(
+        run, "make_tier2",
+        lambda configuration, *args: tier2_calls.append(configuration),
+    )
+    monkeypatch.setattr(
+        main, "prep_direct_fit_materials", lambda **kwargs: "materials.npz",
+    )
+    monkeypatch.setattr(
+        run.mcmc_direct, "fit_piecewise_file", lambda **kwargs: object(),
+    )
+
+    results = run.run_direct_multiple(
+        tier1_list=["mtrue"],
+        tier2_list=["highMstar"],
+        tier3_list=["direct"],
+        a_edges=[0.1, 10.0],
+        m_edges=[0.4, 50.0],
+        star_df=pd.DataFrame({"star_name": ["a"], "Mstar": [1.2]}),
+        tier2_df_cuts_dict={
+            "highMstar": [{"star_df_query": "Mstar > 1"}, "High Mass"]
+        },
+        comp_post_dir="posteriors",
+        sampling_func=lambda *args: {},
+        plot_models_list=[],
+        make_plots=False,
+    )
+
+    assert len(tier2_calls) == 1
+    assert tier2_calls[0]["t2_dir"] == "highMstar"
+    assert results[0]["nstars"] == 1
+
+
+def test_run_direct_multiple_prepares_missing_tier1(tmp_path, monkeypatch):
+    """Missing Tier 1 products should be generated from supplied recoveries."""
+    monkeypatch.chdir(tmp_path)
+    tier1_calls = []
+
+    def fake_make_tier1(configuration, *args):
+        tier1_calls.append((configuration, args))
+        (tmp_path / configuration["t1_dir"]).mkdir()
+
+    monkeypatch.setattr(run, "make_tier1", fake_make_tier1)
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(
+        main, "prep_direct_fit_materials", lambda **kwargs: "materials.npz"
+    )
+    monkeypatch.setattr(
+        run.mcmc_direct, "fit_piecewise_file", lambda **kwargs: object()
+    )
+    results = run.run_direct_multiple(
+        tier1_list=["mtrue"], tier2_list=["allstars"],
+        tier3_list=["direct"], a_edges=[0.1, 10.0],
+        m_edges=[0.4, 50.0],
+        star_df=pd.DataFrame({"star_name": ["a"], "Mstar": [1.0]}),
+        tier2_df_cuts_dict={
+            "allstars": [{"star_df_query": None}, "All Stars"]
+        },
+        recoveries_dir="recoveries", recoveries_mtype="msini",
+        plot_models_list=[], make_plots=False,
+    )
+    assert tier1_calls[0][0]["t1_dir"] == "mtrue"
+    assert tier1_calls[0][0]["mass_unit"] == "earth"
+    assert tier1_calls[0][1][1:] == ("recoveries", "msini", False, False)
+    assert results[0]["tier1"] == "mtrue"
+
+
+def test_missing_tier1_requires_recoveries_directory(tmp_path, monkeypatch):
+    """The runner should identify the input needed for Tier 1 preparation."""
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="recoveries_dir"):
+        run.run_direct_multiple(
+            tier1_list=["mtrue"], tier2_list=["allstars"],
+            tier3_list=["direct"], a_edges=[0.1, 10.0],
+            m_edges=[0.4, 50.0],
+            star_df=pd.DataFrame({"star_name": ["a"]}),
+            tier2_df_cuts_dict={
+                "allstars": [{"star_df_query": None}, "All Stars"]
+            },
+        )
+
+
+def test_tier2_readiness_requires_catalog_and_average_map(tmp_path):
+    """A directory alone should not count as a complete Tier 2 product."""
+    tier2 = tmp_path / "mtrue" / "allstars"
+    tier2.mkdir(parents=True)
+    assert not run._tier2_artifacts_exist(tmp_path / "mtrue", "allstars")
+    (tier2 / "sampled_post_prior_compl.npz").touch()
+    assert not run._tier2_artifacts_exist(tmp_path / "mtrue", "allstars")
+    (tier2 / "avg_map").mkdir()
+    (tier2 / "avg_map" / "interp_fn.pkl").touch()
+    assert run._tier2_artifacts_exist(tmp_path / "mtrue", "allstars")
+
+
+def test_make_tier2_uses_filtered_stars_for_average_map(monkeypatch):
+    """Subset average completeness should use the same selected stellar sample."""
+    calls = {}
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: False)
+    monkeypatch.setattr(
+        main, "make_average_map",
+        lambda **kwargs: calls.setdefault("map_stars", kwargs["star_df"].copy()),
+    )
+    monkeypatch.setattr(
+        main, "prep_post_draws",
+        lambda **kwargs: calls.setdefault("post_stars", kwargs["star_df"].copy()),
+    )
+    monkeypatch.setattr(run.pu, "plot_catalog", lambda **kwargs: None)
+    stars = pd.DataFrame({
+        "star_name": ["low", "high"],
+        "Mstar": [0.8, 1.2],
+        "comp_list": [[], []],
+    })
+    configuration = {
+        "t1_dir": "mtrue",
+        "t2_dir": "highMstar",
+        "star_df_query": "Mstar > 1",
+        "t1_mass_unit": "jupiter",
+        "t1_true_or_sini": "true",
+        "t1_m_or_q": "m",
+    }
+    run.make_tier2(configuration, stars, "posteriors", lambda *args: {})
+    assert calls["map_stars"]["star_name"].tolist() == ["high"]
+    assert calls["post_stars"]["star_name"].tolist() == ["high"]
+
+
+def test_run_direct_multiple_rejects_unknown_model():
+    """Model lists should fail clearly for an unregistered direct model."""
+    with pytest.raises(ValueError, match="unsupported direct models"):
+        run.run_direct_multiple(
+            tier1_list=["mtrue"],
+            tier2_list=["allstars"],
+            tier3_list=["direct"],
+            a_edges=[0.1, 10.0],
+            m_edges=[0.4, 50.0],
+            star_df=pd.DataFrame({"star_name": ["a"]}),
+            tier2_df_cuts_dict={
+                "allstars": [{"star_df_query": None}, "All Stars"]
+            },
+            run_models_list=["not_a_model"],
+        )
+
+
+def test_run_direct_multiple_dispatches_logg_through_smooth_apis(
+        tmp_path, monkeypatch):
+    """The public runner should send logG through the shared smooth APIs."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mtrue").mkdir()
+    fit_calls, plot_calls = [], []
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(
+        main, "prep_direct_fit_materials", lambda **kwargs: "materials.npz"
+    )
+
+    def fake_fit(**kwargs):
+        fit_calls.append(kwargs)
+        return [], ["chains_direct_logG_bin0.npz"]
+
+    monkeypatch.setattr(run.mcmc_direct, "fit_smooth_file", fake_fit)
+    monkeypatch.setattr(
+        main, "plot_direct_smooth",
+        lambda **kwargs: plot_calls.append(kwargs) or {"density": "plot.png"},
+    )
+    results = run.run_direct_multiple(
+        tier1_list=["mtrue"], tier2_list=["allstars"],
+        tier3_list=["direct"], a_edges=[0.1, 10.0],
+        m_edges=[0.4, 50.0],
+        star_df=pd.DataFrame({"star_name": ["a"]}),
+        tier2_df_cuts_dict={
+            "allstars": [{"star_df_query": None}, "All Stars"]
+        },
+        run_models_list=["logG"], plot_models_list=["logG"],
+        logg_amplitude_bounds=(0.001, 2.0),
+        logg_sigma_bounds=(0.05, 1.0),
+        plot_cumulative=True,
+    )
+    assert fit_calls[0]["amplitude_bounds"] == (0.001, 2.0)
+    assert fit_calls[0]["width_bounds"] == (0.05, 1.0)
+    assert fit_calls[0]["model_name"] == "logG"
+    assert plot_calls[0]["plot_corner"] is True
+    assert plot_calls[0]["plot_cumulative"] is True
+    assert results[0]["chains"]["logG"] == ["chains_direct_logG_bin0.npz"]
+
+
+def test_run_direct_multiple_dispatches_new_smooth_models(tmp_path, monkeypatch):
+    """All new models should share the registered smooth-fit dispatcher."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mtrue").mkdir()
+    calls = []
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(
+        main, "prep_direct_fit_materials", lambda **kwargs: "materials.npz"
+    )
+
+    def fake_fit(**kwargs):
+        calls.append(kwargs)
+        return [], [f"{kwargs['model_name']}.npz"]
+
+    monkeypatch.setattr(run.mcmc_direct, "fit_smooth_file", fake_fit)
+    results = run.run_direct_multiple(
+        tier1_list=["mtrue"], tier2_list=["allstars"],
+        tier3_list=["direct"], a_edges=[0.1, 10.0], m_edges=[0.4, 50.0],
+        star_df=pd.DataFrame({"star_name": ["a"]}),
+        tier2_df_cuts_dict={
+            "allstars": [{"star_df_query": None}, "All Stars"]
+        },
+        run_models_list=["escarpment", "sigmoid", "bpl"], plot_models_list=[],
+        sigmoid_amplitude_bounds=(0.002, 3.0),
+        sigmoid_width_bounds=(0.02, 0.5),
+        make_plots=False,
+    )
+    assert [call["model_name"] for call in calls] == [
+        "escarpment", "sigmoid", "bpl"
+    ]
+    assert calls[1]["amplitude_bounds"] == (0.002, 3.0)
+    assert calls[1]["width_bounds"] == (0.02, 0.5)
+    assert set(results[0]["chains"]) == {"escarpment", "sigmoid", "bpl"}
+
+
+def test_multiple_smooth_plots_do_not_require_piecewise(tmp_path, monkeypatch):
+    """Smooth-model overlays must not load or require a piecewise fit."""
+    calls = []
+    monkeypatch.setattr(
+        main.mcmc_direct, "add_smooth_model_to_figures",
+        lambda **kwargs: calls.append(kwargs) or {"density": "plot.png"},
+    )
+    monkeypatch.setattr(main.glob, "glob", lambda pattern: ["chains_bin0.npz"])
+    paths = main.plot_direct_models(
+        tier1_dir=str(tmp_path), tier2_dir="allstars", tier3_dir="direct",
+        nstars=1, stack_dim="a", a_edges=[0.1, 10.0],
+        m_edges=[0.4, 50.0], plot_models=["logG", "escarpment"],
+        plot_occurrence=False, plot_cumulative=False, plot_density=False,
+        plot_corner=False,
+    )
+    assert [call["model_name"] for call in calls] == ["logG", "escarpment"]
+    assert set(paths) == {"logG", "escarpment", "combined"}
