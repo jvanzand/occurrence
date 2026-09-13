@@ -409,6 +409,7 @@ def _run_direct_configuration(configuration):
     )
     early_plot_paths = {}
     roi_occurrence_future = None
+    plot_executor = None
     run_models = configuration["run_models"]
     can_overlap_supplementary_plots = (
         configuration["run_fits"] and configuration["make_plots"] and
@@ -496,7 +497,6 @@ def _run_direct_configuration(configuration):
                         configuration["m_unit"],
                         title,
                     )
-                    plot_executor.shutdown(wait=False)
             elif model_name in {"logG", "escarpment", "sigmoid", "bpl"}:
                 amplitude_key = {
                     "logG": "logg_amplitude_bounds",
@@ -509,32 +509,45 @@ def _run_direct_configuration(configuration):
                     if model_name == "sigmoid"
                     else configuration["logg_sigma_bounds"]
                 )
-                _, chain_paths = mcmc_direct.fit_smooth_file(
-                    direct_fit_path=material_path,
-                    a_edges=configuration["a_edges"],
-                    m_edges=configuration["m_edges"],
-                    stack_dim=configuration["stack_dim"],
-                    model_name=model_name,
-                    save_dir=os.path.join(
-                        configuration["tier1_dir"], configuration["tier2_dir"],
-                        configuration["tier3_dir"], "saved_chains",
-                    ),
-                    nwalkers=configuration["nwalkers"],
-                    nsteps=configuration["nsteps"],
-                    burnin=configuration["burnin"],
-                    parallel=configuration["parallel_mcmc"],
-                    random_seed=configuration["random_seed"],
-                    amplitude_bounds=configuration[amplitude_key],
-                    slope_bounds=configuration["bpl_slope_bounds"],
-                    width_bounds=width_bounds,
-                    max_integrated_occurrence=configuration[
-                        "max_integrated_occurrence"
-                    ],
-                )
+                try:
+                    _, chain_paths = mcmc_direct.fit_smooth_file(
+                        direct_fit_path=material_path,
+                        a_edges=configuration["a_edges"],
+                        m_edges=configuration["m_edges"],
+                        stack_dim=configuration["stack_dim"],
+                        model_name=model_name,
+                        save_dir=os.path.join(
+                            configuration["tier1_dir"],
+                            configuration["tier2_dir"],
+                            configuration["tier3_dir"], "saved_chains",
+                        ),
+                        nwalkers=configuration["nwalkers"],
+                        nsteps=configuration["nsteps"],
+                        burnin=configuration["burnin"],
+                        parallel=configuration["parallel_mcmc"],
+                        random_seed=configuration["random_seed"],
+                        amplitude_bounds=configuration[amplitude_key],
+                        slope_bounds=configuration["bpl_slope_bounds"],
+                        width_bounds=width_bounds,
+                        max_integrated_occurrence=configuration[
+                            "max_integrated_occurrence"
+                        ],
+                    )
+                except BaseException:
+                    if plot_executor is not None:
+                        plot_executor.shutdown(wait=True)
+                        plot_executor = None
+                    raise
                 result["chains"][model_name] = chain_paths
 
     if roi_occurrence_future is not None:
-        early_plot_paths["roi_occurrence"] = roi_occurrence_future.result()
+        try:
+            early_plot_paths["roi_occurrence"] = roi_occurrence_future.result()
+        finally:
+            # Python 3.7 can close the executor wakeup pipe too early when
+            # shutdown(wait=False) races its QueueManagerThread. Keep the
+            # executor alive while fits continue, then close it synchronously.
+            plot_executor.shutdown(wait=True)
 
     if configuration["make_plots"] and configuration["plot_models"]:
         result["plots"] = main.plot_direct_models(

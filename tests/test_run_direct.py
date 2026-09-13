@@ -351,7 +351,7 @@ def test_supplementary_plots_overlap_later_serial_models(tmp_path, monkeypatch):
             return FakeFuture(function(*args))
 
         def shutdown(self, wait=True):
-            assert wait is False
+            assert wait is True
             events.append("release_executor")
 
     monkeypatch.chdir(tmp_path)
