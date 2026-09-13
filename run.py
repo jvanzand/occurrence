@@ -52,7 +52,8 @@ def make_tier1(tier1_config, star_df_full, recoveries_dir,
     return
 
 
-def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func, avg_map_only=False):
+def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
+               avg_map_only=False, fill_single_nan_with_average=True):
     """
     Makes only the tier2 dict
     """
@@ -98,7 +99,8 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func, avg_map
                              star_df=star_df, comp_post_dir=comp_post_dir,
                              sampling_func=sampling_func,
                              saved_maps_dir=saved_maps_dir, m_unit=t2.t1_mass_unit,
-                             avg_map_only=avg_map_only)
+                             avg_map_only=avg_map_only,
+                             fill_single_nan_with_average=fill_single_nan_with_average)
                              
         ## Plot companion catalog
         catalog_path = os.path.join(t2.t1_dir, t2.t2_dir, 'sampled_post_prior_compl.npz')
@@ -169,7 +171,8 @@ def run_direct_multiple(
         plot_random_seed=None,
         prepare_missing=True,
         avg_map_only=False,
-        plot_tier1_maps=False):
+        plot_tier1_maps=False,
+        fill_single_nan_with_average=True):
     """Run and plot direct occurrence fits for multiple tier combinations.
 
     Registered models are ``piecewise``, ``logG``, ``escarpment``, ``sigmoid``,
@@ -316,7 +319,8 @@ def run_direct_multiple(
                 "comp_post_dir and sampling_func are required to create missing Tier 2 products"
             )
         preparation_arguments = (
-            star_df, comp_post_dir, sampling_func, avg_map_only
+            star_df, comp_post_dir, sampling_func, avg_map_only,
+            fill_single_nan_with_average,
         )
         if parallel_fits and len(missing_tier2) > 1:
             _run_futures_in_parallel(

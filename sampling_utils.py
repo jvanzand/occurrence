@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import pickle
 import h5py
+import warnings
 
 from astropy import constants as c
 Mj2Me = (c.M_jup/c.M_earth).value
@@ -149,7 +150,8 @@ def interim_prior(post_sample_dict, prior_type='loguniform'):
 
 def include_post_completeness(sampled_post_dict, star_df,
                               tier1_dir, tier2_dir,
-                              avg_map_only=False):
+                              avg_map_only=False,
+                              fill_single_nan_with_average=True):
     """
     Given a dictionary with companion posterior
     samples, calculate the completeness at each
@@ -185,8 +187,34 @@ def include_post_completeness(sampled_post_dict, star_df,
             a_m_prior = sampled_post_dict[comp_name] # Already-saved values, which we will append to
             
             ## Compute average and single-system completeness
-            avg_compls = avg_compl_interp((a_m_prior[0], a_m_prior[1])) # interp_fn((a_list, m_list))
-            single_star_compls = single_compl_interp((a_m_prior[0], a_m_prior[1]))
+            avg_compls = np.asarray(
+                avg_compl_interp((a_m_prior[0], a_m_prior[1])), dtype=float
+            )
+            single_star_compls = np.array(
+                single_compl_interp((a_m_prior[0], a_m_prior[1])),
+                dtype=float,
+                copy=True,
+            )
+
+            if fill_single_nan_with_average:
+                invalid_single = ~np.isfinite(single_star_compls)
+                valid_average = np.isfinite(avg_compls)
+                fallback_mask = invalid_single & valid_average
+                unresolved_mask = invalid_single & ~valid_average
+                if np.any(fallback_mask):
+                    warnings.warn(
+                        f"{comp_name}: replaced host-specific completeness with "
+                        f"average completeness for {np.count_nonzero(fallback_mask)} "
+                        f"of {single_star_compls.size} posterior samples",
+                        RuntimeWarning,
+                    )
+                    single_star_compls[fallback_mask] = avg_compls[fallback_mask]
+                if np.any(unresolved_mask):
+                    warnings.warn(
+                        f"{comp_name}: {np.count_nonzero(unresolved_mask)} posterior "
+                        "samples have undefined host-specific and average completeness",
+                        RuntimeWarning,
+                    )
             
             
 

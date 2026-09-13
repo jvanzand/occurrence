@@ -181,7 +181,8 @@ def prep_post_draws(tier1_dir, tier2_dir,
                     sampling_func,
                     saved_maps_dir=None, m_unit='earth',
                     fig_title='Catalog Posteriors',
-                    avg_map_only=False):
+                    avg_map_only=False,
+                    fill_single_nan_with_average=True):
 
     """
     Sample from companion posteriors according to user-specified
@@ -233,7 +234,8 @@ def prep_post_draws(tier1_dir, tier2_dir,
     sampled_post_with_compls = su.include_post_completeness(post_prior_sample_dict,
                                                             star_df,
                                                             tier1_dir, tier2_dir,
-                                                            avg_map_only=avg_map_only)
+                                                            avg_map_only=avg_map_only,
+                                                            fill_single_nan_with_average=fill_single_nan_with_average)
     #rr_test = deepcopy(sampled_post_with_compls)                                                  
     ## Saves dict with companion names as key names
     ## Each value is a 7xN array, with prior densities defined relative to

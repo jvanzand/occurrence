@@ -332,3 +332,68 @@ def test_completeness_attachment_preserves_all_posterior_draws(tmp_path, monkeyp
     assert np.isnan(result[4, 100])
     assert np.isnan(result[5, 100])
     np.testing.assert_array_equal(result[6], prior)
+
+
+def test_undefined_single_completeness_falls_back_to_average(tmp_path, monkeypatch):
+    """Finite average completeness should replace only undefined single values."""
+    from occurrence.sampling_utils import include_post_completeness
+    monkeypatch.chdir(tmp_path)
+    average_dir = tmp_path / "mtrue" / "allstars" / "avg_map"
+    single_dir = tmp_path / "mtrue" / "saved_maps_mtrue" / "star1"
+    average_dir.mkdir(parents=True)
+    single_dir.mkdir(parents=True)
+    with (average_dir / "interp_fn.pkl").open("wb") as stream:
+        pickle.dump(ConstantInterpolator(0.8), stream)
+    with (single_dir / "interp_fn.pkl").open("wb") as stream:
+        pickle.dump(PartlyUndefinedInterpolator(), stream)
+
+    x_samples = np.array([1.0, 2.0, 3.0])
+    y_samples = np.full(3, 4.0)
+    prior = np.array([0.5, 0.25, 0.5])
+    sampled_post_dict = {
+        "star1_0": np.vstack([x_samples, y_samples, prior])
+    }
+    stars = pd.DataFrame({
+        "star_name": ["star1"],
+        "comp_list": [["star1_0"]],
+    })
+
+    with pytest.warns(RuntimeWarning, match="replaced host-specific completeness"):
+        result = include_post_completeness(
+            sampled_post_dict=sampled_post_dict,
+            star_df=stars,
+            tier1_dir="mtrue",
+            tier2_dir="allstars",
+        )["star1_0"]
+
+    np.testing.assert_allclose(result[2], [0.8, 0.8, 0.8])
+    np.testing.assert_allclose(result[3], [0.5, 0.8, 0.5])
+    np.testing.assert_allclose(result[5], [1.0, 3.2, 1.0])
+
+
+def test_single_completeness_fallback_can_be_disabled(tmp_path, monkeypatch):
+    """Strict catalog generation should retain undefined single completeness."""
+    from occurrence.sampling_utils import include_post_completeness
+
+    monkeypatch.chdir(tmp_path)
+    average_dir = tmp_path / "mtrue" / "allstars" / "avg_map"
+    single_dir = tmp_path / "mtrue" / "saved_maps_mtrue" / "star1"
+    average_dir.mkdir(parents=True)
+    single_dir.mkdir(parents=True)
+    with (average_dir / "interp_fn.pkl").open("wb") as stream:
+        pickle.dump(ConstantInterpolator(0.8), stream)
+    with (single_dir / "interp_fn.pkl").open("wb") as stream:
+        pickle.dump(PartlyUndefinedInterpolator(), stream)
+
+    samples = {"star1_0": np.array([[2.0], [4.0], [1.0]])}
+    stars = pd.DataFrame({
+        "star_name": ["star1"],
+        "comp_list": [["star1_0"]],
+    })
+    result = include_post_completeness(
+        samples, stars, "mtrue", "allstars",
+        fill_single_nan_with_average=False,
+    )["star1_0"]
+
+    assert np.isnan(result[3, 0])
+    assert np.isnan(result[5, 0])
