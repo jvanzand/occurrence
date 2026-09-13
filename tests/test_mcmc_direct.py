@@ -9,14 +9,14 @@ from occurrence import mcmc_direct
 
 
 def _materials():
-    x_values, stack_values = np.meshgrid([1.0, 10.0], [1.0, 10.0], indexing="ij")
+    x_values, y_values = np.meshgrid([1.0, 10.0], [1.0, 10.0], indexing="ij")
     exposure = dfu.ExposureGrid(
         x_values=x_values,
-        stack_values=stack_values,
+        y_values=y_values,
         completeness_sum=np.ones((2, 2)),
         integration_weights=np.full((2, 2), 0.25),
         x_bounds=(1.0, 10.0),
-        stack_bounds=(1.0, 10.0),
+        y_bounds=(1.0, 10.0),
     )
     companion = dfu.prepare_companion_samples(
         name="b",
@@ -25,7 +25,7 @@ def _materials():
         completeness=[0.5],
         interim_prior=[1.0],
         x_bounds=(1.0, 10.0),
-        stack_bounds=(1.0, 10.0),
+        y_bounds=(1.0, 10.0),
     )
     return {"b": companion}, exposure
 
@@ -39,7 +39,7 @@ def test_direct_piecewise_sampler_is_reproducible(tmp_path):
             companions=companions,
             exposure=exposure,
             x_edges=[1.0, 10.0],
-            stack_edges=[1.0, 10.0],
+            y_edges=[1.0, 10.0],
             nwalkers=4,
             nsteps=8,
             burnin=5,
@@ -62,7 +62,7 @@ def test_direct_piecewise_sampler_requires_matching_fit_domain():
             companions=companions,
             exposure=exposure,
             x_edges=[2.0, 10.0],
-            stack_edges=[1.0, 10.0],
+            y_edges=[1.0, 10.0],
             nwalkers=4,
             nsteps=2,
             burnin=2,
@@ -75,7 +75,7 @@ def test_direct_piecewise_sampler_rejects_unsupported_companion(tmp_path):
     outside = dfu.prepare_companion_samples(
         name="outside",
         x_samples=[20.0], y_samples=[2.0], completeness=[0.5],
-        interim_prior=[1.0], x_bounds=(1.0, 10.0), stack_bounds=(1.0, 10.0),
+        interim_prior=[1.0], x_bounds=(1.0, 10.0), y_bounds=(1.0, 10.0),
     )
     companions["outside"] = outside
     with pytest.raises(ValueError, match="no posterior support"):
@@ -286,7 +286,7 @@ def test_piecewise_cumulative_figure_integrates_successive_bins(tmp_path):
     samples = np.tile([1.0, 2.0], (20, 1))
     np.savez(
         path, flat_chains=samples, x_edges=[1.0, 10.0],
-        stack_edges=[1.0, np.sqrt(10.0), 10.0],
+        y_edges=[1.0, np.sqrt(10.0), 10.0],
     )
     figure, axes = mcmc_direct.piecewise_cumulative_figure(
         path, stack_dim="a"

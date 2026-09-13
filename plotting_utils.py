@@ -409,6 +409,19 @@ def plot_corner_from_file(
         truth_color=reference_color,
     )
 
+    # Some corner versions fail to render the final diagonal truth marker.
+    # Draw each one explicitly, including the sigmoid width (formerly D).
+    if reference_values is not None:
+        references = np.asarray(reference_values, dtype=float)
+        if references.shape != (ndim,):
+            raise ValueError("reference_values must contain one value per parameter")
+        axes = np.asarray(fig.axes, dtype=object).reshape((ndim, ndim))
+        for index, reference in enumerate(references):
+            if np.isfinite(reference):
+                limits = axes[index, index].get_xlim()
+                axes[index, index].axvline(reference, color=reference_color)
+                axes[index, index].set_xlim(limits)
+
     plt.savefig(outpath, dpi=200, bbox_inches="tight")
     plt.close()
 

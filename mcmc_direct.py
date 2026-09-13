@@ -27,7 +27,7 @@ def mcmc_piecewise(
         companions,
         exposure,
         x_edges,
-        stack_edges,
+        y_edges,
         nwalkers=50,
         nsteps=5000,
         burnin=1000,
@@ -36,13 +36,13 @@ def mcmc_piecewise(
         random_seed=None):
     """Fit cell-wise densities directly to companion posterior samples."""
     x_edges = dl._validate_edges(x_edges, "x_edges")
-    stack_edges = dl._validate_edges(stack_edges, "stack_edges")
+    y_edges = dl._validate_edges(y_edges, "y_edges")
     if not np.allclose(x_edges[[0, -1]], exposure.x_bounds):
         raise ValueError("outer x_edges must match the exposure x_bounds")
-    if not np.allclose(stack_edges[[0, -1]], exposure.stack_bounds):
-        raise ValueError("outer stack_edges must match the exposure stack_bounds")
+    if not np.allclose(y_edges[[0, -1]], exposure.y_bounds):
+        raise ValueError("outer y_edges must match the exposure y_bounds")
     cache = dl.build_piecewise_cache(
-        companions, exposure, x_edges, stack_edges
+        companions, exposure, x_edges, y_edges
     )
     cell_areas = cache.cell_areas
     ndim = cell_areas.size
@@ -88,7 +88,7 @@ def mcmc_piecewise(
         flat_chains=sampler.get_chain(flat=True),
         flat_log_probs=sampler.get_log_prob(flat=True),
         x_edges=x_edges,
-        stack_edges=stack_edges,
+        y_edges=y_edges,
         cell_areas=cache.cell_areas,
         cell_exposure=cache.cell_exposure,
         effective_counts=cache.effective_counts,
@@ -97,11 +97,11 @@ def mcmc_piecewise(
     return sampler
 
 
-def fit_piecewise_file(direct_fit_path, x_edges, stack_edges, **mcmc_options):
+def fit_piecewise_file(direct_fit_path, x_edges, y_edges, **mcmc_options):
     """Load Stage 2 materials and run a direct piecewise-constant fit."""
     companions, exposure = dfu.load_direct_fit_data(direct_fit_path)
     return mcmc_piecewise(
-        companions, exposure, x_edges, stack_edges, **mcmc_options
+        companions, exposure, x_edges, y_edges, **mcmc_options
     )
 
 
@@ -161,13 +161,13 @@ def log_prior_smooth(
         )
         jacobian = transformed_theta[0] + transformed_theta[1]
     elif model_name == "sigmoid":
-        low, high, midpoint, width = physical
+        c1, c2, center, width = physical
         if width_bounds is None:
             width_bounds = _default_width_bounds(cache)
         valid = (
-            amplitude_bounds[0] <= low <= amplitude_bounds[1] and
-            amplitude_bounds[0] <= high <= amplitude_bounds[1] and
-            log_min <= midpoint <= log_max and
+            amplitude_bounds[0] <= c1 <= amplitude_bounds[1] and
+            amplitude_bounds[0] <= c2 <= amplitude_bounds[1] and
+            log_min <= center <= log_max and
             width_bounds[0] <= width <= width_bounds[1]
         )
         jacobian = (
@@ -747,7 +747,8 @@ def piecewise_cumulative_figure(
     with np.load(chain_path) as data:
         samples = np.asarray(data["flat_chains"])[::10]
         a_edges = np.asarray(data["x_edges"])
-        m_edges = np.asarray(data["stack_edges"])
+        y_key = "y_edges" if "y_edges" in data else "stack_edges"
+        m_edges = np.asarray(data[y_key])
     n_a, n_m = len(a_edges) - 1, len(m_edges) - 1
     densities = samples.reshape(-1, n_m, n_a)
     areas = np.outer(np.diff(np.log10(m_edges)), np.diff(np.log10(a_edges)))
@@ -804,11 +805,12 @@ def summarize_piecewise_file(
     with np.load(chain_path) as data:
         samples = data["flat_chains"]
         a_edges = data["x_edges"]
-        m_edges = data["stack_edges"]
+        y_key = "y_edges" if "y_edges" in data else "stack_edges"
+        m_edges = data[y_key]
         if "cell_exposure" in data and "effective_counts" in data:
             cache = dl.PiecewiseLikelihoodCache(
                 x_edges=a_edges,
-                stack_edges=m_edges,
+                y_edges=m_edges,
                 cell_areas=data["cell_areas"],
                 cell_exposure=data["cell_exposure"],
                 effective_counts=data["effective_counts"],

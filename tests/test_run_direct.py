@@ -1,10 +1,29 @@
 """Tests for multi-configuration direct-fit orchestration."""
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from occurrence import main
 from occurrence import run
+
+
+@pytest.mark.parametrize(
+    "m_unit, solar_mass",
+    [("jupiter", run.su.Ms2Mj), ("earth", run.su.Ms2Me)],
+)
+def test_mass_edges_are_converted_for_mass_ratio_tiers(m_unit, solar_mass):
+    edges = np.array([1.0, 10.0])
+    converted = run._y_edges_for_tier(edges, "q", m_unit)
+    np.testing.assert_allclose(converted, edges/solar_mass)
+    np.testing.assert_array_equal(edges, [1.0, 10.0])
+
+
+def test_mass_edges_are_unchanged_for_mass_tiers():
+    np.testing.assert_array_equal(
+        run._y_edges_for_tier([1.0, 10.0], "m", "jupiter"),
+        [1.0, 10.0],
+    )
 
 
 def test_run_direct_multiple_applies_tier2_cuts_and_plot_controls(

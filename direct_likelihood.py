@@ -10,7 +10,7 @@ class PiecewiseLikelihoodCache:
     """Parameter-independent sufficient statistics for a piecewise fit."""
 
     x_edges: np.ndarray
-    stack_edges: np.ndarray
+    y_edges: np.ndarray
     cell_areas: np.ndarray
     cell_exposure: np.ndarray
     effective_counts: np.ndarray
@@ -58,10 +58,11 @@ def sigmoid_density(theta, x):
     Parameters
     ----------
     theta : sequence of float
-        ``(A, B, C, D)``, where ``A`` is the low-x occurrence-rate-density
-        plateau, ``B`` is the high-x plateau, ``C`` is the transition midpoint
-        in ``log10(x)``, and positive ``D`` is the transition width in dex.
-        The density equals ``(A + B)/2`` at ``x = 10**C``.
+        ``(C1, C2, center, width)``, where ``C1`` is the low-x
+        occurrence-rate-density plateau, ``C2`` is the high-x plateau,
+        ``center`` is the transition midpoint in ``log10(x)``, and positive
+        ``width`` is the transition width in dex. The density equals
+        ``(C1 + C2)/2`` at ``x = 10**center``.
     x : array-like
         Positive physical coordinate values at which to evaluate the model.
 
@@ -70,10 +71,10 @@ def sigmoid_density(theta, x):
     numpy.ndarray
         Occurrence-rate density at each supplied coordinate.
     """
-    low, high, midpoint, width = np.asarray(theta, dtype=float)
-    scaled = (np.log10(np.asarray(x, dtype=float)) - midpoint)/width
+    c1, c2, center, width = np.asarray(theta, dtype=float)
+    scaled = (np.log10(np.asarray(x, dtype=float)) - center)/width
     transition = 1.0/(1.0 + np.exp(-np.clip(scaled, -700.0, 700.0)))
-    return low + (high - low)*transition
+    return c1 + (c2 - c1)*transition
 
 
 def broken_powerlaw_density(theta, x):
@@ -124,16 +125,14 @@ def build_smooth_cache(
     stack_bounds = _validate_bounds_pair(stack_bounds, "stack_bounds")
     if stack_dim == "a":
         model_coordinate, stack_coordinate = "mass", "sma"
-        model_bounds = exposure.stack_bounds
-        grid_model = exposure.stack_values[0, :]
-        grid_stack = exposure.x_values[:, 0]
+        model_bounds = exposure.y_bounds
+        grid_model = exposure.y_values[0, :]
     else:
         model_coordinate, stack_coordinate = "sma", "mass"
         model_bounds = exposure.x_bounds
         grid_model = exposure.x_values[:, 0]
-        grid_stack = exposure.stack_values[0, :]
 
-    full_stack_bounds = exposure.x_bounds if stack_dim == "a" else exposure.stack_bounds
+    full_stack_bounds = exposure.x_bounds if stack_dim == "a" else exposure.y_bounds
     if stack_bounds[0] < full_stack_bounds[0] or stack_bounds[1] > full_stack_bounds[1]:
         raise ValueError("stack_bounds must lie inside the exposure domain")
     exposure_weights = _collapse_exposure_over_stack(
@@ -197,7 +196,7 @@ def _collapse_exposure_over_stack(exposure, stack_dim, stack_bounds):
     returned one-dimensional exposure kernel.
     """
     log_a = np.log10(exposure.x_values[:, 0])
-    log_m = np.log10(exposure.stack_values[0, :])
+    log_m = np.log10(exposure.y_values[0, :])
     log_bounds = np.log10(stack_bounds)
     completeness = exposure.completeness_sum
     if stack_dim == "a":
@@ -231,20 +230,20 @@ def _trapezoid_weights(coordinates):
     return weights
 
 
-def build_piecewise_cache(companions, exposure, x_edges, stack_edges):
+def build_piecewise_cache(companions, exposure, x_edges, y_edges):
     """Precompute all fixed terms in the piecewise-constant likelihood."""
     x_edges = _validate_edges(x_edges, "x_edges")
-    stack_edges = _validate_edges(stack_edges, "stack_edges")
+    y_edges = _validate_edges(y_edges, "y_edges")
     x_widths = np.diff(np.log10(x_edges))
-    stack_widths = np.diff(np.log10(stack_edges))
-    cell_areas = np.outer(stack_widths, x_widths).ravel()
+    y_widths = np.diff(np.log10(y_edges))
+    cell_areas = np.outer(y_widths, x_widths).ravel()
     cell_count = cell_areas.size
 
     exposure_indices = piecewise_cell_indices(
         exposure.x_values,
-        exposure.stack_values,
+        exposure.y_values,
         x_edges,
-        stack_edges,
+        y_edges,
         include_lower_boundaries=True,
     )
     exposure_terms = exposure.completeness_sum*exposure.integration_weights
@@ -267,7 +266,7 @@ def build_piecewise_cache(companions, exposure, x_edges, stack_edges):
             companion.x_samples[mask],
             companion.y_samples[mask],
             x_edges,
-            stack_edges,
+            y_edges,
         )
         ratios = companion.completeness_over_prior[mask]
         for cell_index in np.unique(indices[indices >= 0]):
@@ -283,7 +282,7 @@ def build_piecewise_cache(companions, exposure, x_edges, stack_edges):
 
     return PiecewiseLikelihoodCache(
         x_edges=x_edges,
-        stack_edges=stack_edges,
+        y_edges=y_edges,
         cell_areas=cell_areas,
         cell_exposure=cell_exposure,
         effective_counts=effective_counts,
@@ -309,24 +308,24 @@ def cached_piecewise_log_likelihood(theta, cache):
 
 
 def piecewise_cell_indices(
-        x, stack, x_edges, stack_edges, include_lower_boundaries=False):
+        x, y, x_edges, y_edges, include_lower_boundaries=False):
     """Assign coordinates to flattened piecewise cells, or -1 outside."""
     x_edges = _validate_edges(x_edges, "x_edges")
-    stack_edges = _validate_edges(stack_edges, "stack_edges")
-    x, stack = np.broadcast_arrays(
-        np.asarray(x, dtype=float), np.asarray(stack, dtype=float)
+    y_edges = _validate_edges(y_edges, "y_edges")
+    x, y = np.broadcast_arrays(
+        np.asarray(x, dtype=float), np.asarray(y, dtype=float)
     )
     x_index = np.searchsorted(x_edges, x, side="left") - 1
-    stack_index = np.searchsorted(stack_edges, stack, side="left") - 1
+    y_index = np.searchsorted(y_edges, y, side="left") - 1
     if include_lower_boundaries:
         x_index = np.where(x == x_edges[0], 0, x_index)
-        stack_index = np.where(stack == stack_edges[0], 0, stack_index)
+        y_index = np.where(y == y_edges[0], 0, y_index)
     inside = (
         (x_index >= 0) & (x_index < x_edges.size - 1) &
-        (stack_index >= 0) & (stack_index < stack_edges.size - 1)
+        (y_index >= 0) & (y_index < y_edges.size - 1)
     )
     indices = np.full(x.shape, -1, dtype=int)
-    indices[inside] = stack_index[inside]*(x_edges.size - 1) + x_index[inside]
+    indices[inside] = y_index[inside]*(x_edges.size - 1) + x_index[inside]
     return indices
 
 

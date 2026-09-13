@@ -255,7 +255,7 @@ def prep_direct_fit_materials(
         tier2_dir,
         tier3_dir,
         x_bounds,
-        stack_bounds,
+        y_bounds,
         star_df,
         completeness_type='single',
         integration_resolution=(100, 100),
@@ -264,7 +264,7 @@ def prep_direct_fit_materials(
     """Prepare unbinned samples and survey exposure for a direct fit.
 
     This Stage 2 entry point supports the current ``(a, mass)`` catalog order
-    and one rectangular stack interval. It writes ``direct_fit_data.npz`` but
+    and one rectangular x-y region. It writes ``direct_fit_data.npz`` but
     does not evaluate a likelihood or run MCMC. The average-map exposure is
     the default because some individual maps may contain NaNs in the ROI;
     individual-map summation remains available with strict validation.
@@ -275,7 +275,7 @@ def prep_direct_fit_materials(
     companions = dfu.load_catalog(
         catalog_path=catalog_path,
         x_bounds=x_bounds,
-        stack_bounds=stack_bounds,
+        y_bounds=y_bounds,
         completeness_type=completeness_type,
         interim_prior_fn=interim_prior_fn,
     )
@@ -288,7 +288,7 @@ def prep_direct_fit_materials(
             average_completeness = pickle.load(stream)
         exposure = dfu.build_exposure_grid(
             x_bounds=x_bounds,
-            stack_bounds=stack_bounds,
+            y_bounds=y_bounds,
             resolution=integration_resolution,
             average_completeness=average_completeness,
             nstars=len(star_df),
@@ -303,7 +303,7 @@ def prep_direct_fit_materials(
                 interpolators.append(pickle.load(stream))
         exposure = dfu.build_exposure_grid(
             x_bounds=x_bounds,
-            stack_bounds=stack_bounds,
+            y_bounds=y_bounds,
             resolution=integration_resolution,
             completeness_interpolators=interpolators,
         )

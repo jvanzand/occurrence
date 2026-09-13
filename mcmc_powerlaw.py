@@ -32,7 +32,7 @@ MODEL_REGISTRY = {
     "sigmoid": ModelSpec(
         dl.sigmoid_density,
         4,
-        ("A", "B", r"$C$", r"$D$"),
+        ("C1", "C2", "center", "width"),
         "green",
     ),
     "bpl": ModelSpec(

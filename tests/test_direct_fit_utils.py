@@ -77,7 +77,7 @@ def test_prepare_companion_samples_preserves_draws_and_marks_roi():
         completeness=[0.2, 0.4, 0.8, 0.9],
         interim_prior=[0.5, 0.25, 0.05, 0.02],
         x_bounds=(0.5, 10.0),
-        stack_bounds=(1.0, 5.0),
+        y_bounds=(1.0, 5.0),
     )
 
     assert record.original_sample_count == 4
@@ -94,7 +94,7 @@ def test_prepare_companion_samples_clips_machine_precision_overshoot():
         completeness=[1.0 + np.finfo(float).eps],
         interim_prior=[0.5],
         x_bounds=(0.5, 2.0),
-        stack_bounds=(1.0, 3.0),
+        y_bounds=(1.0, 3.0),
     )
     np.testing.assert_array_equal(record.completeness, [1.0])
 
@@ -116,7 +116,7 @@ def test_prepare_companion_samples_rejects_invalid_roi_data(overrides):
         "completeness": [0.5, 0.6],
         "interim_prior": [0.5, 0.4],
         "x_bounds": (0.5, 3.0),
-        "stack_bounds": (0.5, 3.0),
+        "y_bounds": (0.5, 3.0),
     }
     arguments.update(overrides)
     with pytest.raises(ValueError):
@@ -137,7 +137,7 @@ def test_six_row_catalog_requires_explicit_log_measure_prior():
         dfu.prepare_catalog(
             {"planet_b": values},
             x_bounds=(0.5, 3.0),
-            stack_bounds=(1.0, 5.0),
+        y_bounds=(1.0, 5.0),
             completeness_type="single",
         )
 
@@ -151,7 +151,7 @@ def test_catalog_adapter_interprets_stored_prior_in_log_measure():
     records = dfu.prepare_catalog(
         {"planet_b": values},
         x_bounds=(0.5, 3.0),
-        stack_bounds=(1.0, 5.0),
+        y_bounds=(1.0, 5.0),
     )
     np.testing.assert_allclose(records["planet_b"].interim_prior, [0.5, 0.125])
 
@@ -163,7 +163,7 @@ def test_catalog_adapter_preserves_stored_log_measure_prior():
         [0.3, 0.4], [0.5, 0.8], [1.0, 1.0],
     ])
     records = dfu.prepare_catalog(
-        {"planet_b": values}, x_bounds=(0.5, 3.0), stack_bounds=(1.0, 5.0)
+        {"planet_b": values}, x_bounds=(0.5, 3.0), y_bounds=(1.0, 5.0)
     )
     np.testing.assert_allclose(records["planet_b"].interim_prior, 1.0)
 
@@ -173,7 +173,7 @@ def test_catalog_adapter_omits_empty_companions():
         records = dfu.prepare_catalog(
             {"empty_planet": np.empty((7, 0))},
             x_bounds=(0.5, 3.0),
-            stack_bounds=(1.0, 5.0),
+        y_bounds=(1.0, 5.0),
         )
     assert records == {}
 
@@ -187,7 +187,7 @@ def test_catalog_adapter_omits_companions_outside_roi():
         records = dfu.prepare_catalog(
             {"outside": values},
             x_bounds=(1.0, 10.0),
-            stack_bounds=(1.0, 10.0),
+            y_bounds=(1.0, 10.0),
         )
     assert records == {}
 
@@ -196,7 +196,7 @@ def test_constant_exposure_integral_matches_analytic_value():
     """Log-grid quadrature should integrate constant exposure exactly."""
     exposure = dfu.build_exposure_grid(
         x_bounds=(1.0, 100.0),
-        stack_bounds=(0.1, 10.0),
+        y_bounds=(0.1, 10.0),
         resolution=(17, 19),
         average_completeness=_constant_interpolator(0.5),
         nstars=4,
@@ -209,7 +209,7 @@ def test_individual_and_average_exposure_agree_when_maps_do():
     """Equivalent individual and average maps should produce equal exposure."""
     arguments = {
         "x_bounds": (0.1, 10.0),
-        "stack_bounds": (1.0, 100.0),
+        "y_bounds": (1.0, 100.0),
         "resolution": (8, 9),
     }
     individual = dfu.build_exposure_grid(
@@ -237,12 +237,12 @@ def test_direct_fit_data_round_trip(tmp_path):
             completeness=[0.5, 0.75],
             interim_prior=[0.5, 0.25],
             x_bounds=(0.5, 3.0),
-            stack_bounds=(1.0, 4.0),
+            y_bounds=(1.0, 4.0),
         )
     }
     exposure = dfu.build_exposure_grid(
         x_bounds=(0.5, 3.0),
-        stack_bounds=(1.0, 4.0),
+        y_bounds=(1.0, 4.0),
         resolution=(4, 5),
         average_completeness=_constant_interpolator(0.5),
         nstars=2,
@@ -282,7 +282,7 @@ def test_main_preparation_entry_point_does_not_require_histograms(tmp_path):
         tier2_dir=tier2_dir,
         tier3_dir="direct_test",
         x_bounds=(0.5, 3.0),
-        stack_bounds=(1.0, 5.0),
+        y_bounds=(1.0, 5.0),
         star_df=stars,
         integration_resolution=(5, 6),
     )

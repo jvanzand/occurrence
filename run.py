@@ -9,6 +9,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from occurrence import plotting_utils as pu
 from occurrence import main
 from occurrence import mcmc_direct
+from occurrence import sampling_utils as su
 
 # Use plot template
 plt.style.use(os.path.join(os.path.dirname(__file__), 'matplotlibrc'))
@@ -123,6 +124,25 @@ def _tier2_artifacts_exist(tier1_dir, tier2_dir):
         os.path.join(tier2_path, "avg_map", "interp_fn.pkl"),
     )
     return all(os.path.isfile(path) for path in required_paths)
+
+
+def _y_edges_for_tier(m_edges, m_or_q, m_unit):
+    """Return mass edges unchanged or convert them to companion/stellar mass."""
+    edges = np.asarray(m_edges, dtype=float)
+    if m_or_q == "m":
+        return edges.copy()
+    solar_mass_in_input_units = {
+        "earth": su.Ms2Me,
+        "jupiter": su.Ms2Mj,
+    }
+    try:
+        conversion = solar_mass_in_input_units[m_unit]
+    except KeyError:
+        raise ValueError(
+            "m_unit must be 'earth' or 'jupiter' when converting mass edges "
+            "for a mass-ratio run"
+        )
+    return edges/conversion
 
 
 def run_direct_multiple(
@@ -249,6 +269,7 @@ def run_direct_multiple(
                 raise ValueError(f"no Tier 2 configuration for {tier2_dir!r}")
             query = cut_config.get("star_df_query")
             selected_stars = star_df.query(query).copy() if query else star_df.copy()
+            y_edges = _y_edges_for_tier(m_edges, m_or_q, m_unit)
             tier2_configurations.append({
                 "t1_dir": tier1_dir,
                 "t2_dir": tier2_dir,
@@ -263,7 +284,7 @@ def run_direct_multiple(
                     "tier2_dir": tier2_dir,
                     "tier3_dir": tier3_dir,
                     "a_edges": np.asarray(a_edges, dtype=float),
-                    "m_edges": np.asarray(m_edges, dtype=float),
+                    "m_edges": y_edges,
                     "star_df": selected_stars,
                     "title": title,
                     "run_models": run_models,
@@ -387,7 +408,7 @@ def _run_direct_configuration(configuration):
             tier2_dir=configuration["tier2_dir"],
             tier3_dir=configuration["tier3_dir"],
             x_bounds=(configuration["a_edges"][0], configuration["a_edges"][-1]),
-            stack_bounds=(configuration["m_edges"][0], configuration["m_edges"][-1]),
+            y_bounds=(configuration["m_edges"][0], configuration["m_edges"][-1]),
             star_df=configuration["star_df"],
             completeness_type=configuration["completeness_type"],
             integration_resolution=configuration["integration_resolution"],
@@ -404,7 +425,7 @@ def _run_direct_configuration(configuration):
                 mcmc_direct.fit_piecewise_file(
                     direct_fit_path=material_path,
                     x_edges=configuration["a_edges"],
-                    stack_edges=configuration["m_edges"],
+                    y_edges=configuration["m_edges"],
                     nwalkers=configuration["nwalkers"],
                     nsteps=configuration["nsteps"],
                     burnin=configuration["burnin"],

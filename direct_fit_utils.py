@@ -42,15 +42,15 @@ class ExposureGrid:
 
     Arrays have shape ``resolution``. ``completeness_sum`` is the sum of
     detection probabilities over surveyed stars. ``integration_weights`` are
-    trapezoidal weights in ``dlog10(x) dlog10(stack)``.
+    trapezoidal weights in ``dlog10(x) dlog10(y)``.
     """
 
     x_values: np.ndarray
-    stack_values: np.ndarray
+    y_values: np.ndarray
     completeness_sum: np.ndarray
     integration_weights: np.ndarray
     x_bounds: Tuple[float, float]
-    stack_bounds: Tuple[float, float]
+    y_bounds: Tuple[float, float]
 
 
 def _validate_bounds(bounds, label):
@@ -70,7 +70,7 @@ def prepare_companion_samples(
         completeness,
         interim_prior,
         x_bounds,
-        stack_bounds):
+        y_bounds):
     """Validate and package the posterior draws for one companion.
 
     ROI membership uses lower-open and upper-closed bounds so adjacent regions
@@ -78,7 +78,7 @@ def prepare_companion_samples(
     excluded by ``roi_mask``; invalid values inside the ROI raise an error.
     """
     x_bounds = _validate_bounds(x_bounds, "x_bounds")
-    stack_bounds = _validate_bounds(stack_bounds, "stack_bounds")
+    y_bounds = _validate_bounds(y_bounds, "y_bounds")
     arrays = [
         np.asarray(values, dtype=float)
         for values in (x_samples, y_samples, completeness, interim_prior)
@@ -92,7 +92,7 @@ def prepare_companion_samples(
     x, y, completeness, interim_prior = arrays
     roi_mask = (
         (x > x_bounds[0]) & (x <= x_bounds[1]) &
-        (y > stack_bounds[0]) & (y <= stack_bounds[1])
+        (y > y_bounds[0]) & (y <= y_bounds[1])
     )
     finite = (
         np.isfinite(x) & np.isfinite(y) & np.isfinite(completeness) &
@@ -133,15 +133,15 @@ def prepare_companion_samples(
 def prepare_catalog(
         catalog,
         x_bounds,
-        stack_bounds,
+        y_bounds,
         completeness_type="single",
         interim_prior_fn: Optional[Callable] = None):
     """Convert the current seven-row catalog format into named sample records.
 
-    Rows 0 and 1 are the fitted and stack coordinates. Rows 2/3 contain the
+    Rows 0 and 1 are the x and y coordinates. Rows 2/3 contain the
     average and host-specific completeness, and row 6 contains the interim
     prior. Priors entering the likelihood are interpreted as densities with
-    respect to ``dlog10(x) dlog10(stack)``. Existing catalogs are not converted;
+    respect to ``dlog10(x) dlog10(y)``. Existing catalogs are not converted;
     they must already follow this convention.
     """
     if completeness_type not in {"average", "single"}:
@@ -149,7 +149,7 @@ def prepare_catalog(
     completeness_row = 2 if completeness_type == "average" else 3
     use_stored_prior = interim_prior_fn is None
     if interim_prior_fn is None:
-        interim_prior_fn = lambda x, stack: np.ones_like(x, dtype=float)
+        interim_prior_fn = lambda x, y: np.ones_like(x, dtype=float)
 
     prepared = {}
     outside_roi = []
@@ -186,7 +186,7 @@ def prepare_catalog(
             completeness=values[completeness_row],
             interim_prior=interim_prior,
             x_bounds=x_bounds,
-            stack_bounds=stack_bounds,
+            y_bounds=y_bounds,
         )
         if not np.any(record.roi_mask):
             outside_roi.append(name)
@@ -204,7 +204,7 @@ def prepare_catalog(
 def load_catalog(
         catalog_path,
         x_bounds,
-        stack_bounds,
+        y_bounds,
         completeness_type="single",
         interim_prior_fn=None):
     """Load and prepare an existing ``sampled_post_prior_compl.npz`` file."""
@@ -213,7 +213,7 @@ def load_catalog(
     return prepare_catalog(
         catalog=catalog,
         x_bounds=x_bounds,
-        stack_bounds=stack_bounds,
+        y_bounds=y_bounds,
         completeness_type=completeness_type,
         interim_prior_fn=interim_prior_fn,
     )
@@ -231,7 +231,7 @@ def _trapezoid_weights(coordinates):
 
 def build_exposure_grid(
         x_bounds,
-        stack_bounds,
+        y_bounds,
         resolution=(100, 100),
         completeness_interpolators: Optional[Iterable[Callable]] = None,
         average_completeness: Optional[Callable] = None,
@@ -243,7 +243,7 @@ def build_exposure_grid(
     the latter reproduces the current average-map approximation.
     """
     x_bounds = _validate_bounds(x_bounds, "x_bounds")
-    stack_bounds = _validate_bounds(stack_bounds, "stack_bounds")
+    y_bounds = _validate_bounds(y_bounds, "y_bounds")
     if len(resolution) != 2 or min(resolution) < 2:
         raise ValueError("resolution must contain two integers of at least 2")
     resolution = tuple(int(value) for value in resolution)
@@ -258,11 +258,11 @@ def build_exposure_grid(
         raise ValueError("average_completeness requires a positive nstars")
 
     log_x = np.linspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), resolution[0])
-    log_stack = np.linspace(
-        np.log10(stack_bounds[0]), np.log10(stack_bounds[1]), resolution[1]
+    log_y = np.linspace(
+        np.log10(y_bounds[0]), np.log10(y_bounds[1]), resolution[1]
     )
-    x_values, stack_values = np.meshgrid(
-        10**log_x, 10**log_stack, indexing="ij"
+    x_values, y_values = np.meshgrid(
+        10**log_x, 10**log_y, indexing="ij"
     )
 
     if using_individual:
@@ -272,11 +272,11 @@ def build_exposure_grid(
         completeness_sum = np.zeros(resolution, dtype=float)
         for interpolator in interpolators:
             completeness_sum += np.asarray(
-                interpolator((x_values, stack_values)), dtype=float
+                interpolator((x_values, y_values)), dtype=float
             )
     else:
         completeness_sum = nstars*np.asarray(
-            average_completeness((x_values, stack_values)), dtype=float
+            average_completeness((x_values, y_values)), dtype=float
         )
 
     if completeness_sum.shape != resolution:
@@ -285,15 +285,15 @@ def build_exposure_grid(
         raise ValueError("summed completeness must be finite and nonnegative")
 
     integration_weights = np.outer(
-        _trapezoid_weights(log_x), _trapezoid_weights(log_stack)
+        _trapezoid_weights(log_x), _trapezoid_weights(log_y)
     )
     return ExposureGrid(
         x_values=x_values,
-        stack_values=stack_values,
+        y_values=y_values,
         completeness_sum=completeness_sum,
         integration_weights=integration_weights,
         x_bounds=x_bounds,
-        stack_bounds=stack_bounds,
+        y_bounds=y_bounds,
     )
 
 
@@ -305,11 +305,11 @@ def save_direct_fit_data(path, companions, exposure):
     arrays = {
         "companion_names": np.asarray(names),
         "x_values": exposure.x_values,
-        "stack_values": exposure.stack_values,
+        "y_values": exposure.y_values,
         "completeness_sum": exposure.completeness_sum,
         "integration_weights": exposure.integration_weights,
         "x_bounds": np.asarray(exposure.x_bounds),
-        "stack_bounds": np.asarray(exposure.stack_bounds),
+        "y_bounds": np.asarray(exposure.y_bounds),
     }
     for index, name in enumerate(names):
         record = companions[name]
@@ -343,12 +343,14 @@ def load_direct_fit_data(path):
                 completeness_over_prior=data[f"{prefix}_completeness_over_prior"],
                 roi_mask=data[f"{prefix}_roi_mask"],
             )
+        y_values_key = "y_values" if "y_values" in data else "stack_values"
+        y_bounds_key = "y_bounds" if "y_bounds" in data else "stack_bounds"
         exposure = ExposureGrid(
             x_values=data["x_values"],
-            stack_values=data["stack_values"],
+            y_values=data[y_values_key],
             completeness_sum=data["completeness_sum"],
             integration_weights=data["integration_weights"],
             x_bounds=tuple(data["x_bounds"]),
-            stack_bounds=tuple(data["stack_bounds"]),
+            y_bounds=tuple(data[y_bounds_key]),
         )
     return companions, exposure

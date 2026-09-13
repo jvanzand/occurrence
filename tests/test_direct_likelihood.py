@@ -9,14 +9,14 @@ from occurrence import direct_likelihood as dl
 
 def _exposure(completeness_sum=2.0):
     """Return a grid whose total logarithmic area is one dex squared."""
-    x_values, stack_values = np.meshgrid([1.0, 10.0], [1.0, 10.0], indexing="ij")
+    x_values, y_values = np.meshgrid([1.0, 10.0], [1.0, 10.0], indexing="ij")
     return dfu.ExposureGrid(
         x_values=x_values,
-        stack_values=stack_values,
+        y_values=y_values,
         completeness_sum=np.full((2, 2), completeness_sum),
         integration_weights=np.full((2, 2), 0.25),
         x_bounds=(1.0, 10.0),
-        stack_bounds=(1.0, 10.0),
+        y_bounds=(1.0, 10.0),
     )
 
 
@@ -35,7 +35,7 @@ def _companion(name, completeness, prior=None, x_samples=None):
         completeness=completeness,
         interim_prior=prior,
         x_bounds=(1.0, 10.0),
-        stack_bounds=(1.0, 10.0),
+        y_bounds=(1.0, 10.0),
     )
 
 
@@ -73,7 +73,7 @@ def test_smooth_cache_selects_mass_when_stacking_sma():
     companion = dfu.prepare_companion_samples(
         name="b", x_samples=[2.0, 8.0], y_samples=[3.0, 7.0],
         completeness=[1.0, 1.0], interim_prior=[1.0, 1.0],
-        x_bounds=(1.0, 10.0), stack_bounds=(1.0, 10.0),
+        x_bounds=(1.0, 10.0), y_bounds=(1.0, 10.0),
     )
     cache = dl.build_smooth_cache(
         {"b": companion}, exposure, stack_dim="a", stack_bounds=(1.0, 10.0)
@@ -121,12 +121,12 @@ def test_smooth_exposure_kernel_converges_with_grid_resolution():
 
     def expected(resolution):
         values = np.logspace(0, 1, resolution)
-        x_values, stack_values = np.meshgrid(values, values, indexing="ij")
+        x_values, y_values = np.meshgrid(values, values, indexing="ij")
         exposure = dfu.ExposureGrid(
-            x_values=x_values, stack_values=stack_values,
+            x_values=x_values, y_values=y_values,
             completeness_sum=1 + 0.2*np.log10(x_values),
             integration_weights=np.ones_like(x_values),
-            x_bounds=(1.0, 10.0), stack_bounds=(1.0, 10.0),
+            x_bounds=(1.0, 10.0), y_bounds=(1.0, 10.0),
         )
         cache = dl.build_smooth_cache(
             {"b": companion}, exposure, "m", (1.17, 8.43)
