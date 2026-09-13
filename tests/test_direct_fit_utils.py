@@ -73,7 +73,7 @@ def test_prepare_companion_samples_preserves_draws_and_marks_roi():
     record = dfu.prepare_companion_samples(
         name="planet_b",
         x_samples=[0.5, 1.0, 5.0, 12.0],
-        stack_samples=[1.0, 2.0, 4.0, 4.0],
+        y_samples=[1.0, 2.0, 4.0, 4.0],
         completeness=[0.2, 0.4, 0.8, 0.9],
         interim_prior=[0.5, 0.25, 0.05, 0.02],
         x_bounds=(0.5, 10.0),
@@ -90,7 +90,7 @@ def test_prepare_companion_samples_clips_machine_precision_overshoot():
     record = dfu.prepare_companion_samples(
         name="planet_b",
         x_samples=[1.0],
-        stack_samples=[2.0],
+        y_samples=[2.0],
         completeness=[1.0 + np.finfo(float).eps],
         interim_prior=[0.5],
         x_bounds=(0.5, 2.0),
@@ -104,7 +104,7 @@ def test_prepare_companion_samples_clips_machine_precision_overshoot():
     [
         {"interim_prior": [0.5, 0.0]},
         {"completeness": [0.5, 1.2]},
-        {"stack_samples": [1.0]},
+        {"y_samples": [1.0]},
     ],
 )
 def test_prepare_companion_samples_rejects_invalid_roi_data(overrides):
@@ -112,7 +112,7 @@ def test_prepare_companion_samples_rejects_invalid_roi_data(overrides):
     arguments = {
         "name": "planet_b",
         "x_samples": [1.0, 2.0],
-        "stack_samples": [1.0, 2.0],
+        "y_samples": [1.0, 2.0],
         "completeness": [0.5, 0.6],
         "interim_prior": [0.5, 0.4],
         "x_bounds": (0.5, 3.0),
@@ -233,7 +233,7 @@ def test_direct_fit_data_round_trip(tmp_path):
         "planet_b": dfu.prepare_companion_samples(
             name="planet_b",
             x_samples=[1.0, 2.0],
-            stack_samples=[2.0, 3.0],
+            y_samples=[2.0, 3.0],
             completeness=[0.5, 0.75],
             interim_prior=[0.5, 0.25],
             x_bounds=(0.5, 3.0),
@@ -309,10 +309,10 @@ def test_completeness_attachment_preserves_all_posterior_draws(tmp_path, monkeyp
     sample_count = 500
     x_samples = np.linspace(1.0, 3.0, sample_count)
     x_samples[100] = 2.0
-    stack_samples = np.full(sample_count, 4.0)
-    prior = 1.0/(x_samples*stack_samples)
+    y_samples = np.full(sample_count, 4.0)
+    prior = 1.0/(x_samples*y_samples)
     sampled_post_dict = {
-        "star1_0": np.vstack([x_samples, stack_samples, prior])
+        "star1_0": np.vstack([x_samples, y_samples, prior])
     }
     stars = pd.DataFrame({
         "star_name": ["star1"],

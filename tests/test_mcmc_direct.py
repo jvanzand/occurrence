@@ -21,7 +21,7 @@ def _materials():
     companion = dfu.prepare_companion_samples(
         name="b",
         x_samples=[2.0],
-        stack_samples=[2.0],
+        y_samples=[2.0],
         completeness=[0.5],
         interim_prior=[1.0],
         x_bounds=(1.0, 10.0),
@@ -74,7 +74,7 @@ def test_direct_piecewise_sampler_rejects_unsupported_companion(tmp_path):
     companions, exposure = _materials()
     outside = dfu.prepare_companion_samples(
         name="outside",
-        x_samples=[20.0], stack_samples=[2.0], completeness=[0.5],
+        x_samples=[20.0], y_samples=[2.0], completeness=[0.5],
         interim_prior=[1.0], x_bounds=(1.0, 10.0), stack_bounds=(1.0, 10.0),
     )
     companions["outside"] = outside

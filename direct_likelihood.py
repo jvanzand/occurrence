@@ -149,13 +149,16 @@ def build_smooth_cache(
     offset = 0
     for name, companion in companions.items():
         if stack_dim == "a":
-            model_samples = companion.stack_samples
-            stack_samples = companion.x_samples
+            model_samples = companion.y_samples
+            stacked_samples = companion.x_samples
         else:
             model_samples = companion.x_samples
-            stack_samples = companion.stack_samples
+            stacked_samples = companion.y_samples
         mask = companion.roi_mask.copy()
-        mask &= (stack_samples > stack_bounds[0]) & (stack_samples <= stack_bounds[1])
+        mask &= (
+            (stacked_samples > stack_bounds[0]) &
+            (stacked_samples <= stack_bounds[1])
+        )
         count = np.count_nonzero(mask)
         if count == 0:
             continue
@@ -262,7 +265,7 @@ def build_piecewise_cache(companions, exposure, x_edges, stack_edges):
             )
         indices = piecewise_cell_indices(
             companion.x_samples[mask],
-            companion.stack_samples[mask],
+            companion.y_samples[mask],
             x_edges,
             stack_edges,
         )

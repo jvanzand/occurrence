@@ -24,7 +24,7 @@ class CompanionSamples:
 
     name: str
     x_samples: np.ndarray
-    stack_samples: np.ndarray
+    y_samples: np.ndarray
     completeness: np.ndarray
     interim_prior: np.ndarray
     completeness_over_prior: np.ndarray
@@ -66,7 +66,7 @@ def _validate_bounds(bounds, label):
 def prepare_companion_samples(
         name,
         x_samples,
-        stack_samples,
+        y_samples,
         completeness,
         interim_prior,
         x_bounds,
@@ -81,7 +81,7 @@ def prepare_companion_samples(
     stack_bounds = _validate_bounds(stack_bounds, "stack_bounds")
     arrays = [
         np.asarray(values, dtype=float)
-        for values in (x_samples, stack_samples, completeness, interim_prior)
+        for values in (x_samples, y_samples, completeness, interim_prior)
     ]
     lengths = {array.size for array in arrays}
     if len(lengths) != 1 or any(array.ndim != 1 for array in arrays):
@@ -89,13 +89,13 @@ def prepare_companion_samples(
     if not arrays[0].size:
         raise ValueError("companion sample fields cannot be empty")
 
-    x, stack, completeness, interim_prior = arrays
+    x, y, completeness, interim_prior = arrays
     roi_mask = (
         (x > x_bounds[0]) & (x <= x_bounds[1]) &
-        (stack > stack_bounds[0]) & (stack <= stack_bounds[1])
+        (y > stack_bounds[0]) & (y <= stack_bounds[1])
     )
     finite = (
-        np.isfinite(x) & np.isfinite(stack) & np.isfinite(completeness) &
+        np.isfinite(x) & np.isfinite(y) & np.isfinite(completeness) &
         np.isfinite(interim_prior)
     )
     if np.any(roi_mask & ~finite):
@@ -122,7 +122,7 @@ def prepare_companion_samples(
     return CompanionSamples(
         name=str(name),
         x_samples=x,
-        stack_samples=stack,
+        y_samples=y,
         completeness=completeness,
         interim_prior=interim_prior,
         completeness_over_prior=completeness_over_prior,
@@ -170,19 +170,19 @@ def prepare_catalog(
                 RuntimeWarning,
             )
             continue
-        x_samples, stack_samples = values[:2]
+        x_samples, y_samples = values[:2]
         if values.shape[0] >= 7 and use_stored_prior:
             interim_prior = values[6]
         else:
             interim_prior = np.asarray(
-                interim_prior_fn(x_samples, stack_samples), dtype=float
+                interim_prior_fn(x_samples, y_samples), dtype=float
             )
         if interim_prior.shape != x_samples.shape:
             raise ValueError("interim_prior_fn must return one value per posterior draw")
         record = prepare_companion_samples(
             name=name,
             x_samples=x_samples,
-            stack_samples=stack_samples,
+            y_samples=y_samples,
             completeness=values[completeness_row],
             interim_prior=interim_prior,
             x_bounds=x_bounds,
@@ -315,7 +315,7 @@ def save_direct_fit_data(path, companions, exposure):
         record = companions[name]
         prefix = f"companion_{index}"
         arrays[f"{prefix}_x_samples"] = record.x_samples
-        arrays[f"{prefix}_stack_samples"] = record.stack_samples
+        arrays[f"{prefix}_y_samples"] = record.y_samples
         arrays[f"{prefix}_completeness"] = record.completeness
         arrays[f"{prefix}_interim_prior"] = record.interim_prior
         arrays[f"{prefix}_completeness_over_prior"] = record.completeness_over_prior
@@ -330,10 +330,14 @@ def load_direct_fit_data(path):
         companions: Dict[str, CompanionSamples] = {}
         for index, name in enumerate(names):
             prefix = f"companion_{index}"
+            y_key = f"{prefix}_y_samples"
+            legacy_stack_key = f"{prefix}_stack_samples"
+            if y_key not in data and legacy_stack_key not in data:
+                raise KeyError(f"missing y samples for {name}")
             companions[name] = CompanionSamples(
                 name=name,
                 x_samples=data[f"{prefix}_x_samples"],
-                stack_samples=data[f"{prefix}_stack_samples"],
+                y_samples=data[y_key if y_key in data else legacy_stack_key],
                 completeness=data[f"{prefix}_completeness"],
                 interim_prior=data[f"{prefix}_interim_prior"],
                 completeness_over_prior=data[f"{prefix}_completeness_over_prior"],

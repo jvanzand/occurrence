@@ -31,7 +31,7 @@ def _companion(name, completeness, prior=None, x_samples=None):
     return dfu.prepare_companion_samples(
         name=name,
         x_samples=x_samples,
-        stack_samples=np.full(sample_count, 2.0),
+        y_samples=np.full(sample_count, 2.0),
         completeness=completeness,
         interim_prior=prior,
         x_bounds=(1.0, 10.0),
@@ -71,7 +71,7 @@ def test_smooth_cache_selects_mass_when_stacking_sma():
     """stack_dim='a' should collapse SMA and retain mass as model coordinate."""
     exposure = _exposure()
     companion = dfu.prepare_companion_samples(
-        name="b", x_samples=[2.0, 8.0], stack_samples=[3.0, 7.0],
+        name="b", x_samples=[2.0, 8.0], y_samples=[3.0, 7.0],
         completeness=[1.0, 1.0], interim_prior=[1.0, 1.0],
         x_bounds=(1.0, 10.0), stack_bounds=(1.0, 10.0),
     )
