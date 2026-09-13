@@ -326,3 +326,86 @@ def test_multiple_smooth_plots_do_not_require_piecewise(tmp_path, monkeypatch):
     )
     assert [call["model_name"] for call in calls] == ["logG", "escarpment"]
     assert set(paths) == {"logG", "escarpment", "combined"}
+
+
+def test_supplementary_plots_overlap_later_serial_models(tmp_path, monkeypatch):
+    """Independent plots should run early without using a plotting thread."""
+    events = []
+
+    class FakeFuture:
+        def __init__(self, value):
+            self.value = value
+
+        def result(self):
+            events.append("collect_roi")
+            return self.value
+
+    class FakeProcessExecutor:
+        def __init__(self, max_workers, mp_context):
+            assert max_workers == 1
+            assert mp_context.get_start_method() == "spawn"
+            events.append("process_executor")
+
+        def submit(self, function, *args):
+            events.append("submit_roi")
+            return FakeFuture(function(*args))
+
+        def shutdown(self, wait=True):
+            assert wait is False
+            events.append("release_executor")
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mtrue").mkdir()
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(
+        main, "prep_direct_fit_materials", lambda **kwargs: "materials.npz"
+    )
+    monkeypatch.setattr(
+        run.mcmc_direct, "fit_piecewise_file",
+        lambda **kwargs: events.append("fit_piecewise"),
+    )
+    monkeypatch.setattr(
+        run.mcmc_direct, "summarize_piecewise_file",
+        lambda *args, **kwargs: {"a_m_lims_pairs": np.ones((1, 2, 2))},
+    )
+    monkeypatch.setattr(
+        run.mcmc_direct, "fit_smooth_file",
+        lambda **kwargs: (events.append("fit_logG") or ([], ["logG.npz"])),
+    )
+    monkeypatch.setattr(
+        run.mcmc_direct, "plot_catalog_roi_completeness",
+        lambda **kwargs: events.append("plot_catalog") or "catalog.png",
+    )
+    monkeypatch.setattr(
+        run.mcmc_direct, "plot_roi_occurrence_completeness",
+        lambda *args: events.append("plot_roi") or "roi.png",
+    )
+    monkeypatch.setattr(run, "ProcessPoolExecutor", FakeProcessExecutor)
+
+    def fake_final_plot(**kwargs):
+        events.append("final_plot")
+        assert kwargs["plot_catalog_roi"] is False
+        assert kwargs["plot_roi_occurrence"] is False
+        return {"piecewise": {}}
+
+    monkeypatch.setattr(main, "plot_direct_models", fake_final_plot)
+    results = run.run_direct_multiple(
+        tier1_list=["mtrue"], tier2_list=["allstars"], tier3_list=["direct"],
+        a_edges=[0.1, 10.0], m_edges=[1.0, 10.0],
+        star_df=pd.DataFrame({"star_name": ["a"]}),
+        tier2_df_cuts_dict={
+            "allstars": [{"star_df_query": None}, "All Stars"]
+        },
+        run_models_list=["piecewise", "logG"],
+        plot_models_list=["piecewise", "logG"],
+        plot_catalog_roi=True, plot_roi_occurrence=True,
+    )
+
+    assert events.index("plot_catalog") < events.index("fit_piecewise")
+    assert events.index("fit_piecewise") < events.index("submit_roi")
+    assert events.index("submit_roi") < events.index("fit_logG")
+    assert events.index("fit_logG") < events.index("collect_roi")
+    assert events.index("collect_roi") < events.index("final_plot")
+    assert results[0]["plots"]["piecewise"] == {
+        "catalog_roi": "catalog.png", "roi_occurrence": "roi.png",
+    }

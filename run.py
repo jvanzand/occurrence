@@ -1,5 +1,6 @@
 ## Module to run the mass ratio occurrence calculation
 import os
+import multiprocessing as mp
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -402,6 +403,18 @@ def _run_direct_configuration(configuration):
         "chains": {},
         "plots": {},
     }
+    title = (
+        f"{len(configuration['star_df'])} Stars "
+        f"({configuration['title']})"
+    )
+    early_plot_paths = {}
+    roi_occurrence_future = None
+    run_models = configuration["run_models"]
+    can_overlap_supplementary_plots = (
+        configuration["run_fits"] and configuration["make_plots"] and
+        "piecewise" in configuration["plot_models"] and
+        len(run_models) > 1
+    )
     if configuration["run_fits"]:
         material_path = main.prep_direct_fit_materials(
             tier1_dir=configuration["tier1_dir"],
@@ -415,7 +428,23 @@ def _run_direct_configuration(configuration):
             use_average_completeness=configuration["use_average_completeness"],
         )
         result["materials"] = material_path
-        for model_name in configuration["run_models"]:
+        if (can_overlap_supplementary_plots and
+                configuration["plot_catalog_roi"]):
+            early_plot_paths["catalog_roi"] = (
+                mcmc_direct.plot_catalog_roi_completeness(
+                    tier1_dir=configuration["tier1_dir"],
+                    tier2_dir=configuration["tier2_dir"],
+                    output_dir=os.path.join(
+                        configuration["tier1_dir"], configuration["tier2_dir"],
+                        configuration["tier3_dir"], "plots",
+                    ),
+                    a_edges=configuration["a_edges"],
+                    m_edges=configuration["m_edges"],
+                    m_unit=configuration["m_unit"],
+                    title=title,
+                )
+            )
+        for model_index, model_name in enumerate(run_models):
             if model_name == "piecewise":
                 chain_path = os.path.join(
                     configuration["tier1_dir"], configuration["tier2_dir"],
@@ -434,6 +463,40 @@ def _run_direct_configuration(configuration):
                     random_seed=configuration["random_seed"],
                 )
                 result["chains"][model_name] = chain_path
+                if (can_overlap_supplementary_plots and
+                        configuration["plot_roi_occurrence"] and
+                        model_index < len(run_models) - 1):
+                    summary_path = os.path.join(
+                        configuration["tier1_dir"], configuration["tier2_dir"],
+                        configuration["tier3_dir"], "saved_dicts",
+                        "summary_dict_direct_piecewise.npz",
+                    )
+                    summary = mcmc_direct.summarize_piecewise_file(
+                        material_path, chain_path,
+                        len(configuration["star_df"]), save_path=summary_path,
+                    )
+                    # Matplotlib runs in its own process, never in a background
+                    # thread. Only one plot is submitted to this executor.
+                    plot_executor = ProcessPoolExecutor(
+                        max_workers=1, mp_context=mp.get_context("spawn")
+                    )
+                    roi_occurrence_future = plot_executor.submit(
+                        mcmc_direct.plot_roi_occurrence_completeness,
+                        configuration["tier1_dir"],
+                        configuration["tier2_dir"],
+                        os.path.join(
+                            configuration["tier1_dir"],
+                            configuration["tier2_dir"],
+                            configuration["tier3_dir"], "plots",
+                        ),
+                        summary,
+                        os.path.basename(os.path.normpath(
+                            configuration["tier1_dir"]
+                        )),
+                        configuration["m_unit"],
+                        title,
+                    )
+                    plot_executor.shutdown(wait=False)
             elif model_name in {"logG", "escarpment", "sigmoid", "bpl"}:
                 amplitude_key = {
                     "logG": "logg_amplitude_bounds",
@@ -470,6 +533,9 @@ def _run_direct_configuration(configuration):
                 )
                 result["chains"][model_name] = chain_paths
 
+    if roi_occurrence_future is not None:
+        early_plot_paths["roi_occurrence"] = roi_occurrence_future.result()
+
     if configuration["make_plots"] and configuration["plot_models"]:
         result["plots"] = main.plot_direct_models(
             tier1_dir=configuration["tier1_dir"],
@@ -481,18 +547,28 @@ def _run_direct_configuration(configuration):
             m_edges=configuration["m_edges"],
             plot_models=configuration["plot_models"],
             m_unit=configuration["m_unit"],
-            title=(
-                f"{len(configuration['star_df'])} Stars "
-                f"({configuration['title']})"
-            ),
+            title=title,
             plot_occurrence=configuration["plot_occurrence"],
             plot_cumulative=configuration["plot_cumulative"],
             plot_density=configuration["plot_density"],
             plot_corner=configuration["plot_corner"],
-            plot_catalog_roi=configuration["plot_catalog_roi"],
-            plot_roi_occurrence=configuration["plot_roi_occurrence"],
+            plot_catalog_roi=(
+                configuration["plot_catalog_roi"] and
+                "catalog_roi" not in early_plot_paths
+            ),
+            plot_roi_occurrence=(
+                configuration["plot_roi_occurrence"] and
+                "roi_occurrence" not in early_plot_paths
+            ),
             model_plot_style=configuration["model_plot_style"],
             n_posterior_draws=configuration["n_posterior_draws"],
             plot_random_seed=configuration["plot_random_seed"],
         )
+        if early_plot_paths:
+            if len(configuration["plot_models"]) == 1:
+                result["plots"].update(early_plot_paths)
+            else:
+                result["plots"].setdefault("piecewise", {}).update(
+                    early_plot_paths
+                )
     return result

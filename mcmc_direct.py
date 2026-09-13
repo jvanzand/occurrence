@@ -845,6 +845,60 @@ def summarize_piecewise_file(
     return summary
 
 
+def plot_catalog_roi_completeness(
+        tier1_dir, tier2_dir, output_dir, a_edges, m_edges,
+        m_unit="earth", title="Direct occurrence fit"):
+    """Plot the catalog and fitted ROI without requiring a fitted model."""
+    from occurrence import plotting_utils as pu
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "catalog_inROI_and_completeness.png"
+    pu.plot_catalog(
+        tier1_dir=tier1_dir,
+        tier2_dir=tier2_dir,
+        catalog_path=os.path.join(
+            tier1_dir, tier2_dir, "sampled_post_prior_compl.npz"
+        ),
+        a_edges=np.asarray(a_edges),
+        m_edges=np.asarray(m_edges),
+        zoom=False,
+        m_unit=m_unit,
+        fig_title=title,
+        fig_savepath=str(output_path),
+    )
+    return str(output_path)
+
+
+def plot_roi_occurrence_completeness(
+        tier1_dir, tier2_dir, output_dir, summary,
+        mtype="mtrue", m_unit="earth", title="Direct occurrence fit"):
+    """Plot a piecewise occurrence summary over the average completeness map."""
+    from occurrence import plotting_utils as pu
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "ROI_with_occurrence.png"
+    average_map_dir = os.path.join(tier1_dir, tier2_dir, "avg_map")
+    xgrid = np.load(os.path.join(average_map_dir, "parent_xgrid.npy"))
+    ygrid = np.load(os.path.join(average_map_dir, "parent_ygrid.npy"))
+    zgrid = np.load(os.path.join(average_map_dir, "parent_zgrid.npy"))
+    pu.completeness_plotter(
+        xgrid=xgrid,
+        ygrid=ygrid,
+        zgrid=zgrid,
+        save_path=str(output_path),
+        title=title,
+        save_plot=True,
+        a_m_lims_pairs=summary["a_m_lims_pairs"],
+        summary_dict=summary,
+        zoom=True,
+        ycol=f"inj_{mtype}",
+        m_unit=m_unit,
+    )
+    return str(output_path)
+
+
 def plot_piecewise_results(
         direct_fit_path,
         chain_path,
@@ -877,8 +931,6 @@ def plot_piecewise_results(
     or_path = output_dir / "occurrence_OR_direct_models.png"
     ord_path = output_dir / "occurrence_ORD_direct_models.png"
     corner_path = output_dir / "corner_direct_piecewise.png"
-    catalog_path = output_dir / "catalog_inROI_and_completeness.png"
-    roi_path = output_dir / "ROI_with_occurrence.png"
     common = dict(
         summary_dict=summary, stack_dim=stack_dim, m_unit=m_unit,
         mtype=mtype, title=title,
@@ -923,39 +975,23 @@ def plot_piecewise_results(
         cell_pairs = np.asarray(summary["a_m_lims_pairs"])
         a_edges = np.unique(cell_pairs[:, 0, :])
         m_edges = np.unique(cell_pairs[:, 1, :])
-        pu.plot_catalog(
-            tier1_dir=tier1_dir,
-            tier2_dir=tier2_dir,
-            catalog_path=os.path.join(
-                tier1_dir, tier2_dir, "sampled_post_prior_compl.npz"
-            ),
+        paths["catalog_roi"] = plot_catalog_roi_completeness(
+            tier1_dir=tier1_dir, tier2_dir=tier2_dir,
+            output_dir=output_dir,
             a_edges=a_edges,
             m_edges=m_edges,
-            zoom=False,
             m_unit=m_unit,
-            fig_title=title,
-            fig_savepath=str(catalog_path),
-        )
-        paths["catalog_roi"] = str(catalog_path)
-    if plot_roi_occurrence:
-        average_map_dir = os.path.join(tier1_dir, tier2_dir, "avg_map")
-        xgrid = np.load(os.path.join(average_map_dir, "parent_xgrid.npy"))
-        ygrid = np.load(os.path.join(average_map_dir, "parent_ygrid.npy"))
-        zgrid = np.load(os.path.join(average_map_dir, "parent_zgrid.npy"))
-        pu.completeness_plotter(
-            xgrid=xgrid,
-            ygrid=ygrid,
-            zgrid=zgrid,
-            save_path=str(roi_path),
             title=title,
-            save_plot=True,
-            a_m_lims_pairs=summary["a_m_lims_pairs"],
-            summary_dict=summary,
-            zoom=True,
-            ycol=f"inj_{mtype}",
-            m_unit=m_unit,
         )
-        paths["roi_occurrence"] = str(roi_path)
+    if plot_roi_occurrence:
+        paths["roi_occurrence"] = plot_roi_occurrence_completeness(
+            tier1_dir=tier1_dir, tier2_dir=tier2_dir,
+            output_dir=output_dir,
+            summary=summary,
+            mtype=mtype,
+            m_unit=m_unit,
+            title=title,
+        )
     return paths
 
 
