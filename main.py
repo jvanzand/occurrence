@@ -54,7 +54,9 @@ def prep_recoveries_files(tier1_dir,
                 cu.recs_msini_converter(recoveries_file, mtrue_recoveries_save_file)
             
         else:
-            os.makedirs('msini/msini_recoveries/', exist_ok=True)
+            os.makedirs(
+                os.path.join(tier1_dir, 'msini_recoveries'), exist_ok=True
+            )
             keep_cols = ['inj_msini', 'inj_au', 'inj_e', 'recovered']
             for starname in star_df.star_name:
                 recoveries_file = os.path.join(master_rec_dir, starname+'_recoveries.csv')
@@ -77,7 +79,9 @@ def prep_recoveries_files(tier1_dir,
                 cu.recs_mass_ratio_converter(recoveries_file, q_recoveries_save_file, mstar)
             
     elif recoveries_mtype=='mtrue':
-        os.makedirs(os.path.join(tier1_dir, 'mtrue_recoveries/'))
+        os.makedirs(
+            os.path.join(tier1_dir, 'mtrue_recoveries'), exist_ok=True
+        )
         if 'sini' in tier1_dir:
             raise Exception("main.prep_recoveries_files: Cannot calculate Msini completeness from Mtrue recoveries files")
 

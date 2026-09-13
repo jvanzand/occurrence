@@ -17,6 +17,18 @@ plt.style.use(os.path.join(os.path.dirname(__file__), 'matplotlibrc'))
   
 
     
+def _tier1_artifacts_exist(tier1_config, star_df, avg_map_only=False):
+    """Return whether all map interpolators required from a Tier 1 run exist."""
+    t1 = SimpleNamespace(**tier1_config)
+    y_param = f"{t1.m_or_q}{t1.true_or_sini}"
+    maps_dir = os.path.join(t1.t1_dir, f"saved_maps_{y_param}")
+    star_names = ["average"] if avg_map_only else list(star_df.star_name)
+    return bool(star_names) and all(
+        os.path.isfile(os.path.join(maps_dir, name, "interp_fn.pkl"))
+        for name in star_names
+    )
+
+
 def make_tier1(tier1_config, star_df_full, recoveries_dir, 
                recoveries_mtype='mtrue', 
                avg_map_only=False,
@@ -29,6 +41,9 @@ def make_tier1(tier1_config, star_df_full, recoveries_dir,
     y_param = f"{t1.m_or_q}{t1.true_or_sini}"
     m_dir_to_make_q = os.path.join(t1.t1_dir, f"m{t1.true_or_sini}_recoveries")
     path_to_recoveries = os.path.join(t1.t1_dir, f"{y_param}_recoveries")
+
+    if _tier1_artifacts_exist(tier1_config, star_df_full, avg_map_only):
+        return
     
     ## Optionally use only one recoveries file to represent completeness for the whole sample
     if avg_map_only:
@@ -37,20 +52,18 @@ def make_tier1(tier1_config, star_df_full, recoveries_dir,
         avg_df = pd.DataFrame([['average', Mstar, [], 0]], columns=cols)
         star_df_full = avg_df
     
-    t1_exists = os.path.exists(t1.t1_dir)
-    if not t1_exists:
-        main.prep_recoveries_files(tier1_dir=t1.t1_dir,
-                                   star_df=star_df_full,
-                                   master_rec_dir=recoveries_dir,
-                                   recoveries_mtype=recoveries_mtype,
-                                   m_dir_to_make_q=m_dir_to_make_q,
-                                   )
-        main.prep_maps(tier1_dir=t1.t1_dir,
-                       star_df=star_df_full,
-                       path_to_recoveries=path_to_recoveries,
-                       m_unit=t1.mass_unit,
-                       avg_map_only=avg_map_only,
-                       save_single_plots=save_single_plots)
+    main.prep_recoveries_files(tier1_dir=t1.t1_dir,
+                               star_df=star_df_full,
+                               master_rec_dir=recoveries_dir,
+                               recoveries_mtype=recoveries_mtype,
+                               m_dir_to_make_q=m_dir_to_make_q,
+                               )
+    main.prep_maps(tier1_dir=t1.t1_dir,
+                   star_df=star_df_full,
+                   path_to_recoveries=path_to_recoveries,
+                   m_unit=t1.mass_unit,
+                   avg_map_only=avg_map_only,
+                   save_single_plots=save_single_plots)
     return
 
 
@@ -233,11 +246,11 @@ def run_direct_multiple(
 
     missing_tier1 = [
         configuration for configuration in tier1_configurations
-        if not os.path.isdir(configuration["t1_dir"])
+        if not _tier1_artifacts_exist(configuration, star_df, avg_map_only)
     ]
     if missing_tier1 and not prepare_missing:
         raise FileNotFoundError(
-            "required Tier 1 directories are missing: " +
+            "required Tier 1 products are missing: " +
             str([item["t1_dir"] for item in missing_tier1])
         )
     if missing_tier1:
@@ -377,6 +390,14 @@ def run_direct_multiple(
     return results
 
 
+def _configuration_path(configuration):
+    """Return a progress label for either a Tier 1 or Tier 2 configuration."""
+    parts = [configuration["t1_dir"]]
+    if "t2_dir" in configuration:
+        parts.append(configuration["t2_dir"])
+    return "/".join(parts)
+
+
 def _run_futures_in_parallel(function, configurations, shared_args, label):
     """Run a prerequisite phase concurrently and propagate worker failures."""
     with ProcessPoolExecutor() as executor:
@@ -387,10 +408,7 @@ def _run_futures_in_parallel(function, configurations, shared_args, label):
         for future in as_completed(futures):
             configuration = futures[future]
             future.result()
-            print(
-                f"Finished {label} "
-                f"{configuration['t1_dir']}/{configuration['t2_dir']}"
-            )
+            print(f"Finished {label} {_configuration_path(configuration)}")
 
 
 def _run_direct_configuration(configuration):

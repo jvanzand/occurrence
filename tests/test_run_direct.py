@@ -48,6 +48,7 @@ def test_run_direct_multiple_applies_tier2_cuts_and_plot_controls(
     monkeypatch.setattr(main, "prep_direct_fit_materials", fake_prep)
     monkeypatch.setattr(run.mcmc_direct, "fit_piecewise_file", fake_fit)
     monkeypatch.setattr(main, "plot_direct_piecewise", fake_plot)
+    monkeypatch.setattr(run, "_tier1_artifacts_exist", lambda *args: True)
     monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "mtrue").mkdir()
@@ -102,6 +103,7 @@ def test_run_direct_multiple_prepares_missing_tier2(tmp_path, monkeypatch):
     monkeypatch.setattr(
         run.mcmc_direct, "fit_piecewise_file", lambda **kwargs: object(),
     )
+    monkeypatch.setattr(run, "_tier1_artifacts_exist", lambda *args: True)
 
     results = run.run_direct_multiple(
         tier1_list=["mtrue"],
@@ -185,6 +187,70 @@ def test_tier2_readiness_requires_catalog_and_average_map(tmp_path):
     assert run._tier2_artifacts_exist(tmp_path / "mtrue", "allstars")
 
 
+def test_tier1_readiness_requires_every_map_interpolator(tmp_path):
+    """A partial Tier 1 directory must be rebuilt rather than silently skipped."""
+    configuration = {
+        "t1_dir": str(tmp_path / "mtrue"),
+        "m_or_q": "m",
+        "true_or_sini": "true",
+    }
+    stars = pd.DataFrame({"star_name": ["a", "b"]})
+    map_dir = tmp_path / "mtrue" / "saved_maps_mtrue"
+    (map_dir / "a").mkdir(parents=True)
+    (map_dir / "a" / "interp_fn.pkl").touch()
+    assert not run._tier1_artifacts_exist(configuration, stars)
+    (map_dir / "b").mkdir()
+    (map_dir / "b" / "interp_fn.pkl").touch()
+    assert run._tier1_artifacts_exist(configuration, stars)
+
+
+def test_parallel_progress_paths_support_tier1_and_tier2_configurations():
+    assert run._configuration_path({"t1_dir": "mtrue"}) == "mtrue"
+    assert run._configuration_path({
+        "t1_dir": "qtrue", "t2_dir": "highMstar",
+    }) == "qtrue/highMstar"
+
+
+def test_parallel_prerequisite_runner_handles_multiple_tier1_and_tier2(
+        monkeypatch, capsys):
+    calls = []
+
+    class FakeFuture:
+        def result(self):
+            return None
+
+    class FakeExecutor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def submit(self, function, configuration, *shared_args):
+            function(configuration, *shared_args)
+            return FakeFuture()
+
+    monkeypatch.setattr(run, "ProcessPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(run, "as_completed", lambda futures: list(futures))
+
+    tier1 = [{"t1_dir": "mtrue"}, {"t1_dir": "qtrue"}]
+    tier2 = [
+        {"t1_dir": "mtrue", "t2_dir": "allstars"},
+        {"t1_dir": "qtrue", "t2_dir": "highMstar"},
+    ]
+    worker = lambda configuration: calls.append(configuration)
+
+    run._run_futures_in_parallel(worker, tier1, (), "direct Tier 1")
+    run._run_futures_in_parallel(worker, tier2, (), "direct Tier 2")
+
+    assert calls == tier1 + tier2
+    output = capsys.readouterr().out
+    assert "Finished direct Tier 1 mtrue" in output
+    assert "Finished direct Tier 1 qtrue" in output
+    assert "Finished direct Tier 2 mtrue/allstars" in output
+    assert "Finished direct Tier 2 qtrue/highMstar" in output
+
+
 def test_make_tier2_uses_filtered_stars_for_average_map(monkeypatch):
     """Subset average completeness should use the same selected stellar sample."""
     calls = {}
@@ -239,6 +305,7 @@ def test_run_direct_multiple_dispatches_logg_through_smooth_apis(
     monkeypatch.chdir(tmp_path)
     (tmp_path / "mtrue").mkdir()
     fit_calls, plot_calls = [], []
+    monkeypatch.setattr(run, "_tier1_artifacts_exist", lambda *args: True)
     monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
     monkeypatch.setattr(
         main, "prep_direct_fit_materials", lambda **kwargs: "materials.npz"
@@ -279,6 +346,7 @@ def test_run_direct_multiple_dispatches_new_smooth_models(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "mtrue").mkdir()
     calls = []
+    monkeypatch.setattr(run, "_tier1_artifacts_exist", lambda *args: True)
     monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
     monkeypatch.setattr(
         main, "prep_direct_fit_materials", lambda **kwargs: "materials.npz"
@@ -356,6 +424,7 @@ def test_supplementary_plots_overlap_later_serial_models(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     (tmp_path / "mtrue").mkdir()
+    monkeypatch.setattr(run, "_tier1_artifacts_exist", lambda *args: True)
     monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
     monkeypatch.setattr(
         main, "prep_direct_fit_materials", lambda **kwargs: "materials.npz"
