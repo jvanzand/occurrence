@@ -498,7 +498,6 @@ def plot_direct_models(
                 summary, stack_dim=stack_dim, m_unit=m_unit, mtype=mtype,
                 rate_type='ORD', title=title, return_fig_ax=True,
             )
-            _label_piecewise_axes(base_figures['density'][1])
         if plot_cumulative:
             base_figures['cumulative'] = mcmc_direct.piecewise_cumulative_figure(
                 piecewise_chain, stack_dim=stack_dim, title=title, m_unit=m_unit,
@@ -548,12 +547,3 @@ def plot_direct_models(
     )
     return paths
 
-
-def _label_piecewise_axes(axes):
-    """Label the black histogram trace on combined direct-model plots."""
-    for axis in np.atleast_1d(axes):
-        if axis.lines:
-            axis.lines[0].set_label('piecewise')
-    
-    
-    
