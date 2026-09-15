@@ -91,7 +91,7 @@ def test_make_variables_aggregates_nonstack_dimension_by_area(tmp_path):
 
 
 def test_make_variables_reports_missing_summary(tmp_path):
-    with pytest.raises(FileNotFoundError, match="summary_dict_direct_piecewise"):
+    with pytest.raises(FileNotFoundError, match="summary_dict_piecewise"):
         post_fit_analysis.make_variables(
             tmp_path, ["mtrue"], ["allstars"], ["roi"],
         )
@@ -110,7 +110,7 @@ def test_make_variables_collects_piecewise_integrated_occurrence(tmp_path):
     chain_dir.mkdir()
     scale = np.linspace(0.5, 1.5, 101)
     np.savez(
-        chain_dir / "chains_direct_piecewise.npz",
+        chain_dir / "chains_piecewise.npz",
         flat_chains=np.column_stack([scale, 2.0*scale]),
         x_edges=np.array([1.0, 10.0, 100.0]),
         y_edges=np.array([1.0, 10.0]),
@@ -133,7 +133,7 @@ def test_make_variables_collects_parametric_fit_chains(tmp_path, monkeypatch):
     sample_axis = np.linspace(0.0, 1.0, 101)
     for index in range(2):
         np.savez(
-            chain_dir / f"chains_direct_escarpment_bin{index}.npz",
+            chain_dir / f"chains_escarpment_bin{index}.npz",
             flat_chains=np.column_stack([
                 1.0 + 0.1*sample_axis,
                 2.0 + 0.2*sample_axis,
@@ -166,12 +166,12 @@ def test_calculate_delta_bic_uses_flat_minus_model_convention(
     chain_dir = tmp_path / "chains"
     chain_dir.mkdir()
     np.savez(
-        chain_dir / "chains_direct_logG_bin0.npz",
+        chain_dir / "chains_logG_bin0.npz",
         stack_bounds=np.array([1.0, 10.0]),
     )
     cache = SimpleNamespace(companion_names=("one", "two", "three"))
     monkeypatch.setattr(
-        post_fit_analysis.dfu, "load_direct_fit_data",
+        post_fit_analysis.dfu, "load_fit_data",
         lambda path: ({}, object()),
     )
     monkeypatch.setattr(
@@ -203,11 +203,11 @@ def test_calculate_all_delta_bics_saves_results_for_every_folder(
     for tier2 in ("highMass", "lowMass"):
         chain_dir = tmp_path / "mtrue" / tier2 / "roi" / "saved_chains"
         chain_dir.mkdir(parents=True)
-        (chain_dir / "chains_direct_logG_bin0.npz").touch()
+        (chain_dir / "chains_logG_bin0.npz").touch()
     calls = []
 
-    def fake_calculate(direct_fit_path, chain_dir, stack_dim):
-        calls.append((direct_fit_path, chain_dir, stack_dim))
+    def fake_calculate(fit_path, chain_dir, stack_dim):
+        calls.append((fit_path, chain_dir, stack_dim))
         return {"logG": np.array([3.25])}
 
     monkeypatch.setattr(

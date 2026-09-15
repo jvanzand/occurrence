@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from occurrence import direct_fit_utils as dfu
-from occurrence import direct_likelihood as dl
+from occurrence import fit_utils as dfu
+from occurrence import likelihood as dl
 
 
 def _exposure(completeness_sum=2.0):
@@ -160,17 +160,17 @@ def test_smooth_likelihood_allows_an_empty_stack_interval():
         ("bpl", [0.2, 0.5, -0.4, 1.2]),
     ],
 )
-def test_direct_smooth_densities_match_registered_models(model_name, theta):
+def test_smooth_densities_match_registered_models(model_name, theta):
     """Direct evaluators should preserve the established model definitions."""
     from occurrence import mcmc_powerlaw
     x = np.logspace(0, 1, 20)
-    direct_function = {
+    model_function = {
         "escarpment": dl.escarpment_density,
         "sigmoid": dl.sigmoid_density,
         "bpl": dl.broken_powerlaw_density,
     }[model_name]
     registered = mcmc_powerlaw.MODEL_REGISTRY[model_name].function
-    np.testing.assert_allclose(direct_function(theta, x), registered(theta, x))
+    np.testing.assert_allclose(model_function(theta, x), registered(theta, x))
 
 
 def test_cached_smooth_likelihood_is_finite_for_new_models():

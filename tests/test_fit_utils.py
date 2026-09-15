@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from occurrence import direct_fit_utils as dfu
+from occurrence import fit_utils as dfu
 from occurrence import sampling_utils
 from occurrence import completeness_utils
 
@@ -227,7 +227,7 @@ def test_individual_and_average_exposure_agree_when_maps_do():
     np.testing.assert_allclose(individual.completeness_sum, average.completeness_sum)
 
 
-def test_direct_fit_data_round_trip(tmp_path):
+def test_fit_data_round_trip(tmp_path):
     """Prepared inputs should survive pickle-free NPZ serialization."""
     companions = {
         "planet_b": dfu.prepare_companion_samples(
@@ -247,9 +247,9 @@ def test_direct_fit_data_round_trip(tmp_path):
         average_completeness=_constant_interpolator(0.5),
         nstars=2,
     )
-    path = tmp_path / "direct_fit_data.npz"
-    dfu.save_direct_fit_data(path, companions, exposure)
-    loaded_companions, loaded_exposure = dfu.load_direct_fit_data(path)
+    path = tmp_path / "fit_data.npz"
+    dfu.save_fit_data(path, companions, exposure)
+    loaded_companions, loaded_exposure = dfu.load_fit_data(path)
 
     loaded = loaded_companions["planet_b"]
     np.testing.assert_array_equal(loaded.x_samples, companions["planet_b"].x_samples)
@@ -260,7 +260,7 @@ def test_direct_fit_data_round_trip(tmp_path):
 
 def test_main_preparation_entry_point_does_not_require_histograms(tmp_path):
     """The high-level adapter should write inputs without histogram products."""
-    from occurrence.main import prep_direct_fit_materials
+    from occurrence.main import prep_fit_materials
 
     tier1_dir = tmp_path / "mtrue"
     tier2_dir = "allstars"
@@ -277,16 +277,16 @@ def test_main_preparation_entry_point_does_not_require_histograms(tmp_path):
     np.savez(average_dir.parent / "sampled_post_prior_compl.npz", planet_b=sample_array)
     stars = pd.DataFrame({"star_name": ["star_1", "star_2"]})
 
-    output_path = prep_direct_fit_materials(
+    output_path = prep_fit_materials(
         tier1_dir=str(tier1_dir),
         tier2_dir=tier2_dir,
-        tier3_dir="direct_test",
+        tier3_dir="fit_test",
         x_bounds=(0.5, 3.0),
         y_bounds=(1.0, 5.0),
         star_df=stars,
         integration_resolution=(5, 6),
     )
-    companions, exposure = dfu.load_direct_fit_data(output_path)
+    companions, exposure = dfu.load_fit_data(output_path)
 
     assert set(companions) == {"planet_b"}
     assert exposure.completeness_sum.shape == (5, 6)

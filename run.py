@@ -9,7 +9,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from occurrence import plotting_utils as pu
 from occurrence import main
-from occurrence import mcmc_direct
+from occurrence import mcmc
 from occurrence import sampling_utils as su
 
 # Use plot template
@@ -159,7 +159,7 @@ def _y_edges_for_tier(m_edges, m_or_q, m_unit):
     return edges/conversion
 
 
-def run_direct_multiple(
+def run_multiple(
         tier1_list,
         tier2_list,
         tier3_list,
@@ -222,7 +222,7 @@ def run_direct_multiple(
     unknown = (set(run_models) | set(plot_models)) - supported_models
     if unknown:
         raise ValueError(
-            f"unsupported direct models: {sorted(unknown)}; "
+            f"unsupported models: {sorted(unknown)}; "
             f"available models: {sorted(supported_models)}"
         )
     if stack_dim not in {"a", "m"}:
@@ -264,7 +264,7 @@ def run_direct_multiple(
         )
         if parallel_fits and len(missing_tier1) > 1:
             _run_futures_in_parallel(
-                make_tier1, missing_tier1, preparation_arguments, "direct Tier 1"
+                make_tier1, missing_tier1, preparation_arguments, "Tier 1"
             )
         else:
             for configuration in missing_tier1:
@@ -359,7 +359,7 @@ def run_direct_multiple(
         )
         if parallel_fits and len(missing_tier2) > 1:
             _run_futures_in_parallel(
-                make_tier2, missing_tier2, preparation_arguments, "direct Tier 2"
+                make_tier2, missing_tier2, preparation_arguments, "Tier 2"
             )
         else:
             for configuration in missing_tier2:
@@ -368,7 +368,7 @@ def run_direct_multiple(
     if parallel_fits and len(configurations) > 1:
         with ProcessPoolExecutor() as executor:
             futures = {
-                executor.submit(_run_direct_configuration, configuration): index
+                executor.submit(_run_configuration, configuration): index
                 for index, configuration in enumerate(configurations)
             }
             results = [None]*len(configurations)
@@ -377,14 +377,14 @@ def run_direct_multiple(
                 results[index] = future.result()
                 configuration = configurations[index]
                 print(
-                    "Finished direct fit "
+                    "Finished fit "
                     f"{configuration['tier1_dir']}/"
                     f"{configuration['tier2_dir']}/"
                     f"{configuration['tier3_dir']}"
                 )
     else:
         results = [
-            _run_direct_configuration(configuration)
+            _run_configuration(configuration)
             for configuration in configurations
         ]
     return results
@@ -411,8 +411,8 @@ def _run_futures_in_parallel(function, configurations, shared_args, label):
             print(f"Finished {label} {_configuration_path(configuration)}")
 
 
-def _run_direct_configuration(configuration):
-    """Execute one configuration produced by :func:`run_direct_multiple`."""
+def _run_configuration(configuration):
+    """Execute one configuration produced by :func:`run_multiple`."""
     result = {
         "tier1": configuration["tier1_dir"],
         "tier2": configuration["tier2_dir"],
@@ -435,7 +435,7 @@ def _run_direct_configuration(configuration):
         len(run_models) > 1
     )
     if configuration["run_fits"]:
-        material_path = main.prep_direct_fit_materials(
+        material_path = main.prep_fit_materials(
             tier1_dir=configuration["tier1_dir"],
             tier2_dir=configuration["tier2_dir"],
             tier3_dir=configuration["tier3_dir"],
@@ -450,7 +450,7 @@ def _run_direct_configuration(configuration):
         if (can_overlap_supplementary_plots and
                 configuration["plot_catalog_roi"]):
             early_plot_paths["catalog_roi"] = (
-                mcmc_direct.plot_catalog_roi_completeness(
+                mcmc.plot_catalog_roi_completeness(
                     tier1_dir=configuration["tier1_dir"],
                     tier2_dir=configuration["tier2_dir"],
                     output_dir=os.path.join(
@@ -468,10 +468,10 @@ def _run_direct_configuration(configuration):
                 chain_path = os.path.join(
                     configuration["tier1_dir"], configuration["tier2_dir"],
                     configuration["tier3_dir"], "saved_chains",
-                    "chains_direct_piecewise.npz",
+                    "chains_piecewise.npz",
                 )
-                mcmc_direct.fit_piecewise_file(
-                    direct_fit_path=material_path,
+                mcmc.fit_piecewise_file(
+                    fit_path=material_path,
                     x_edges=configuration["a_edges"],
                     y_edges=configuration["m_edges"],
                     nwalkers=configuration["nwalkers"],
@@ -488,9 +488,9 @@ def _run_direct_configuration(configuration):
                     summary_path = os.path.join(
                         configuration["tier1_dir"], configuration["tier2_dir"],
                         configuration["tier3_dir"], "saved_dicts",
-                        "summary_dict_direct_piecewise.npz",
+                        "summary_dict_piecewise.npz",
                     )
-                    summary = mcmc_direct.summarize_piecewise_file(
+                    summary = mcmc.summarize_piecewise_file(
                         material_path, chain_path,
                         len(configuration["star_df"]), save_path=summary_path,
                     )
@@ -500,7 +500,7 @@ def _run_direct_configuration(configuration):
                         max_workers=1, mp_context=mp.get_context("spawn")
                     )
                     roi_occurrence_future = plot_executor.submit(
-                        mcmc_direct.plot_roi_occurrence_completeness,
+                        mcmc.plot_roi_occurrence_completeness,
                         configuration["tier1_dir"],
                         configuration["tier2_dir"],
                         os.path.join(
@@ -528,8 +528,8 @@ def _run_direct_configuration(configuration):
                     else configuration["logg_sigma_bounds"]
                 )
                 try:
-                    _, chain_paths = mcmc_direct.fit_smooth_file(
-                        direct_fit_path=material_path,
+                    _, chain_paths = mcmc.fit_smooth_file(
+                        fit_path=material_path,
                         a_edges=configuration["a_edges"],
                         m_edges=configuration["m_edges"],
                         stack_dim=configuration["stack_dim"],
@@ -568,7 +568,7 @@ def _run_direct_configuration(configuration):
             plot_executor.shutdown(wait=True)
 
     if configuration["make_plots"] and configuration["plot_models"]:
-        result["plots"] = main.plot_direct_models(
+        result["plots"] = main.plot_models(
             tier1_dir=configuration["tier1_dir"],
             tier2_dir=configuration["tier2_dir"],
             tier3_dir=configuration["tier3_dir"],

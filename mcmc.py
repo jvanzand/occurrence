@@ -7,8 +7,8 @@ from pathlib import Path
 import emcee
 import numpy as np
 
-from occurrence import direct_fit_utils as dfu
-from occurrence import direct_likelihood as dl
+from occurrence import fit_utils as dfu
+from occurrence import likelihood as dl
 from occurrence import mcmc_powerlaw
 
 
@@ -32,7 +32,7 @@ def mcmc_piecewise(
         nsteps=5000,
         burnin=1000,
         parallel=False,
-        save_path="chains_direct_piecewise.npz",
+        save_path="chains_piecewise.npz",
         random_seed=None):
     """Fit cell-wise densities directly to companion posterior samples."""
     x_edges = dl._validate_edges(x_edges, "x_edges")
@@ -63,7 +63,7 @@ def mcmc_piecewise(
             if not np.any(companion.roi_mask)
         ]
         detail = f"; companions without ROI support: {unsupported}" if unsupported else ""
-        raise ValueError(f"direct MCMC initialization has nonfinite likelihoods{detail}")
+        raise ValueError(f"MCMC initialization has nonfinite likelihoods{detail}")
 
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     if parallel:
@@ -80,7 +80,7 @@ def mcmc_piecewise(
 
     log_probabilities = sampler.get_log_prob()
     if not np.isfinite(log_probabilities).all():
-        raise RuntimeError("direct MCMC produced nonfinite log probabilities")
+        raise RuntimeError("MCMC produced nonfinite log probabilities")
     np.savez_compressed(
         save_path,
         chains=sampler.get_chain(),
@@ -97,9 +97,9 @@ def mcmc_piecewise(
     return sampler
 
 
-def fit_piecewise_file(direct_fit_path, x_edges, y_edges, **mcmc_options):
+def fit_piecewise_file(fit_path, x_edges, y_edges, **mcmc_options):
     """Load Stage 2 materials and run a direct piecewise-constant fit."""
-    companions, exposure = dfu.load_direct_fit_data(direct_fit_path)
+    companions, exposure = dfu.load_fit_data(fit_path)
     return mcmc_piecewise(
         companions, exposure, x_edges, y_edges, **mcmc_options
     )
@@ -314,7 +314,7 @@ def mcmc_smooth(
             if attempts >= 1000:
                 raise ValueError(f"could not initialize finite {model_name} walkers")
     if save_path is None:
-        save_path = f"chains_direct_{model_name}.npz"
+        save_path = f"chains_{model_name}.npz"
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     if parallel:
         with mp.Pool() as pool:
@@ -361,21 +361,21 @@ def mcmc_smooth(
 
 
 def fit_smooth_file(
-        direct_fit_path, a_edges, m_edges, stack_dim, model_name,
+        fit_path, a_edges, m_edges, stack_dim, model_name,
         **mcmc_options):
     """Fit one registered smooth model in every stack interval."""
-    companions, exposure = dfu.load_direct_fit_data(direct_fit_path)
+    companions, exposure = dfu.load_fit_data(fit_path)
     a_edges = dl._validate_edges(a_edges, "a_edges")
     m_edges = dl._validate_edges(m_edges, "m_edges")
     stack_edges = a_edges if stack_dim == "a" else m_edges
     base_path = Path(mcmc_options.pop(
-        "save_dir", Path(direct_fit_path).parents[1] / "saved_chains"
+        "save_dir", Path(fit_path).parents[1] / "saved_chains"
     ))
     base_path.mkdir(parents=True, exist_ok=True)
     samplers, paths = [], []
     for index, bounds in enumerate(zip(stack_edges[:-1], stack_edges[1:])):
         cache = dl.build_smooth_cache(companions, exposure, stack_dim, bounds)
-        path = base_path / f"chains_direct_{model_name}_bin{index}.npz"
+        path = base_path / f"chains_{model_name}_bin{index}.npz"
         options = dict(mcmc_options)
         if options.get("random_seed") is not None:
             options["random_seed"] += index
@@ -462,7 +462,7 @@ def add_smooth_model_to_figures(
         output_dir,
         stack_dim,
         m_unit="earth",
-        title="Direct smooth-model fit",
+        title="Smooth-model fit",
         plot_occurrence=True,
         plot_cumulative=False,
         plot_density=True,
@@ -588,7 +588,7 @@ def add_smooth_model_to_figures(
     if plot_corner:
         corner_paths = []
         for index, item in enumerate(loaded):
-            path = output_dir / f"corner_direct_{model_name}_bin{index}.png"
+            path = output_dir / f"corner_{model_name}_bin{index}.png"
             pu.plot_corner_from_file(
                 path_to_chains=item["path"],
                 model_name=model_name,
@@ -602,7 +602,7 @@ def add_smooth_model_to_figures(
     return paths
 
 
-def save_direct_model_figures(
+def save_model_figures(
         figures, output_dir, stack_dim, model_edges, title,
         m_unit="earth"):
     """Format and save completed direct-model figures exactly once."""
@@ -620,15 +620,15 @@ def save_direct_model_figures(
         "density": (
             "Occurrence rate density\n"
             r"[Planets/star/$\Delta \log_{10}(\omega)$]",
-            "occurrence_ORD_direct_models.png",
+            "occurrence_ORD.png",
         ),
         "occurrence": (
             "Occurrence rate (OR)\n[Planets/star]",
-            "occurrence_OR_direct_models.png",
+            "occurrence_OR_models.png",
         ),
         "cumulative": (
             "Cumulative OR\n[Planets/star]",
-            "occurrence_CDF_direct_models.png",
+            "occurrence_CDF.png",
         ),
     }
     model_edges = np.asarray(model_edges, dtype=float)
@@ -797,11 +797,11 @@ def piecewise_cumulative_figure(
 
 
 def summarize_piecewise_file(
-        direct_fit_path, chain_path, nstars, save_path=None):
+        fit_path, chain_path, nstars, save_path=None):
     """Create plotting summaries directly from a piecewise-fit chain."""
     from occurrence import occurrence_utils as ou
 
-    companions, exposure = dfu.load_direct_fit_data(direct_fit_path)
+    companions, exposure = dfu.load_fit_data(fit_path)
     with np.load(chain_path) as data:
         samples = data["flat_chains"]
         a_edges = data["x_edges"]
@@ -847,7 +847,7 @@ def summarize_piecewise_file(
 
 def plot_catalog_roi_completeness(
         tier1_dir, tier2_dir, output_dir, a_edges, m_edges,
-        m_unit="earth", title="Direct occurrence fit"):
+        m_unit="earth", title="Occurrence fit"):
     """Plot the catalog and fitted ROI without requiring a fitted model."""
     from occurrence import plotting_utils as pu
 
@@ -872,7 +872,7 @@ def plot_catalog_roi_completeness(
 
 def plot_roi_occurrence_completeness(
         tier1_dir, tier2_dir, output_dir, summary,
-        mtype="mtrue", m_unit="earth", title="Direct occurrence fit"):
+        mtype="mtrue", m_unit="earth", title="Occurrence fit"):
     """Plot a piecewise occurrence summary over the average completeness map."""
     from occurrence import plotting_utils as pu
 
@@ -900,14 +900,14 @@ def plot_roi_occurrence_completeness(
 
 
 def plot_piecewise_results(
-        direct_fit_path,
+        fit_path,
         chain_path,
         output_dir,
         nstars,
         stack_dim,
         m_unit="earth",
         mtype="mtrue",
-        title="Direct piecewise-constant fit",
+        title="Piecewise-constant fit",
         plot_occurrence=True,
         plot_density=True,
         plot_corner=True,
@@ -923,14 +923,14 @@ def plot_piecewise_results(
         raise ValueError("stack_dim must be 'a' or 'm'")
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = output_dir.parent / "saved_dicts" / "summary_dict_direct_piecewise.npz"
+    summary_path = output_dir.parent / "saved_dicts" / "summary_dict_piecewise.npz"
     if summary is None:
         summary = summarize_piecewise_file(
-            direct_fit_path, chain_path, nstars, save_path=summary_path
+            fit_path, chain_path, nstars, save_path=summary_path
         )
-    or_path = output_dir / "occurrence_OR_direct_models.png"
-    ord_path = output_dir / "occurrence_ORD_direct_models.png"
-    corner_path = output_dir / "corner_direct_piecewise.png"
+    or_path = output_dir / "occurrence_OR_models.png"
+    ord_path = output_dir / "occurrence_ORD.png"
+    corner_path = output_dir / "corner_piecewise.png"
     common = dict(
         summary_dict=summary, stack_dim=stack_dim, m_unit=m_unit,
         mtype=mtype, title=title,

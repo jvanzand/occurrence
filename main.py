@@ -13,8 +13,8 @@ import multiprocessing as mp
 from occurrence import completeness_utils as cu
 from occurrence import sampling_utils as su
 from occurrence import plotting_utils as pu
-from occurrence import direct_fit_utils as dfu
-from occurrence import mcmc_direct
+from occurrence import fit_utils as dfu
+from occurrence import mcmc
 
 from occurrence.completeness_utils import _process_single_star
 
@@ -254,7 +254,7 @@ def prep_post_draws(tier1_dir, tier2_dir,
     return
     
     
-def prep_direct_fit_materials(
+def prep_fit_materials(
         tier1_dir,
         tier2_dir,
         tier3_dir,
@@ -268,7 +268,7 @@ def prep_direct_fit_materials(
     """Prepare unbinned samples and survey exposure for a direct fit.
 
     This Stage 2 entry point supports the current ``(a, mass)`` catalog order
-    and one rectangular x-y region. It writes ``direct_fit_data.npz`` but
+    and one rectangular x-y region. It writes ``fit_data.npz`` but
     does not evaluate a likelihood or run MCMC. The average-map exposure is
     the default because some individual maps may contain NaNs in the ROI;
     individual-map summation remains available with strict validation.
@@ -313,13 +313,13 @@ def prep_direct_fit_materials(
         )
 
     save_path = os.path.join(
-        tier1_dir, tier2_dir, tier3_dir, 'saved_dicts', 'direct_fit_data.npz'
+        tier1_dir, tier2_dir, tier3_dir, 'saved_dicts', 'fit_data.npz'
     )
-    dfu.save_direct_fit_data(save_path, companions, exposure)
+    dfu.save_fit_data(save_path, companions, exposure)
     return save_path
 
 
-def plot_direct_piecewise(
+def plot_piecewise(
         tier1_dir,
         tier2_dir,
         tier3_dir,
@@ -327,7 +327,7 @@ def plot_direct_piecewise(
         stack_dim,
         m_unit='earth',
         mtype=None,
-        title='Direct piecewise-constant fit',
+        title='Piecewise-constant fit',
         plot_occurrence=True,
         plot_density=True,
         plot_corner=True,
@@ -337,12 +337,12 @@ def plot_direct_piecewise(
     base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
     if mtype is None:
         mtype = os.path.basename(os.path.normpath(tier1_dir))
-    return mcmc_direct.plot_piecewise_results(
-        direct_fit_path=os.path.join(
-            base_dir, 'saved_dicts', 'direct_fit_data.npz'
+    return mcmc.plot_piecewise_results(
+        fit_path=os.path.join(
+            base_dir, 'saved_dicts', 'fit_data.npz'
         ),
         chain_path=os.path.join(
-            base_dir, 'saved_chains', 'chains_direct_piecewise.npz'
+            base_dir, 'saved_chains', 'chains_piecewise.npz'
         ),
         output_dir=os.path.join(base_dir, 'plots'),
         nstars=nstars,
@@ -360,7 +360,7 @@ def plot_direct_piecewise(
     )
 
 
-def plot_direct_smooth(
+def plot_smooth(
         tier1_dir,
         tier2_dir,
         tier3_dir,
@@ -369,7 +369,7 @@ def plot_direct_smooth(
         a_edges,
         m_edges,
         m_unit='earth',
-        title='Direct smooth-model fit',
+        title='Smooth-model fit',
         plot_occurrence=True,
         plot_cumulative=False,
         plot_density=True,
@@ -385,14 +385,14 @@ def plot_direct_smooth(
     # intentionally filename-based so plotting also works after a fit-only run.
     chain_dir = os.path.join(base_dir, 'saved_chains')
     chain_paths = glob.glob(
-        os.path.join(chain_dir, f'chains_direct_{model_name}_bin*.npz')
+        os.path.join(chain_dir, f'chains_{model_name}_bin*.npz')
     )
     chain_paths.sort(
         key=lambda path: int(os.path.splitext(path)[0].rsplit('bin', 1)[1])
     )
     if not chain_paths:
         raise FileNotFoundError(
-            f"no saved direct {model_name} chains in {chain_dir!r}"
+            f"no saved {model_name} chains in {chain_dir!r}"
         )
     figures = {}
     if plot_density:
@@ -402,7 +402,7 @@ def plot_direct_smooth(
     if plot_cumulative:
         figures['cumulative'] = plt.subplots(figsize=(6, 4))
     model_edges = m_edges if stack_dim == 'a' else a_edges
-    paths = mcmc_direct.add_smooth_model_to_figures(
+    paths = mcmc.add_smooth_model_to_figures(
         chain_paths=chain_paths,
         model_name=model_name,
         figures=figures,
@@ -419,7 +419,7 @@ def plot_direct_smooth(
         plot_random_seed=plot_random_seed,
         model_edges=model_edges,
     )
-    paths.update(mcmc_direct.save_direct_model_figures(
+    paths.update(mcmc.save_model_figures(
         figures=figures, output_dir=os.path.join(base_dir, 'plots'),
         stack_dim=stack_dim, model_edges=model_edges, title=title,
         m_unit=m_unit,
@@ -427,7 +427,7 @@ def plot_direct_smooth(
     return paths
 
 
-def plot_direct_models(
+def plot_models(
         tier1_dir,
         tier2_dir,
         tier3_dir,
@@ -437,7 +437,7 @@ def plot_direct_models(
         m_edges,
         plot_models,
         m_unit='earth',
-        title='Direct occurrence fit',
+        title='Occurrence fit',
         plot_occurrence=True,
         plot_cumulative=False,
         plot_density=True,
@@ -452,9 +452,9 @@ def plot_direct_models(
     supported = {'piecewise', 'logG', 'escarpment', 'sigmoid', 'bpl'}
     unknown = set(selected) - supported
     if unknown:
-        raise ValueError(f"unsupported direct plot models: {sorted(unknown)}")
+        raise ValueError(f"unsupported plot models: {sorted(unknown)}")
     if selected == ['piecewise']:
-        return plot_direct_piecewise(
+        return plot_piecewise(
             tier1_dir=tier1_dir, tier2_dir=tier2_dir, tier3_dir=tier3_dir,
             nstars=nstars, stack_dim=stack_dim,
             m_unit=m_unit, title=title, plot_occurrence=plot_occurrence,
@@ -463,7 +463,7 @@ def plot_direct_models(
             plot_roi_occurrence=plot_roi_occurrence,
         )
     if len(selected) == 1 and selected[0] != 'piecewise':
-        return plot_direct_smooth(
+        return plot_smooth(
             tier1_dir=tier1_dir, tier2_dir=tier2_dir, tier3_dir=tier3_dir,
             model_name=selected[0],
             stack_dim=stack_dim, a_edges=a_edges, m_edges=m_edges,
@@ -480,17 +480,17 @@ def plot_direct_models(
     model_edges = m_edges if stack_dim == 'a' else a_edges
     paths = {}
     if 'piecewise' in selected:
-        direct_fit_path = os.path.join(
-            base_dir, 'saved_dicts', 'direct_fit_data.npz'
+        fit_path = os.path.join(
+            base_dir, 'saved_dicts', 'fit_data.npz'
         )
         piecewise_chain = os.path.join(
-            base_dir, 'saved_chains', 'chains_direct_piecewise.npz'
+            base_dir, 'saved_chains', 'chains_piecewise.npz'
         )
         summary_path = os.path.join(
-            base_dir, 'saved_dicts', 'summary_dict_direct_piecewise.npz'
+            base_dir, 'saved_dicts', 'summary_dict_piecewise.npz'
         )
-        summary = mcmc_direct.summarize_piecewise_file(
-            direct_fit_path, piecewise_chain, nstars, save_path=summary_path
+        summary = mcmc.summarize_piecewise_file(
+            fit_path, piecewise_chain, nstars, save_path=summary_path
         )
         mtype = os.path.basename(os.path.normpath(tier1_dir))
         if plot_density:
@@ -499,11 +499,11 @@ def plot_direct_models(
                 rate_type='ORD', title=title, return_fig_ax=True,
             )
         if plot_cumulative:
-            base_figures['cumulative'] = mcmc_direct.piecewise_cumulative_figure(
+            base_figures['cumulative'] = mcmc.piecewise_cumulative_figure(
                 piecewise_chain, stack_dim=stack_dim, title=title, m_unit=m_unit,
             )
-        paths['piecewise'] = mcmc_direct.plot_piecewise_results(
-            direct_fit_path, piecewise_chain, os.path.join(base_dir, 'plots'),
+        paths['piecewise'] = mcmc.plot_piecewise_results(
+            fit_path, piecewise_chain, os.path.join(base_dir, 'plots'),
             nstars, stack_dim, m_unit=m_unit, mtype=mtype, title=title,
             plot_occurrence=False, plot_density=False, plot_corner=plot_corner,
             plot_catalog_roi=plot_catalog_roi,
@@ -520,16 +520,16 @@ def plot_direct_models(
     for model_name in [name for name in selected if name != 'piecewise']:
         chain_dir = os.path.join(base_dir, 'saved_chains')
         chain_paths = glob.glob(os.path.join(
-            chain_dir, f'chains_direct_{model_name}_bin*.npz'
+            chain_dir, f'chains_{model_name}_bin*.npz'
         ))
         chain_paths.sort(
             key=lambda path: int(os.path.splitext(path)[0].rsplit('bin', 1)[1])
         )
         if not chain_paths:
             raise FileNotFoundError(
-                f"no saved direct {model_name} chains in {chain_dir!r}"
+                f"no saved {model_name} chains in {chain_dir!r}"
             )
-        paths[model_name] = mcmc_direct.add_smooth_model_to_figures(
+        paths[model_name] = mcmc.add_smooth_model_to_figures(
             chain_paths=chain_paths, model_name=model_name,
             figures=base_figures, output_dir=os.path.join(base_dir, 'plots'),
             stack_dim=stack_dim, m_unit=m_unit, title=title,
@@ -540,10 +540,9 @@ def plot_direct_models(
             plot_random_seed=plot_random_seed,
             model_edges=model_edges,
         )
-    paths['combined'] = mcmc_direct.save_direct_model_figures(
+    paths['combined'] = mcmc.save_model_figures(
         figures=base_figures, output_dir=os.path.join(base_dir, 'plots'),
         stack_dim=stack_dim, model_edges=model_edges, title=title,
         m_unit=m_unit,
     )
     return paths
-

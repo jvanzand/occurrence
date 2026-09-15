@@ -297,7 +297,7 @@ def build_exposure_grid(
     )
 
 
-def save_direct_fit_data(path, companions, exposure):
+def save_fit_data(path, companions, exposure):
     """Save prepared direct-fit inputs to a compressed, pickle-free NPZ file."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -323,8 +323,8 @@ def save_direct_fit_data(path, companions, exposure):
     np.savez_compressed(path, **arrays)
 
 
-def load_direct_fit_data(path):
-    """Load a file written by :func:`save_direct_fit_data`."""
+def load_fit_data(path):
+    """Load a file written by :func:`save_fit_data`."""
     with np.load(path, allow_pickle=False) as data:
         names = [str(name) for name in data["companion_names"]]
         companions: Dict[str, CompanionSamples] = {}

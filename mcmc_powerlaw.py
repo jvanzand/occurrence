@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Callable, Tuple
 
-from occurrence import direct_likelihood as dl
+from occurrence import likelihood as dl
 
 
 @dataclass(frozen=True)

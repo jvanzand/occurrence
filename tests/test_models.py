@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from occurrence import direct_likelihood as dl
+from occurrence import likelihood as dl
 from occurrence import mcmc_powerlaw
 from occurrence import plotting_utils
 

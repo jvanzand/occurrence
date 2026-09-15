@@ -7,13 +7,13 @@ import re
 import numpy as np
 from scipy.optimize import minimize_scalar
 
-from occurrence import direct_fit_utils as dfu
-from occurrence import direct_likelihood as dl
-from occurrence import mcmc_direct
+from occurrence import fit_utils as dfu
+from occurrence import likelihood as dl
+from occurrence import mcmc
 from occurrence import mcmc_powerlaw
 
 
-SUMMARY_FILENAME = "summary_dict_direct_piecewise.npz"
+SUMMARY_FILENAME = "summary_dict_piecewise.npz"
 DELTA_BIC_FILENAME = "delta_bics.json"
 PAPER_ITEMS_DIRNAME = "paper_items"
 
@@ -139,7 +139,7 @@ def _integrated_occurrence_samples(model_name, samples, model_bounds,
 def _piecewise_integrated_values(chain_dir, prefix, split_suffix, stack_dim,
                                  n_stack_bins):
     """Collect per-stack integrated occurrence from the piecewise posterior."""
-    path = chain_dir / "chains_direct_piecewise.npz"
+    path = chain_dir / "chains_piecewise.npz"
     if not path.is_file():
         return []
     with np.load(path) as chain:
@@ -184,7 +184,7 @@ def _parametric_values(chain_dir, prefix, split_suffix, stack_dim,
     for model_name, (model_macro, parameter_macros) in (
             _MODEL_PARAMETER_MACROS.items()):
         paths = [
-            chain_dir / f"chains_direct_{model_name}_bin{index}.npz"
+            chain_dir / f"chains_{model_name}_bin{index}.npz"
             for index in range(n_stack_bins)
         ]
         existing = [path.is_file() for path in paths]
@@ -270,7 +270,7 @@ def _maximum_likelihood_draw(path, model_name):
     # transformation's Jacobian to recover the physical-model likelihood.
     log_likelihoods = (
         log_probabilities -
-        mcmc_direct._physical_log_jacobian(model_name, samples)
+        mcmc._physical_log_jacobian(model_name, samples)
     )
     finite = np.isfinite(log_likelihoods)
     if not np.any(finite):
@@ -304,7 +304,7 @@ def _optimize_flat_model(cache):
     return np.exp(result.x), -float(result.fun)
 
 
-def calculate_delta_bic(direct_fit_path, chain_dir, stack_dim="a"):
+def calculate_delta_bic(fit_path, chain_dir, stack_dim="a"):
     """Compare every saved parametric fit with an optimized flat model.
 
     The comparison is performed separately in each stack bin.  The returned
@@ -319,13 +319,13 @@ def calculate_delta_bic(direct_fit_path, chain_dir, stack_dim="a"):
     """
     if stack_dim not in {"a", "m"}:
         raise ValueError("stack_dim must be 'a' or 'm'")
-    direct_fit_path = Path(direct_fit_path)
+    fit_path = Path(fit_path)
     chain_dir = Path(chain_dir)
-    companions, exposure = dfu.load_direct_fit_data(direct_fit_path)
+    companions, exposure = dfu.load_fit_data(fit_path)
     comparisons = {}
 
     for model_name, (_, parameter_names) in _MODEL_PARAMETER_MACROS.items():
-        paths = list(chain_dir.glob(f"chains_direct_{model_name}_bin*.npz"))
+        paths = list(chain_dir.glob(f"chains_{model_name}_bin*.npz"))
         paths.sort(key=lambda path: int(path.stem.rsplit("bin", 1)[1]))
         if not paths:
             continue
@@ -525,7 +525,7 @@ def calculate_all_delta_bics(
                     key = _result_key(tier1_dir, tier2_dir, tier3_dir)
                     has_parametric_chains = any(
                         next(chain_dir.glob(
-                            f"chains_direct_{model_name}_bin*.npz"
+                            f"chains_{model_name}_bin*.npz"
                         ), None) is not None
                         for model_name in _MODEL_PARAMETER_MACROS
                     ) if chain_dir.is_dir() else False
@@ -533,7 +533,7 @@ def calculate_all_delta_bics(
                         all_delta_bics[key] = {}
                         continue
                     comparisons = calculate_delta_bic(
-                        result_dir / "saved_dicts" / "direct_fit_data.npz",
+                        result_dir / "saved_dicts" / "fit_data.npz",
                         chain_dir,
                         stack_dim,
                     )
@@ -604,7 +604,7 @@ def make_variables(
     is treated as a single directory.  A completed fit is expected at::
 
         results_dir/tier1/tier2/tier3/saved_dicts/
-        summary_dict_direct_piecewise.npz
+        summary_dict_piecewise.npz
 
     The output contains ``Nstars``, ``Neff`` (the sum of the effective counts),
     and ``AvgCompl`` (the area-averaged completeness across the full ROI), plus
@@ -649,7 +649,7 @@ def make_variables(
                     )
                     if not summary_path.is_file():
                         raise FileNotFoundError(
-                            f"no direct piecewise summary found at {summary_path}"
+                            f"no piecewise summary found at {summary_path}"
                         )
 
                     with np.load(summary_path) as summary:
