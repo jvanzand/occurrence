@@ -258,7 +258,7 @@ def test_make_parameter_table_references_variables_commands(
     text = output.read_text()
 
     assert output == (
-        tmp_path / "latex_tables" /
+        tmp_path / "paper_items" /
         "model_params_mtrue_highMstar_paper_bounds.tex"
     )
     assert r"\caption{Custom Fit Caption}" in text

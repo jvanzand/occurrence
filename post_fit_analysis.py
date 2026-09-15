@@ -397,8 +397,8 @@ def make_parameter_table(
     Every value is a command reference into
     ``results_dir/paper_items/variables.tex``.
     ``stack_bin`` is zero-based and defaults to the first fitted stack bin.
-    By default, the generated table is saved in ``latex_tables/`` beneath the
-    current working directory.  ``output_file`` overrides that location.
+    By default, the generated table is saved in ``results_dir/paper_items/``.
+    ``output_file`` overrides that location.
     """
     results_dir = Path(results_dir)
     variables_path = results_dir / PAPER_ITEMS_DIRNAME / "variables.tex"
@@ -488,7 +488,7 @@ def make_parameter_table(
 
     if output_file is None:
         filename = f"model_params_{t1}_{t2}_{t3}.tex"
-        output_path = Path.cwd() / "latex_tables" / filename
+        output_path = results_dir / PAPER_ITEMS_DIRNAME / filename
     else:
         output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
