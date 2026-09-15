@@ -33,7 +33,7 @@ def test_make_variables_writes_allstars_statistics(tmp_path):
         tmp_path, ["mtrue"], ["allstars"], ["paper_bounds"],
     )
 
-    assert output == tmp_path / "variables.tex"
+    assert output == tmp_path / "paper_items" / "variables.tex"
     assert output.read_text().splitlines()[4:] == [
         r"\newcommand{\McallstarsNstars}{\ensuremath{123}}",
         r"\newcommand{\McallstarsNeff}{\ensuremath{98.7}}",
@@ -223,7 +223,8 @@ def test_calculate_all_delta_bics_saves_results_for_every_folder(
     }
     assert len(calls) == 2
     saved = json.loads(
-        (tmp_path / post_fit_analysis.DELTA_BIC_FILENAME).read_text()
+        (tmp_path / "paper_items" /
+         post_fit_analysis.DELTA_BIC_FILENAME).read_text()
     )
     assert saved["stack_dim"] == "a"
     assert saved["delta_bic_convention"] == "BIC_flat - BIC_model"
@@ -244,7 +245,9 @@ def test_make_parameter_table_references_variables_commands(
         "McMstarEscarpmentParamBPTwoHighBinaZero",
         "McMstarEscarpmentIntOccHighBinaZero",
     ]
-    (tmp_path / "variables.tex").write_text("\n".join(
+    paper_items = tmp_path / "paper_items"
+    paper_items.mkdir()
+    (paper_items / "variables.tex").write_text("\n".join(
         rf"\newcommand{{\{name}}}{{\ensuremath{{1.0}}}}" for name in commands
     ))
 
