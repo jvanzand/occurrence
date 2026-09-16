@@ -69,8 +69,8 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
     if summary_dict is not None and a_m_lims_pairs is not None:
         a_m_lims_pairs = summary_dict['a_m_lims_pairs']
         print(f"Occurrence-annotated completeness map saved to: {save_path}")
-        ## If only a bins, rotate text for better readability
-        if summary_dict['n_mbins']==1:
+        # Rotate only for a horizontal sequence of multiple SMA bins.
+        if summary_dict['n_mbins'] == 1 and summary_dict['n_abins'] > 1:
             rotation=90
             fontsize=9
         else:

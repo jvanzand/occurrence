@@ -16,6 +16,11 @@ from occurrence import sampling_utils as su
 plt.style.use(os.path.join(os.path.dirname(__file__), 'matplotlibrc'))
   
 
+def _format_subsample_title(title):
+    """Normalize Tier 2 labels for use in Matplotlib plot titles."""
+    return title.replace("$Age", "Age").replace(">=", r" $\geq$ ")
+
+
     
 def _tier1_artifacts_exist(tier1_config, star_df, avg_map_only=False):
     """Return whether all map interpolators required from a Tier 1 run exist."""
@@ -423,7 +428,7 @@ def _run_configuration(configuration):
     }
     title = (
         f"{len(configuration['star_df'])} Stars "
-        f"({configuration['title']})"
+        f"({_format_subsample_title(configuration['title'])})"
     )
     early_plot_paths = {}
     roi_occurrence_future = None

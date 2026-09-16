@@ -8,6 +8,13 @@ from occurrence import main
 from occurrence import run
 
 
+def test_format_subsample_title_uses_geq_without_stray_math_delimiter():
+    assert (
+        run._format_subsample_title("$Age>=5.0 Gyr")
+        == r"Age $\geq$ 5.0 Gyr"
+    )
+
+
 @pytest.mark.parametrize(
     "m_unit, solar_mass",
     [("jupiter", run.su.Ms2Mj), ("earth", run.su.Ms2Me)],
