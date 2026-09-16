@@ -268,3 +268,120 @@ def test_make_parameter_table_references_variables_commands(
         r"Occurrence & \McMstarEscarpmentIntOccHighBinaZero \\" in text
     )
     assert "1.0" not in text
+
+
+def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
+        tmp_path):
+    output = post_fit_analysis.make_appendix_parameter_table(
+        tmp_path,
+        tier1_dirs=["mtrue", "qtrue"],
+        tier2_types=["allstars", "Mstar"],
+        t3="paper_bounds",
+    )
+    text = output.read_text()
+
+    assert output == (
+        tmp_path / "paper_items" /
+        "model_params_appendix_paper_bounds.tex"
+    )
+    assert r"\begin{deluxetable*}{ccccccccccccc}" in text
+    assert r"\multicolumn{4}{c}{Log G Model}" in text
+    assert r"\multicolumn{5}{c}{Sigmoid Model}" in text
+    assert r"\cmidrule(lr){5-8}" in text
+    assert r"\cmidrule(lr){9-13}" in text
+    rows = [line for line in text.splitlines() if line.startswith(("mtrue", "qtrue"))]
+    assert [row.split(" & ")[:2] for row in rows] == [
+        ["mtrue", "allstars"],
+        ["mtrue", "highMstar"],
+        ["mtrue", "lowMstar"],
+        ["qtrue", "allstars"],
+        ["qtrue", "highMstar"],
+        ["qtrue", "lowMstar"],
+    ]
+    assert r"\McallstarsLogGParamABinaZero" in rows[0]
+    assert r"\McallstarsSigmoidParamCenterBinaZero" in rows[0]
+    assert r"\McMstarNeffHighBinAZero" in rows[1]
+    assert r"\McMstarSigmoidDbicLowBinaZero" in rows[2]
+    assert "Escarpment" not in text
+
+
+def test_make_three_parameter_tables_create_both_forms(tmp_path):
+    outputs = post_fit_analysis.make_three_parameter_tables(tmp_path)
+    text = outputs["reordered"].read_text()
+
+    assert outputs["reordered"] == (
+        tmp_path / "paper_items" /
+        "three_parameter_OR_reordered_mtrue_stellar3params.tex"
+    )
+    assert outputs["original"] == (
+        tmp_path / "paper_items" /
+        "three_parameter_OR_mtrue_stellar3params.tex"
+    )
+    assert (
+        r"\tablecaption{Occurrence Rates with Two Stellar Parameters Held Fixed}"
+        in text
+    )
+    assert r"\label{tab:three_param_OR_reordered}" in text
+    lho = post_fit_analysis._three_parameter_command_name(
+        "mtrue", "stellar3params", ("low", "high", "old")
+    )
+    hho = post_fit_analysis._three_parameter_command_name(
+        "mtrue", "stellar3params", ("high", "high", "old")
+    )
+    hhy = post_fit_analysis._three_parameter_command_name(
+        "mtrue", "stellar3params", ("high", "high", "young")
+    )
+    assert rf"high & old & \{lho} & \{hho} \\" in text
+    assert rf"high & high & \{hhy} & \{hho} \\" in text
+    assert text.count(rf"\{hhy}") == 3
+
+    original = outputs["original"].read_text()
+    assert r"\begin{deluxetable*}{lcccccc}" in original
+    assert r"\tablecaption{Occurrence Rates by Stellar Mass, Metallicity, and Age}" in original
+    assert original.index(r"\colhead{$N_{\star}$}") < original.index(
+        r"\colhead{$N_{\mathrm{eff}}$}"
+    ) < original.index(r"\colhead{Completeness}")
+    first_row = next(
+        line for line in original.splitlines() if line.startswith("high")
+    )
+    assert first_row.startswith("high & high & young &")
+    assert first_row.index("Nstars") < first_row.index("Neff") < first_row.index(
+        "AvgCompl"
+    )
+    for statistic in ("Neff", "Nstars", "AvgCompl", "IntOcc"):
+        name = post_fit_analysis._three_parameter_command_name(
+            "mtrue", "stellar3params", ("high", "high", "young"),
+            statistic,
+        )
+        assert rf"\{name}" in first_row
+
+
+def test_make_variables_adds_available_three_parameter_results(
+        tmp_path, monkeypatch, capsys):
+    tier1 = tmp_path / "mtrue"
+    _write_summary(tier1, "allstars", "roi")
+    subset = "highMstarhighFeHhighAct"
+    result_dir = tier1 / subset / "stellar3params"
+    summary_dir = result_dir / "saved_dicts"
+    summary_dir.mkdir(parents=True)
+    (summary_dir / post_fit_analysis.SUMMARY_FILENAME).touch()
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_statistics",
+        lambda path: {
+            "Nstars": "47", "Neff": "4.0", "AvgCompl": "0.64",
+            "IntOcc": r"0.12^{+0.08}_{-0.05}",
+        },
+    )
+
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["allstars"], ["roi"]
+    ).read_text()
+    for statistic in ("Nstars", "Neff", "AvgCompl", "IntOcc"):
+        name = post_fit_analysis._three_parameter_command_name(
+            "mtrue", "stellar3params", ("high", "high", "young"),
+            statistic,
+        )
+        assert rf"\newcommand{{\{name}}}" in text
+    output = capsys.readouterr().out
+    assert "three-parameter occurrence results have not been calculated" in output
+    assert "lowMstarlowFeHlowAct" in output
