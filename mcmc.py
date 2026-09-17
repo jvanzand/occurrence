@@ -652,7 +652,13 @@ def save_model_figures(
             )
             axis.xaxis.set_major_formatter(FuncFormatter(formatter))
             axis.xaxis.set_minor_locator(NullLocator())
-            pu.legend_with_label_last(axis, "Uncorrected")
+            legend_fontsize = (
+                1.7*plt.rcParams["font.size"]
+                if name in {"density", "occurrence"} else None
+            )
+            pu.legend_with_label_last(
+                axis, "Uncorrected", fontsize=legend_fontsize
+            )
         if np.ndim(axes) == 0:
             axes.set_xlabel(x_label)
             axes.set_ylabel(ylabel)

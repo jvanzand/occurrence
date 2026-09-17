@@ -65,7 +65,7 @@ def mass_ratio_tick_formatter(tick_values):
     return format_tick
 
 
-def legend_with_label_last(axis, last_label):
+def legend_with_label_last(axis, last_label, fontsize=None):
     """Draw an axis legend with every occurrence of ``last_label`` last."""
     handles, labels = axis.get_legend_handles_labels()
     ordered = [
@@ -77,6 +77,7 @@ def legend_with_label_last(axis, last_label):
         axis.legend(
             [handles[index] for index in ordered],
             [labels[index] for index in ordered],
+            fontsize=fontsize,
         )
 
 
@@ -648,7 +649,10 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 reference_x, reference_plot_y, color='gray',
                 linestyle='--', linewidth=2, label='Uncorrected',
             )
-            legend_with_label_last(ax, 'Uncorrected')
+            legend_with_label_last(
+                ax, 'Uncorrected',
+                fontsize=1.7*matplotlib.rcParams['font.size'],
+            )
 
         ax.set_xscale('log')
         # Set ticks at bin edges and format
@@ -732,7 +736,10 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                         linestyle='--', linewidth=2,
                         label='Uncorrected',
                     )
-                    legend_with_label_last(ax_i, 'Uncorrected')
+                    legend_with_label_last(
+                        ax_i, 'Uncorrected',
+                        fontsize=1.7*matplotlib.rcParams['font.size'],
+                    )
 
                 ax_i.set_xscale('log')
 
@@ -797,7 +804,10 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                         linestyle='--', linewidth=2,
                         label='Uncorrected',
                     )
-                    legend_with_label_last(ax_i, 'Uncorrected')
+                    legend_with_label_last(
+                        ax_i, 'Uncorrected',
+                        fontsize=1.7*matplotlib.rcParams['font.size'],
+                    )
 
                 ax_i.set_xscale('log')
                 # Show tick marks at bin edges rather than centers
