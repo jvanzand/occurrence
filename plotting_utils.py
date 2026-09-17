@@ -48,10 +48,14 @@ def mass_ratio_tick_formatter(tick_values):
 
     scientific = values[values < 0.01]
     decimal = values[values >= 0.01]
-    scientific_precision = required_precision(scientific, scientific_label)
+    scientific_precision = min(
+        required_precision(scientific, scientific_label) + 1, 15
+    )
     # Two places are the minimum needed to represent the 0.01 notation cutoff
     # without turning a nonzero mass ratio into a label of zero.
-    decimal_precision = required_precision(decimal, decimal_label, minimum=2)
+    decimal_precision = min(
+        required_precision(decimal, decimal_label, minimum=2) + 1, 15
+    )
 
     def format_tick(value, position=None):
         if value < 0.01:

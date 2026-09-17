@@ -490,6 +490,14 @@ def test_mass_ratio_tick_formatter_selects_notation_and_distinct_precision():
         "0.01", "0.1",
     ]
 
+    extra_precision_ticks = [0.001214, 0.001224, 0.1214, 0.1224]
+    extra_precision_formatter = plotting_utils.mass_ratio_tick_formatter(
+        extra_precision_ticks
+    )
+    assert [extra_precision_formatter(value) for value in extra_precision_ticks] == [
+        "1.214e-3", "1.224e-3", "0.1214", "0.1224",
+    ]
+
 
 def test_saved_mass_ratio_model_figure_retains_compact_tick_formatter(tmp_path):
     import matplotlib.pyplot as plt
