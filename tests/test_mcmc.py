@@ -473,3 +473,37 @@ def test_combined_figures_are_finalized_once_with_user_ticks(tmp_path, monkeypat
     assert len(calls) == 1
     np.testing.assert_allclose(axis.get_xticks(), edges)
     assert (tmp_path / "occurrence_CDF.png").exists()
+
+
+def test_mass_ratio_tick_formatter_selects_notation_and_distinct_precision():
+    from occurrence import plotting_utils
+
+    ticks = [0.00121, 0.00122, 0.00123, 0.121, 0.122, 0.123]
+    formatter = plotting_utils.mass_ratio_tick_formatter(ticks)
+
+    assert [formatter(value) for value in ticks] == [
+        "1.21e-3", "1.22e-3", "1.23e-3",
+        "0.121", "0.122", "0.123",
+    ]
+    threshold_formatter = plotting_utils.mass_ratio_tick_formatter([0.01, 0.1])
+    assert [threshold_formatter(value) for value in [0.01, 0.1]] == [
+        "0.01", "0.1",
+    ]
+
+
+def test_saved_mass_ratio_model_figure_retains_compact_tick_formatter(tmp_path):
+    import matplotlib.pyplot as plt
+
+    edges = [0.00121, 0.00122, 0.00123, 0.121, 0.122, 0.123]
+    figure, axis = plt.subplots()
+    axis.plot(edges, np.arange(len(edges)), label="model")
+    mcmc.save_model_figures(
+        {"density": (figure, axis)}, tmp_path, "a", edges, "test",
+        mtype="qtrue",
+    )
+
+    labels = [axis.xaxis.get_major_formatter()(value) for value in edges]
+    assert labels == [
+        "1.21e-3", "1.22e-3", "1.23e-3",
+        "0.121", "0.122", "0.123",
+    ]

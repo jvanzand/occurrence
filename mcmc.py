@@ -604,10 +604,11 @@ def add_smooth_model_to_figures(
 
 def save_model_figures(
         figures, output_dir, stack_dim, model_edges, title,
-        m_unit="earth"):
+        m_unit="earth", mtype="mtrue"):
     """Format and save completed direct-model figures exactly once."""
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
+    from occurrence import plotting_utils as pu
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -644,9 +645,12 @@ def save_model_figures(
                 10**(log_edges[-1] + padding),
             )
             axis.xaxis.set_major_locator(FixedLocator(model_edges))
-            axis.xaxis.set_major_formatter(
-                FuncFormatter(lambda value, position: f"{value:g}")
+            formatter = (
+                pu.mass_ratio_tick_formatter(model_edges)
+                if coordinate == "mass" and mtype in {"qtrue", "qsini"}
+                else lambda value, position: f"{value:g}"
             )
+            axis.xaxis.set_major_formatter(FuncFormatter(formatter))
             axis.xaxis.set_minor_locator(NullLocator())
             axis.legend()
         if np.ndim(axes) == 0:

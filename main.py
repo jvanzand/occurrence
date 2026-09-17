@@ -423,6 +423,7 @@ def plot_smooth(
         figures=figures, output_dir=os.path.join(base_dir, 'plots'),
         stack_dim=stack_dim, model_edges=model_edges, title=title,
         m_unit=m_unit,
+        mtype=os.path.basename(os.path.normpath(tier1_dir)),
     ))
     return paths
 
@@ -478,6 +479,7 @@ def plot_models(
     base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
     base_figures = {}
     model_edges = m_edges if stack_dim == 'a' else a_edges
+    mtype = os.path.basename(os.path.normpath(tier1_dir))
     paths = {}
     if 'piecewise' in selected:
         fit_path = os.path.join(
@@ -492,7 +494,6 @@ def plot_models(
         summary = mcmc.summarize_piecewise_file(
             fit_path, piecewise_chain, nstars, save_path=summary_path
         )
-        mtype = os.path.basename(os.path.normpath(tier1_dir))
         if plot_density:
             base_figures['density'] = pu.plot_occurrence_hist(
                 summary, stack_dim=stack_dim, m_unit=m_unit, mtype=mtype,
@@ -543,6 +544,6 @@ def plot_models(
     paths['combined'] = mcmc.save_model_figures(
         figures=base_figures, output_dir=os.path.join(base_dir, 'plots'),
         stack_dim=stack_dim, model_edges=model_edges, title=title,
-        m_unit=m_unit,
+        m_unit=m_unit, mtype=mtype,
     )
     return paths

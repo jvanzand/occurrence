@@ -724,16 +724,18 @@ def make_three_parameter_tables(
             "Occurrence Rates by Stellar Mass, Metallicity, and Age"
         ),
         original_label="tab:three_param_OR",
-        reordered_output_file=None, original_output_file=None):
+        reordered_output_file=None, original_output_file=None,
+        use_latex_variables=True):
     """Create reordered and legacy-form tables for three stellar parameters.
 
     The eight subsets vary stellar mass, metallicity, and activity.  Following
     the legacy convention, high activity is labeled ``young`` and low activity
     is labeled ``old``.  Each occurrence rate appears in all three comparison
     blocks so one parameter can be compared while the other two are fixed.
-    Cells in both tables reference the same command names that
-    :func:`make_variables` emits, but this function does not require or inspect
-    ``variables.tex``.
+    By default, cells in both tables reference the same command names that
+    :func:`make_variables` emits, without requiring or inspecting
+    ``variables.tex``.  Set ``use_latex_variables=False`` to read the saved
+    results and write numerical values directly into both tables instead.
     """
     results_dir = Path(results_dir)
     if tier2_dirs is None:
@@ -743,20 +745,32 @@ def make_three_parameter_tables(
     if len(tier2_dirs) != 8:
         raise ValueError("tier2_dirs must contain the eight stellar subsets")
 
-    occurrence = {}
+    if not isinstance(use_latex_variables, (bool, np.bool_)):
+        raise TypeError("use_latex_variables must be a boolean")
+
+    table_values = {}
     for tier2_dir in tier2_dirs:
         levels = _three_parameter_levels(tier2_dir)
-        if levels in occurrence:
+        if levels in table_values:
             raise ValueError(f"duplicate three-parameter subset: {levels}")
-        occurrence[levels] = _three_parameter_command_name(t1, t3, levels)
+        if use_latex_variables:
+            table_values[levels] = {
+                statistic: rf"\{_three_parameter_command_name(t1, t3, levels, statistic)}"
+                for statistic in ("Nstars", "Neff", "AvgCompl", "IntOcc")
+            }
+        else:
+            result_dir = results_dir / t1 / tier2_dir / t3
+            statistics = _three_parameter_statistics(result_dir)
+            table_values[levels] = dict(statistics)
+            table_values[levels]["IntOcc"] = f"${statistics['IntOcc']}$"
     expected = {
         (mass, metallicity, age)
         for mass in ("high", "low")
         for metallicity in ("high", "low")
         for age in ("young", "old")
     }
-    if set(occurrence) != expected:
-        missing = sorted(expected - set(occurrence))
+    if set(table_values) != expected:
+        missing = sorted(expected - set(table_values))
         raise ValueError(f"three-parameter subsets are incomplete; missing {missing}")
 
     lines = [
@@ -780,7 +794,7 @@ def make_three_parameter_tables(
         lines.append(r"\hline")
         for first, second, low_value, high_value in rows:
             lines.append(
-                rf"{first} & {second} & \{low_value} & \{high_value} \\"
+                rf"{first} & {second} & {low_value} & {high_value} \\"
             )
         lines.append(r"\hline")
 
@@ -788,8 +802,8 @@ def make_three_parameter_tables(
         "[Fe/H]", "Age", "Low Mass OR", "High Mass OR",
         [
             (metallicity, age,
-             occurrence[("low", metallicity, age)],
-             occurrence[("high", metallicity, age)])
+             table_values[("low", metallicity, age)]["IntOcc"],
+             table_values[("high", metallicity, age)]["IntOcc"])
             for metallicity in ("high", "low")
             for age in ("old", "young")
         ],
@@ -798,8 +812,8 @@ def make_three_parameter_tables(
         "Mass", "Age", "Low [Fe/H] OR", "High [Fe/H] OR",
         [
             (mass, age,
-             occurrence[(mass, "low", age)],
-             occurrence[(mass, "high", age)])
+             table_values[(mass, "low", age)]["IntOcc"],
+             table_values[(mass, "high", age)]["IntOcc"])
             for mass in ("high", "low")
             for age in ("old", "young")
         ],
@@ -808,8 +822,8 @@ def make_three_parameter_tables(
         "Mass", "[Fe/H]", "Young OR", "Old OR",
         [
             (mass, metallicity,
-             occurrence[(mass, metallicity, "young")],
-             occurrence[(mass, metallicity, "old")])
+             table_values[(mass, metallicity, "young")]["IntOcc"],
+             table_values[(mass, metallicity, "old")]["IntOcc"])
             for mass in ("high", "low")
             for metallicity in ("high", "low")
         ],
@@ -849,16 +863,11 @@ def make_three_parameter_tables(
     for tier2_dir in tier2_dirs:
         levels = _three_parameter_levels(tier2_dir)
         mass, metallicity, age = levels
-        names = {
-            statistic: _three_parameter_command_name(
-                t1, t3, levels, statistic
-            )
-            for statistic in ("Neff", "Nstars", "AvgCompl", "IntOcc")
-        }
+        values = table_values[levels]
         original_lines.append(
             f"{mass} & {metallicity} & {age} & "
-            f"\\{names['Nstars']} & \\{names['Neff']} & "
-            f"\\{names['AvgCompl']} & \\{names['IntOcc']} " + r"\\"
+            f"{values['Nstars']} & {values['Neff']} & "
+            f"{values['AvgCompl']} & {values['IntOcc']} " + r"\\"
         )
     original_lines.extend([
         r"\enddata",

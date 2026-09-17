@@ -12,6 +12,55 @@ from pathlib import Path
 import itertools as itt
 
 
+def mass_ratio_tick_formatter(tick_values):
+    """Return a compact formatter that keeps mass-ratio ticks distinct.
+
+    Values below 0.01 use scientific notation; all others use decimal
+    notation.  The precision of each notation is increased only until the
+    tick labels in that group are unique.
+    """
+    values = np.asarray(tick_values, dtype=float).reshape(-1)
+    if values.size == 0 or not np.isfinite(values).all():
+        raise ValueError("mass-ratio tick values must be nonempty and finite")
+
+    def decimal_label(value, precision):
+        label = f"{value:.{precision}f}"
+        if "." in label:
+            label = label.rstrip("0").rstrip(".")
+        return "0" if label in {"-0", ""} else label
+
+    def scientific_label(value, precision):
+        if value == 0:
+            return "0"
+        mantissa, exponent = f"{value:.{precision}e}".split("e")
+        mantissa = mantissa.rstrip("0").rstrip(".")
+        return f"{mantissa}e{int(exponent)}"
+
+    def required_precision(group, label_function, minimum=0):
+        unique = np.unique(group)
+        if unique.size < 2:
+            return minimum
+        for precision in range(minimum, 16):
+            labels = [label_function(value, precision) for value in unique]
+            if len(set(labels)) == len(labels):
+                return precision
+        raise ValueError("mass-ratio ticks cannot be distinguished")
+
+    scientific = values[values < 0.01]
+    decimal = values[values >= 0.01]
+    scientific_precision = required_precision(scientific, scientific_label)
+    # Two places are the minimum needed to represent the 0.01 notation cutoff
+    # without turning a nonzero mass ratio into a label of zero.
+    decimal_precision = required_precision(decimal, decimal_label, minimum=2)
+
+    def format_tick(value, position=None):
+        if value < 0.01:
+            return scientific_label(value, scientific_precision)
+        return decimal_label(value, decimal_precision)
+
+    return format_tick
+
+
 def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True, 
                          a_m_lims_pairs=None, summary_dict=None,
                          zoom=False,
@@ -559,7 +608,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         ax.set_xscale('log')
         # Set ticks at bin edges and format
         tick_label_fmt_fn = int_or_one_decimal if mtype in ['mtrue', 'msini'] \
-                       else sci_no_leading_zero if mtype in ['qtrue', 'qsini'] \
+                       else mass_ratio_tick_formatter(x_edges) if mtype in ['qtrue', 'qsini'] \
                        else None
 
         ax.xaxis.set_major_locator(FixedLocator(x_edges))
@@ -684,7 +733,11 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 ax_i.set_xscale('log')
                 # Show tick marks at bin edges rather than centers
                 ax_i.xaxis.set_major_locator(FixedLocator(x_edges))
-                ax_i.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+                tick_label_fmt_fn = (
+                    mass_ratio_tick_formatter(x_edges)
+                    if mtype in ['qtrue', 'qsini'] else int_or_one_decimal
+                )
+                ax_i.xaxis.set_major_formatter(FuncFormatter(tick_label_fmt_fn))
                 ax_i.xaxis.set_minor_locator(NullLocator())
                 #ax_i.yaxis.set_minor_locator(NullLocator())
                 ax_i.tick_params(axis='both', which='major', labelsize=tick_size)
@@ -701,11 +754,6 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 
             
             
-            # Set ticks at bin edges and format
-            tick_label_fmt_fn = int_or_one_decimal if mtype in ['mtrue', 'msini'] \
-                       else sci_no_leading_zero if mtype in ['qtrue', 'qsini'] \
-                       else None
-        
         if mtype in ['qtrue', 'qsini']:
             plt.setp(ax[0].get_xticklabels(), rotation=90, ha='left')
 

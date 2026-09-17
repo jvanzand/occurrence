@@ -356,6 +356,35 @@ def test_make_three_parameter_tables_create_both_forms(tmp_path):
         assert rf"\{name}" in first_row
 
 
+def test_make_three_parameter_tables_can_embed_numerical_values(
+        tmp_path, monkeypatch):
+    values = {
+        "Nstars": "47",
+        "Neff": "4.0",
+        "AvgCompl": "0.64",
+        "IntOcc": r"0.12^{+0.08}_{-0.05}",
+    }
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_statistics",
+        lambda result_dir: values,
+    )
+
+    outputs = post_fit_analysis.make_three_parameter_tables(
+        tmp_path, use_latex_variables=False
+    )
+    reordered = outputs["reordered"].read_text()
+    original = outputs["original"].read_text()
+
+    formatted_occurrence = r"$0.12^{+0.08}_{-0.05}$"
+    assert formatted_occurrence in reordered
+    assert reordered.count(formatted_occurrence) == 24
+    assert (
+        "high & high & young & 47 & 4.0 & 0.64 & "
+        + formatted_occurrence
+    ) in original
+    assert r"\McHighMstarHighFeHYoungIntOcc" not in reordered
+
+
 def test_make_variables_adds_available_three_parameter_results(
         tmp_path, monkeypatch, capsys):
     tier1 = tmp_path / "mtrue"
