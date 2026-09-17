@@ -646,9 +646,9 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
             reference_x, reference_plot_y = make_bar_vals(x_pairs, reference_y)
             ax.plot(
                 reference_x, reference_plot_y, color='gray',
-                linestyle='--', linewidth=2, label='Uncorrected Rate',
+                linestyle='--', linewidth=2, label='Uncorrected',
             )
-            legend_with_label_last(ax, 'Uncorrected Rate')
+            legend_with_label_last(ax, 'Uncorrected')
 
         ax.set_xscale('log')
         # Set ticks at bin edges and format
@@ -730,9 +730,9 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                     ax_i.plot(
                         reference_x, reference_y, color='gray',
                         linestyle='--', linewidth=2,
-                        label='Uncorrected Rate',
+                        label='Uncorrected',
                     )
-                    legend_with_label_last(ax_i, 'Uncorrected Rate')
+                    legend_with_label_last(ax_i, 'Uncorrected')
 
                 ax_i.set_xscale('log')
 
@@ -795,9 +795,9 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                     ax_i.plot(
                         reference_x, reference_y, color='gray',
                         linestyle='--', linewidth=2,
-                        label='Uncorrected Rate',
+                        label='Uncorrected',
                     )
-                    legend_with_label_last(ax_i, 'Uncorrected Rate')
+                    legend_with_label_last(ax_i, 'Uncorrected')
 
                 ax_i.set_xscale('log')
                 # Show tick marks at bin edges rather than centers

@@ -652,7 +652,7 @@ def save_model_figures(
             )
             axis.xaxis.set_major_formatter(FuncFormatter(formatter))
             axis.xaxis.set_minor_locator(NullLocator())
-            pu.legend_with_label_last(axis, "Uncorrected Rate")
+            pu.legend_with_label_last(axis, "Uncorrected")
         if np.ndim(axes) == 0:
             axes.set_xlabel(x_label)
             axes.set_ylabel(ylabel)
@@ -698,7 +698,7 @@ def add_uncorrected_mle_to_figures(
             plot_x, plot_y = pu.make_bar_vals(x_pairs, row)
             axis.plot(
                 plot_x, plot_y, color="gray", linestyle="--",
-                linewidth=2, label="Uncorrected Rate",
+                linewidth=2, label="Uncorrected",
             )
 
 

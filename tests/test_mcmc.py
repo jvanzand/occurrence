@@ -553,12 +553,12 @@ def test_saved_model_figure_places_uncorrected_rate_last_in_legend(tmp_path):
     import matplotlib.pyplot as plt
 
     figure, axis = plt.subplots()
-    axis.plot([1.0, 2.0], [0.1, 0.2], label="Uncorrected Rate")
+    axis.plot([1.0, 2.0], [0.1, 0.2], label="Uncorrected")
     axis.plot([1.0, 2.0], [0.2, 0.3], label="sigmoid")
     mcmc.save_model_figures(
         {"density": (figure, axis)}, tmp_path, "a", [1.0, 2.0], "test"
     )
 
     assert [text.get_text() for text in axis.get_legend().get_texts()] == [
-        "sigmoid", "Uncorrected Rate",
+        "sigmoid", "Uncorrected",
     ]
