@@ -103,20 +103,34 @@ def test_piecewise_plotting_produces_all_requested_outputs(tmp_path, monkeypatch
         plotting_utils, "plot_occurrence_hist",
         lambda **kwargs: calls.append(kwargs["rate_type"]),
     )
+    corner_calls = []
     monkeypatch.setattr(
         plotting_utils, "plot_corner_from_file",
-        lambda **kwargs: calls.append("corner"),
+        lambda **kwargs: corner_calls.append(kwargs),
+    )
+    chain_path = tmp_path / "chains.npz"
+    np.savez(
+        chain_path,
+        flat_chains=np.array([[0.2], [0.3]]),
+        flat_log_probs=np.array([-1.0, 0.0]),
+        cell_areas=np.array([2.0]),
     )
     paths = mcmc.plot_piecewise_results(
         fit_path="materials.npz",
-        chain_path="chains.npz",
+        chain_path=chain_path,
         output_dir=tmp_path / "plots",
         nstars=10,
         stack_dim="a",
         m_unit="jupiter",
     )
-    assert calls == ["OR", "ORD", "corner"]
-    assert set(paths) == {"summary", "occurrence", "density", "corner"}
+    assert calls == ["OR", "ORD"]
+    assert len(corner_calls) == 2
+    assert "parameter_scale" not in corner_calls[0]
+    np.testing.assert_array_equal(corner_calls[1]["parameter_scale"], [2.0])
+    assert corner_calls[1]["outpath"].endswith("corner_piecewise_OR.png")
+    assert set(paths) == {
+        "summary", "occurrence", "density", "corner", "corner_occurrence"
+    }
 
 
 def test_piecewise_plotting_loads_catalog_and_completeness_inputs(

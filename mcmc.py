@@ -935,6 +935,7 @@ def plot_piecewise_results(
     or_path = output_dir / "occurrence_OR_models.png"
     ord_path = output_dir / "occurrence_ORD.png"
     corner_path = output_dir / "corner_piecewise.png"
+    occurrence_corner_path = output_dir / "corner_piecewise_OR.png"
     common = dict(
         summary_dict=summary, stack_dim=stack_dim, m_unit=m_unit,
         mtype=mtype, title=title,
@@ -951,13 +952,12 @@ def plot_piecewise_results(
         )
         paths["density"] = str(ord_path)
     if plot_corner:
-        maximum_likelihood = None
-        if Path(chain_path).is_file():
-            with np.load(chain_path) as chain_data:
-                flat_chains = np.asarray(chain_data["flat_chains"])
-                maximum_likelihood = flat_chains[
-                    np.argmax(np.asarray(chain_data["flat_log_probs"]))
-                ]
+        with np.load(chain_path) as chain_data:
+            flat_chains = np.asarray(chain_data["flat_chains"])
+            maximum_likelihood = flat_chains[
+                np.argmax(np.asarray(chain_data["flat_log_probs"]))
+            ]
+            cell_areas = np.asarray(chain_data["cell_areas"], dtype=float)
         pu.plot_corner_from_file(
             path_to_chains=chain_path,
             param_names=[
@@ -970,6 +970,19 @@ def plot_piecewise_results(
             reference_values=maximum_likelihood,
         )
         paths["corner"] = str(corner_path)
+        pu.plot_corner_from_file(
+            path_to_chains=chain_path,
+            param_names=[
+                rf"$\mathrm{{OR}}_{{{index}}}$"
+                for index in range(len(summary["mode_ORD"]))
+            ],
+            outpath=str(occurrence_corner_path),
+            thin=10,
+            max_samples=50000,
+            reference_values=maximum_likelihood,
+            parameter_scale=cell_areas,
+        )
+        paths["corner_occurrence"] = str(occurrence_corner_path)
     if plot_catalog_roi or plot_roi_occurrence:
         if tier1_dir is None or tier2_dir is None:
             raise ValueError(

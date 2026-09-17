@@ -400,7 +400,8 @@ def plot_corner_from_file(
     thin=10,
     max_samples=50000,
     reference_values=None,
-    reference_color=None):
+    reference_color=None,
+    parameter_scale=None):
     """
     Load direct-fit MCMC chains from an NPZ file and generate a corner plot.
     Handles piecewise and registered parametric models.
@@ -413,6 +414,9 @@ def plot_corner_from_file(
         param_names (list of str): Labels for parameters (if None, auto-generate based on model)
         thin (int): Thinning factor
         max_samples (int): Max number of samples to plot
+        parameter_scale (array-like): Optional factor applied independently to
+            every parameter.  This is used to convert piecewise densities to
+            per-bin occurrence rates.
     """
 
     data = np.load(path_to_chains)
@@ -433,6 +437,15 @@ def plot_corner_from_file(
         samples = samples[inds]
 
     ndim = samples.shape[1]
+    if parameter_scale is not None:
+        parameter_scale = np.asarray(parameter_scale, dtype=float)
+        if parameter_scale.shape != (ndim,):
+            raise ValueError("parameter_scale must contain one value per parameter")
+        if not np.isfinite(parameter_scale).all():
+            raise ValueError("parameter_scale must be finite")
+        samples = samples*parameter_scale
+        if reference_values is not None:
+            reference_values = np.asarray(reference_values, dtype=float)*parameter_scale
     model_spec = None
     if model_name is not None:
         from occurrence import mcmc_powerlaw
