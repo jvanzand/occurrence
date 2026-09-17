@@ -188,6 +188,7 @@ def run_multiple(
         plot_corner=True,
         plot_catalog_roi=False,
         plot_roi_occurrence=False,
+        plot_uncorrected_occurrence_mle=False,
         completeness_type="single",
         integration_resolution=(100, 100),
         use_average_completeness=True,
@@ -318,6 +319,9 @@ def run_multiple(
                     "plot_corner": plot_corner,
                     "plot_catalog_roi": plot_catalog_roi,
                     "plot_roi_occurrence": plot_roi_occurrence,
+                    "plot_uncorrected_occurrence_mle": (
+                        plot_uncorrected_occurrence_mle
+                    ),
                     "completeness_type": completeness_type,
                     "integration_resolution": integration_resolution,
                     "use_average_completeness": use_average_completeness,
@@ -596,6 +600,9 @@ def _run_configuration(configuration):
                 configuration["plot_roi_occurrence"] and
                 "roi_occurrence" not in early_plot_paths
             ),
+            plot_uncorrected_occurrence_mle=configuration[
+                "plot_uncorrected_occurrence_mle"
+            ],
             model_plot_style=configuration["model_plot_style"],
             n_posterior_draws=configuration["n_posterior_draws"],
             plot_random_seed=configuration["plot_random_seed"],

@@ -65,6 +65,21 @@ def mass_ratio_tick_formatter(tick_values):
     return format_tick
 
 
+def legend_with_label_last(axis, last_label):
+    """Draw an axis legend with every occurrence of ``last_label`` last."""
+    handles, labels = axis.get_legend_handles_labels()
+    ordered = [
+        index for index, label in enumerate(labels) if label != last_label
+    ] + [
+        index for index, label in enumerate(labels) if label == last_label
+    ]
+    if ordered:
+        axis.legend(
+            [handles[index] for index in ordered],
+            [labels[index] for index in ordered],
+        )
+
+
 def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True, 
                          a_m_lims_pairs=None, summary_dict=None,
                          zoom=False,
@@ -499,7 +514,8 @@ def plot_corner_from_file(
 
 def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                          rate_type='OR', title='', return_fig_ax=False,
-                         savepath='occurrence.png', figsize=(6, 4)):
+                         savepath='occurrence.png', figsize=(6, 4),
+                         plot_uncorrected_occurrence_mle=False):
     """
     Plot occurrence histograms and save to file.
 
@@ -622,6 +638,18 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         # Scatter a black circle at the mode for each bin
         ax.scatter(centers, y, color='k', s=36, zorder=105)
 
+        if plot_uncorrected_occurrence_mle:
+            reference = np.asarray(
+                summary_dict[f'uncorrected_mle_{rate_type}']
+            ).reshape(n_m, n_a)
+            reference_y = reference[0] if n_a > 1 else reference[:, 0]
+            reference_x, reference_plot_y = make_bar_vals(x_pairs, reference_y)
+            ax.plot(
+                reference_x, reference_plot_y, color='gray',
+                linestyle='--', linewidth=2, label='Uncorrected Rate',
+            )
+            legend_with_label_last(ax, 'Uncorrected Rate')
+
         ax.set_xscale('log')
         # Set ticks at bin edges and format
         tick_label_fmt_fn = int_or_one_decimal if mtype in ['mtrue', 'msini'] \
@@ -694,6 +722,18 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 # Scatter a black circle at the mode for each bin
                 ax_i.scatter(centers_local, y, color='k', s=36, zorder=105)
 
+                if plot_uncorrected_occurrence_mle:
+                    reference = np.asarray(
+                        summary_dict[f'uncorrected_mle_{rate_type}']
+                    ).reshape(n_m, n_a)[i]
+                    reference_x, reference_y = make_bar_vals(x_pairs, reference)
+                    ax_i.plot(
+                        reference_x, reference_y, color='gray',
+                        linestyle='--', linewidth=2,
+                        label='Uncorrected Rate',
+                    )
+                    legend_with_label_last(ax_i, 'Uncorrected Rate')
+
                 ax_i.set_xscale('log')
 
                 # Add right-side vertical label showing mass range for this subplot
@@ -746,6 +786,18 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 centers_local = np.sqrt(x_edges[:-1] * x_edges[1:])
                 ax_i.errorbar(centers_local, y, yerr=err, fmt='none', ecolor='k', elinewidth=2.0, capsize=4)
                 ax_i.scatter(centers_local, y, color='k', s=36, zorder=105)
+
+                if plot_uncorrected_occurrence_mle:
+                    reference = np.asarray(
+                        summary_dict[f'uncorrected_mle_{rate_type}']
+                    ).reshape(n_m, n_a)[:, i]
+                    reference_x, reference_y = make_bar_vals(x_pairs, reference)
+                    ax_i.plot(
+                        reference_x, reference_y, color='gray',
+                        linestyle='--', linewidth=2,
+                        label='Uncorrected Rate',
+                    )
+                    legend_with_label_last(ax_i, 'Uncorrected Rate')
 
                 ax_i.set_xscale('log')
                 # Show tick marks at bin edges rather than centers

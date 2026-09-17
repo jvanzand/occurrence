@@ -332,7 +332,8 @@ def plot_piecewise(
         plot_density=True,
         plot_corner=True,
         plot_catalog_roi=False,
-        plot_roi_occurrence=False):
+        plot_roi_occurrence=False,
+        plot_uncorrected_occurrence_mle=False):
     """Load and plot a saved direct piecewise-constant fit."""
     base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
     if mtype is None:
@@ -355,6 +356,7 @@ def plot_piecewise(
         plot_corner=plot_corner,
         plot_catalog_roi=plot_catalog_roi,
         plot_roi_occurrence=plot_roi_occurrence,
+        plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
         tier1_dir=tier1_dir,
         tier2_dir=tier2_dir,
     )
@@ -376,7 +378,9 @@ def plot_smooth(
         plot_corner=True,
         model_plot_style='credible',
         n_posterior_draws=100,
-        plot_random_seed=None):
+        plot_random_seed=None,
+        plot_uncorrected_occurrence_mle=False,
+        nstars=None):
     """Load, plot, and save one smooth direct model."""
     import matplotlib.pyplot as plt
 
@@ -419,6 +423,11 @@ def plot_smooth(
         plot_random_seed=plot_random_seed,
         model_edges=model_edges,
     )
+    if plot_uncorrected_occurrence_mle:
+        mcmc.add_uncorrected_mle_to_figures(
+            figures, os.path.join(base_dir, 'saved_dicts', 'fit_data.npz'),
+            a_edges, m_edges, nstars, stack_dim,
+        )
     paths.update(mcmc.save_model_figures(
         figures=figures, output_dir=os.path.join(base_dir, 'plots'),
         stack_dim=stack_dim, model_edges=model_edges, title=title,
@@ -447,7 +456,8 @@ def plot_models(
         plot_roi_occurrence=False,
         model_plot_style='credible',
         n_posterior_draws=100,
-        plot_random_seed=None):
+        plot_random_seed=None,
+        plot_uncorrected_occurrence_mle=False):
     """Plot selected direct models together while retaining separate corners."""
     selected = list(plot_models)
     supported = {'piecewise', 'logG', 'escarpment', 'sigmoid', 'bpl'}
@@ -462,6 +472,7 @@ def plot_models(
             plot_density=plot_density, plot_corner=plot_corner,
             plot_catalog_roi=plot_catalog_roi,
             plot_roi_occurrence=plot_roi_occurrence,
+            plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
         )
     if len(selected) == 1 and selected[0] != 'piecewise':
         return plot_smooth(
@@ -475,6 +486,8 @@ def plot_models(
             model_plot_style=model_plot_style,
             n_posterior_draws=n_posterior_draws,
             plot_random_seed=plot_random_seed,
+            plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
+            nstars=nstars,
         )
     base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
     base_figures = {}
@@ -499,6 +512,11 @@ def plot_models(
                 summary, stack_dim=stack_dim, m_unit=m_unit, mtype=mtype,
                 rate_type='ORD', title=title, return_fig_ax=True,
             )
+        if plot_occurrence:
+            base_figures['occurrence'] = pu.plot_occurrence_hist(
+                summary, stack_dim=stack_dim, m_unit=m_unit, mtype=mtype,
+                rate_type='OR', title=title, return_fig_ax=True,
+            )
         if plot_cumulative:
             base_figures['cumulative'] = mcmc.piecewise_cumulative_figure(
                 piecewise_chain, stack_dim=stack_dim, title=title, m_unit=m_unit,
@@ -516,6 +534,8 @@ def plot_models(
         import matplotlib.pyplot as plt
         if plot_density:
             base_figures['density'] = plt.subplots(figsize=(6, 4))
+        if plot_occurrence:
+            base_figures['occurrence'] = plt.subplots(figsize=(6, 4))
         if plot_cumulative:
             base_figures['cumulative'] = plt.subplots(figsize=(6, 4))
     for model_name in [name for name in selected if name != 'piecewise']:
@@ -540,6 +560,12 @@ def plot_models(
             n_posterior_draws=n_posterior_draws,
             plot_random_seed=plot_random_seed,
             model_edges=model_edges,
+        )
+    if plot_uncorrected_occurrence_mle:
+        mcmc.add_uncorrected_mle_to_figures(
+            base_figures,
+            os.path.join(base_dir, 'saved_dicts', 'fit_data.npz'),
+            a_edges, m_edges, nstars, stack_dim,
         )
     paths['combined'] = mcmc.save_model_figures(
         figures=base_figures, output_dir=os.path.join(base_dir, 'plots'),

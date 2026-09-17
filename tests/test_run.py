@@ -84,6 +84,7 @@ def test_run_multiple_applies_tier2_cuts_and_plot_controls(
         plot_corner=True,
         plot_catalog_roi=True,
         plot_roi_occurrence=True,
+        plot_uncorrected_occurrence_mle=True,
     )
 
     assert [result["nstars"] for result in results] == [3, 2]
@@ -93,6 +94,10 @@ def test_run_multiple_applies_tier2_cuts_and_plot_controls(
     assert all(call["plot_density"] is False for call in plot_calls)
     assert all(call["plot_catalog_roi"] is True for call in plot_calls)
     assert all(call["plot_roi_occurrence"] is True for call in plot_calls)
+    assert all(
+        call["plot_uncorrected_occurrence_mle"] is True
+        for call in plot_calls
+    )
 
 
 def test_run_multiple_prepares_missing_tier2(tmp_path, monkeypatch):

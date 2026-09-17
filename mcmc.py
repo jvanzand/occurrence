@@ -652,7 +652,7 @@ def save_model_figures(
             )
             axis.xaxis.set_major_formatter(FuncFormatter(formatter))
             axis.xaxis.set_minor_locator(NullLocator())
-            axis.legend()
+            pu.legend_with_label_last(axis, "Uncorrected Rate")
         if np.ndim(axes) == 0:
             axes.set_xlabel(x_label)
             axes.set_ylabel(ylabel)
@@ -663,6 +663,43 @@ def save_model_figures(
         plt.close(figure)
         paths[name] = str(path)
     return paths
+
+
+def add_uncorrected_mle_to_figures(
+        figures, fit_path, a_edges, m_edges, nstars, stack_dim):
+    """Overlay completeness-uncorrected Poisson MLE histograms."""
+    from occurrence import plotting_utils as pu
+
+    if nstars is None or nstars <= 0:
+        raise ValueError("nstars must be positive for an uncorrected MLE")
+    companions, exposure = dfu.load_fit_data(fit_path)
+    cache = dl.build_piecewise_cache(companions, exposure, a_edges, m_edges)
+    n_a = len(a_edges) - 1
+    n_m = len(m_edges) - 1
+    occurrence = (cache.effective_counts/nstars).reshape(n_m, n_a)
+    density = occurrence/cache.cell_areas.reshape(n_m, n_a)
+    if stack_dim == "a":
+        model_edges = np.asarray(m_edges)
+        occurrence = occurrence.T
+        density = density.T
+    elif stack_dim == "m":
+        model_edges = np.asarray(a_edges)
+    else:
+        raise ValueError("stack_dim must be 'a' or 'm'")
+
+    x_pairs = np.column_stack((model_edges[:-1], model_edges[1:]))
+    for figure_name, values in (
+            ("occurrence", occurrence), ("density", density)):
+        if figure_name not in figures:
+            continue
+        axes = figures[figure_name][1]
+        for index, row in enumerate(values):
+            axis = _axis_for_stack(axes, index)
+            plot_x, plot_y = pu.make_bar_vals(x_pairs, row)
+            axis.plot(
+                plot_x, plot_y, color="gray", linestyle="--",
+                linewidth=2, label="Uncorrected Rate",
+            )
 
 
 def _plot_credible_curves(axis, x_values, curves, label, color=None):
@@ -917,6 +954,7 @@ def plot_piecewise_results(
         plot_corner=True,
         plot_catalog_roi=False,
         plot_roi_occurrence=False,
+        plot_uncorrected_occurrence_mle=False,
         tier1_dir=None,
         tier2_dir=None,
         summary=None):
@@ -943,12 +981,14 @@ def plot_piecewise_results(
     paths = {"summary": str(summary_path)}
     if plot_occurrence:
         pu.plot_occurrence_hist(
-            **common, rate_type="OR", savepath=str(or_path)
+            **common, rate_type="OR", savepath=str(or_path),
+            plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
         )
         paths["occurrence"] = str(or_path)
     if plot_density:
         pu.plot_occurrence_hist(
-            **common, rate_type="ORD", savepath=str(ord_path)
+            **common, rate_type="ORD", savepath=str(ord_path),
+            plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
         )
         paths["density"] = str(ord_path)
     if plot_corner:
@@ -1021,6 +1061,7 @@ def _piecewise_metadata(cache, a_edges, m_edges, nstars):
         for a in range(len(a_edges) - 1)
     ])
     total_area = np.sum(cache.cell_areas)
+    uncorrected_or = cache.effective_counts/nstars
     return {
         "nstars": nstars,
         "cell_weights": cache.effective_counts,
@@ -1029,6 +1070,8 @@ def _piecewise_metadata(cache, a_edges, m_edges, nstars):
         "a_m_lims_pairs": pairs,
         "n_abins": len(a_edges) - 1,
         "n_mbins": len(m_edges) - 1,
+        "uncorrected_mle_OR": uncorrected_or,
+        "uncorrected_mle_ORD": uncorrected_or/cache.cell_areas,
     }
 
 

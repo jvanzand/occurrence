@@ -69,6 +69,24 @@ def test_piecewise_sampler_requires_matching_fit_domain():
         )
 
 
+def test_piecewise_metadata_includes_uncorrected_poisson_mle():
+    companions, exposure = _materials()
+    cache = mcmc.dl.build_piecewise_cache(
+        companions, exposure, [1.0, 10.0], [1.0, 10.0]
+    )
+    metadata = mcmc._piecewise_metadata(
+        cache, np.array([1.0, 10.0]), np.array([1.0, 10.0]), nstars=5
+    )
+
+    np.testing.assert_allclose(
+        metadata["uncorrected_mle_OR"], cache.effective_counts/5
+    )
+    np.testing.assert_allclose(
+        metadata["uncorrected_mle_ORD"],
+        cache.effective_counts/(5*cache.cell_areas),
+    )
+
+
 def test_piecewise_sampler_rejects_unsupported_companion(tmp_path):
     """MCMC should fail before sampling if a companion has no ROI support."""
     companions, exposure = _materials()
@@ -528,4 +546,19 @@ def test_saved_mass_ratio_model_figure_retains_compact_tick_formatter(tmp_path):
     assert labels == [
         "1.21e-3", "1.22e-3", "1.23e-3",
         "0.121", "0.122", "0.123",
+    ]
+
+
+def test_saved_model_figure_places_uncorrected_rate_last_in_legend(tmp_path):
+    import matplotlib.pyplot as plt
+
+    figure, axis = plt.subplots()
+    axis.plot([1.0, 2.0], [0.1, 0.2], label="Uncorrected Rate")
+    axis.plot([1.0, 2.0], [0.2, 0.3], label="sigmoid")
+    mcmc.save_model_figures(
+        {"density": (figure, axis)}, tmp_path, "a", [1.0, 2.0], "test"
+    )
+
+    assert [text.get_text() for text in axis.get_legend().get_texts()] == [
+        "sigmoid", "Uncorrected Rate",
     ]
