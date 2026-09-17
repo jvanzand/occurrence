@@ -653,7 +653,7 @@ def save_model_figures(
             axis.xaxis.set_major_formatter(FuncFormatter(formatter))
             axis.xaxis.set_minor_locator(NullLocator())
             legend_fontsize = (
-                1.7*plt.rcParams["font.size"]
+                1.5*plt.rcParams["font.size"]
                 if name in {"density", "occurrence"} else None
             )
             pu.legend_with_label_last(
