@@ -525,6 +525,18 @@ def test_combined_figures_are_finalized_once_with_user_ticks(tmp_path, monkeypat
     assert (tmp_path / "occurrence_CDF.png").exists()
 
 
+def test_mass_ratio_figures_use_mass_ratio_axis_label(tmp_path):
+    import matplotlib.pyplot as plt
+
+    figure, axis = plt.subplots()
+    mcmc.save_model_figures(
+        {"density": (figure, axis)}, tmp_path, "a", [0.001, 0.01],
+        "test", m_unit="jupiter", mtype="qtrue",
+    )
+
+    assert axis.get_xlabel() == r"Mass Ratio ($M_c/M_{\star}$)"
+
+
 def test_mass_ratio_tick_formatter_selects_notation_and_distinct_precision():
     from occurrence import plotting_utils
 

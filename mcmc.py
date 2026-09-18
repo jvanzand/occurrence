@@ -711,10 +711,15 @@ def save_model_figures(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     coordinate = "mass" if stack_dim == "a" else "sma"
-    x_label = "Semimajor axis (AU)" if coordinate == "sma" else (
-        "Companion mass ($M_{Jup}$)" if m_unit == "jupiter"
-        else "Companion mass ($M_{Earth}$)"
-    )
+    if coordinate == "sma":
+        x_label = "Semimajor axis (AU)"
+    elif mtype in {"qtrue", "qsini"}:
+        x_label = r"Mass Ratio ($M_c/M_{\star}$)"
+    else:
+        x_label = (
+            "Companion mass ($M_{Jup}$)" if m_unit == "jupiter"
+            else "Companion mass ($M_{Earth}$)"
+        )
     plot_specs = {
         "density": (
             "Occurrence rate density\n"

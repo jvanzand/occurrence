@@ -353,8 +353,6 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
     assert r"\McallstarsNstars" in rows[0]
     assert r"\McallstarsNeffBinAZero" in rows[0]
     assert r"\McallstarsAvgComplBinAZero" in rows[0]
-    assert r"\McallstarsLogGIntOccBinaZero" in rows[0]
-    assert r"\McallstarsLogGParamABinaZero" in rows[0]
     assert r"\McHighMstarNeffBinAZero" in rows[1]
     data = text.split(r"\startdata", 1)[1].split(r"\enddata", 1)[0]
     all_data_rows = [
@@ -363,14 +361,18 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
     ]
     assert len(all_data_rows) == 23
     first_block = all_data_rows[:4]
-    assert [row.split(" & ")[5] for row in first_block] == [
-        r"\textbf{logG}", r"\textbf{sigmoid}", r"\textbf{escarpment}",
-        r"\textbf{loglinear}",
+    expected_models = [
+        rf"\textbf{{{model}}}"
+        for model in post_fit_analysis._APPENDIX_MODEL_ORDER
     ]
-    assert r"\McallstarsSigmoidParamCenterBinaZero" in first_block[1]
-    assert r"\McallstarsEscarpmentParamBPOneBinaZero" in first_block[2]
-    assert r"\McallstarsLogLinearParamCHighBinaZero" in first_block[3]
-    assert r"\nodata" in first_block[0]
+    assert [row.split(" & ")[5] for row in first_block] == expected_models
+    model_rows = dict(zip(post_fit_analysis._APPENDIX_MODEL_ORDER, first_block))
+    assert r"\McallstarsLogGIntOccBinaZero" in model_rows["logG"]
+    assert r"\McallstarsLogGParamABinaZero" in model_rows["logG"]
+    assert r"\McallstarsSigmoidParamCenterBinaZero" in model_rows["sigmoid"]
+    assert r"\McallstarsEscarpmentParamBPOneBinaZero" in model_rows["escarpment"]
+    assert r"\McallstarsLogLinearParamCHighBinaZero" in model_rows["loglinear"]
+    assert r"\nodata" in model_rows["logG"]
     assert r"\McLowMstarLogLinearDbicBinaZero" in all_data_rows[11]
     assert r"\QallstarsLogLinearIntOccBinaZero" in text
     assert r"\QLowMstarLogLinearIntOccBinaZero" not in text
