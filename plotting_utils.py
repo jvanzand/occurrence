@@ -65,7 +65,7 @@ def mass_ratio_tick_formatter(tick_values):
     return format_tick
 
 
-def legend_with_label_last(axis, last_label, fontsize=None):
+def legend_with_label_last(axis, last_label, fontsize=None, loc=None):
     """Draw an axis legend with every occurrence of ``last_label`` last."""
     handles, labels = axis.get_legend_handles_labels()
     ordered = [
@@ -78,6 +78,7 @@ def legend_with_label_last(axis, last_label, fontsize=None):
             [handles[index] for index in ordered],
             [labels[index] for index in ordered],
             fontsize=fontsize,
+            loc=loc,
         )
 
 
@@ -516,7 +517,8 @@ def plot_corner_from_file(
 def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                          rate_type='OR', title='', return_fig_ax=False,
                          savepath='occurrence.png', figsize=(6, 4),
-                         plot_uncorrected_occurrence_mle=False):
+                         plot_uncorrected_occurrence_mle=False,
+                         legend_loc="upper right"):
     """
     Plot occurrence histograms and save to file.
 
@@ -652,6 +654,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
             legend_with_label_last(
                 ax, 'Uncorrected',
                 fontsize=1.7*matplotlib.rcParams['font.size'],
+                loc=legend_loc,
             )
 
         ax.set_xscale('log')
@@ -739,6 +742,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                     legend_with_label_last(
                         ax_i, 'Uncorrected',
                         fontsize=1.7*matplotlib.rcParams['font.size'],
+                        loc=legend_loc,
                     )
 
                 ax_i.set_xscale('log')
@@ -807,6 +811,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                     legend_with_label_last(
                         ax_i, 'Uncorrected',
                         fontsize=1.7*matplotlib.rcParams['font.size'],
+                        loc=legend_loc,
                     )
 
                 ax_i.set_xscale('log')

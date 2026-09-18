@@ -333,7 +333,8 @@ def plot_piecewise(
         plot_corner=True,
         plot_catalog_roi=False,
         plot_roi_occurrence=False,
-        plot_uncorrected_occurrence_mle=False):
+        plot_uncorrected_occurrence_mle=False,
+        occurrence_legend_loc="upper right"):
     """Load and plot a saved direct piecewise-constant fit."""
     base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
     if mtype is None:
@@ -357,6 +358,7 @@ def plot_piecewise(
         plot_catalog_roi=plot_catalog_roi,
         plot_roi_occurrence=plot_roi_occurrence,
         plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
+        occurrence_legend_loc=occurrence_legend_loc,
         tier1_dir=tier1_dir,
         tier2_dir=tier2_dir,
     )
@@ -380,7 +382,8 @@ def plot_smooth(
         n_posterior_draws=100,
         plot_random_seed=None,
         plot_uncorrected_occurrence_mle=False,
-        nstars=None):
+        nstars=None,
+        occurrence_legend_loc="upper right"):
     """Load, plot, and save one smooth direct model."""
     import matplotlib.pyplot as plt
 
@@ -433,6 +436,7 @@ def plot_smooth(
         stack_dim=stack_dim, model_edges=model_edges, title=title,
         m_unit=m_unit,
         mtype=os.path.basename(os.path.normpath(tier1_dir)),
+        occurrence_legend_loc=occurrence_legend_loc,
     ))
     return paths
 
@@ -457,7 +461,8 @@ def plot_models(
         model_plot_style='credible',
         n_posterior_draws=100,
         plot_random_seed=None,
-        plot_uncorrected_occurrence_mle=False):
+        plot_uncorrected_occurrence_mle=False,
+        occurrence_legend_loc="upper right"):
     """Plot selected direct models together while retaining separate corners."""
     selected = list(plot_models)
     supported = {
@@ -475,6 +480,7 @@ def plot_models(
             plot_catalog_roi=plot_catalog_roi,
             plot_roi_occurrence=plot_roi_occurrence,
             plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
+            occurrence_legend_loc=occurrence_legend_loc,
         )
     if len(selected) == 1 and selected[0] != 'piecewise':
         return plot_smooth(
@@ -490,6 +496,7 @@ def plot_models(
             plot_random_seed=plot_random_seed,
             plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
             nstars=nstars,
+            occurrence_legend_loc=occurrence_legend_loc,
         )
     base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
     base_figures = {}
@@ -573,5 +580,6 @@ def plot_models(
         figures=base_figures, output_dir=os.path.join(base_dir, 'plots'),
         stack_dim=stack_dim, model_edges=model_edges, title=title,
         m_unit=m_unit, mtype=mtype,
+        occurrence_legend_loc=occurrence_legend_loc,
     )
     return paths

@@ -189,6 +189,7 @@ def run_multiple(
         plot_catalog_roi=False,
         plot_roi_occurrence=False,
         plot_uncorrected_occurrence_mle=False,
+        occurrence_legend_loc="upper right",
         completeness_type="single",
         integration_resolution=(100, 100),
         use_average_completeness=True,
@@ -352,6 +353,7 @@ def run_multiple(
                     "plot_uncorrected_occurrence_mle": (
                         plot_uncorrected_occurrence_mle
                     ),
+                    "occurrence_legend_loc": occurrence_legend_loc,
                     "completeness_type": completeness_type,
                     "integration_resolution": integration_resolution,
                     "use_average_completeness": use_average_completeness,
@@ -643,6 +645,7 @@ def _run_configuration(configuration):
             plot_uncorrected_occurrence_mle=configuration[
                 "plot_uncorrected_occurrence_mle"
             ],
+            occurrence_legend_loc=configuration["occurrence_legend_loc"],
             model_plot_style=configuration["model_plot_style"],
             n_posterior_draws=configuration["n_posterior_draws"],
             plot_random_seed=configuration["plot_random_seed"],

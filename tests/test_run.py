@@ -85,6 +85,7 @@ def test_run_multiple_applies_tier2_cuts_and_plot_controls(
         plot_catalog_roi=True,
         plot_roi_occurrence=True,
         plot_uncorrected_occurrence_mle=True,
+        occurrence_legend_loc="lower left",
     )
 
     assert [result["nstars"] for result in results] == [3, 2]
@@ -96,6 +97,10 @@ def test_run_multiple_applies_tier2_cuts_and_plot_controls(
     assert all(call["plot_roi_occurrence"] is True for call in plot_calls)
     assert all(
         call["plot_uncorrected_occurrence_mle"] is True
+        for call in plot_calls
+    )
+    assert all(
+        call["occurrence_legend_loc"] == "lower left"
         for call in plot_calls
     )
 

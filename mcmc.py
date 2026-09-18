@@ -702,7 +702,7 @@ def add_smooth_model_to_figures(
 
 def save_model_figures(
         figures, output_dir, stack_dim, model_edges, title,
-        m_unit="earth", mtype="mtrue"):
+        m_unit="earth", mtype="mtrue", occurrence_legend_loc="upper right"):
     """Format and save completed direct-model figures exactly once."""
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
@@ -752,11 +752,13 @@ def save_model_figures(
             axis.xaxis.set_major_formatter(FuncFormatter(formatter))
             axis.xaxis.set_minor_locator(NullLocator())
             legend_fontsize = (
-                1.7*plt.rcParams["font.size"]
+                1.6*plt.rcParams["font.size"]
                 if name in {"density", "occurrence"} else None
             )
             pu.legend_with_label_last(
-                axis, "Uncorrected", fontsize=legend_fontsize
+                axis, "Uncorrected", fontsize=legend_fontsize,
+                loc=(occurrence_legend_loc
+                     if name in {"density", "occurrence"} else None),
             )
         if np.ndim(axes) == 0:
             axes.set_xlabel(x_label)
@@ -1137,6 +1139,7 @@ def plot_piecewise_results(
         plot_catalog_roi=False,
         plot_roi_occurrence=False,
         plot_uncorrected_occurrence_mle=False,
+        occurrence_legend_loc="upper right",
         tier1_dir=None,
         tier2_dir=None,
         summary=None):
@@ -1165,12 +1168,14 @@ def plot_piecewise_results(
         pu.plot_occurrence_hist(
             **common, rate_type="OR", savepath=str(or_path),
             plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
+            legend_loc=occurrence_legend_loc,
         )
         paths["occurrence"] = str(or_path)
     if plot_density:
         pu.plot_occurrence_hist(
             **common, rate_type="ORD", savepath=str(ord_path),
             plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
+            legend_loc=occurrence_legend_loc,
         )
         paths["density"] = str(ord_path)
     if plot_corner:

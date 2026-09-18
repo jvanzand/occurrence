@@ -580,8 +580,9 @@ def test_saved_model_figure_places_uncorrected_rate_last_in_legend(tmp_path):
     assert [text.get_text() for text in axis.get_legend().get_texts()] == [
         "sigmoid", "Uncorrected",
     ]
+    assert axis.get_legend()._loc == 1  # Matplotlib's "upper right" code.
     assert all(
-        text.get_fontsize() == 1.7*plt.rcParams["font.size"]
+        text.get_fontsize() == 1.6*plt.rcParams["font.size"]
         for text in axis.get_legend().get_texts()
     )
 
