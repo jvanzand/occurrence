@@ -436,6 +436,24 @@ def test_new_smooth_samplers_save_physical_chains(tmp_path, model_name):
             assert np.all(data["flat_chains"][:, 2] < data["flat_chains"][:, 3])
 
 
+def test_loglinear_sampler_saves_two_positive_endpoint_rates(tmp_path):
+    companions, exposure = _materials()
+    cache = mcmc.dl.build_smooth_cache(
+        companions, exposure, "m", (1.0, 10.0), model_bounds=(1.3, 8.0)
+    )
+    path = tmp_path / "loglinear.npz"
+    mcmc.mcmc_smooth(
+        cache, "loglinear", nwalkers=4, nsteps=6, burnin=4,
+        save_path=path, random_seed=22, max_integrated_occurrence=None,
+        display_model_bounds=(1.0, 10.0),
+    )
+    with np.load(path) as data:
+        assert data["flat_chains"].shape[1] == 2
+        assert np.all(data["flat_chains"] > 0)
+        np.testing.assert_allclose(data["model_bounds"], [1.3, 8.0])
+        np.testing.assert_allclose(data["display_model_bounds"], [1.0, 10.0])
+
+
 @pytest.mark.parametrize(
     "model_name, sample",
     [
@@ -566,3 +584,74 @@ def test_saved_model_figure_places_uncorrected_rate_last_in_legend(tmp_path):
         text.get_fontsize() == 1.7*plt.rcParams["font.size"]
         for text in axis.get_legend().get_texts()
     )
+
+
+def _write_restricted_loglinear_chain(path):
+    samples = np.column_stack((
+        np.linspace(0.08, 0.12, 100),
+        np.linspace(0.9, 1.1, 100),
+    ))
+    np.savez(
+        path, flat_chains=samples,
+        flat_log_probs=np.linspace(-1.0, 0.0, len(samples)),
+        model_bounds=[1.3, 13.0], display_model_bounds=[0.4, 50.0],
+        stack_bounds=[0.1, 10.0], model_coordinate="mass",
+        stack_coordinate="sma",
+    )
+
+
+def test_credible_extrapolation_is_dashed_fainter_and_does_not_rescale(tmp_path):
+    import matplotlib.pyplot as plt
+
+    chain_path = tmp_path / "loglinear.npz"
+    _write_restricted_loglinear_chain(chain_path)
+    figure, axis = plt.subplots()
+    figures = {"density": (figure, axis)}
+    mcmc.add_smooth_model_to_figures(
+        [chain_path], "loglinear", figures, tmp_path, stack_dim="a",
+        plot_occurrence=False, plot_density=True, plot_corner=False,
+        model_plot_style="credible",
+    )
+    supported_limits = axis.get_ylim()
+    mcmc.save_model_figures(
+        figures, tmp_path, "a", [0.4, 50.0], "test", m_unit="jupiter"
+    )
+
+    dashed = [line for line in axis.lines if line.get_linestyle() == "--"]
+    assert len(dashed) == 2
+    assert all(line.get_color() == "red" for line in axis.lines)
+    assert all(line.get_alpha() == pytest.approx(0.65) for line in dashed)
+    assert all(collection.get_alpha() == pytest.approx(0.28)
+               for collection in axis.collections)
+    np.testing.assert_allclose(axis.get_ylim(), supported_limits)
+
+
+def test_draw_extrapolation_keeps_draw_opacity_and_uses_dashes(tmp_path):
+    import matplotlib.pyplot as plt
+
+    chain_path = tmp_path / "loglinear.npz"
+    _write_restricted_loglinear_chain(chain_path)
+    figure, axis = plt.subplots()
+    figures = {"density": (figure, axis)}
+    mcmc.add_smooth_model_to_figures(
+        [chain_path], "loglinear", figures, tmp_path, stack_dim="a",
+        plot_occurrence=False, plot_density=True, plot_corner=False,
+        model_plot_style="draws", n_posterior_draws=5,
+        plot_random_seed=4,
+    )
+    supported_limits = axis.get_ylim()
+    mcmc.save_model_figures(
+        figures, tmp_path, "a", [0.4, 50.0], "test", m_unit="jupiter"
+    )
+
+    faint_solid = [
+        line for line in axis.lines
+        if line.get_linestyle() == "-" and line.get_alpha() == 0.08
+    ]
+    faint_dashed = [
+        line for line in axis.lines
+        if line.get_linestyle() == "--" and line.get_alpha() == 0.08
+    ]
+    assert len(faint_solid) == 5
+    assert len(faint_dashed) == 10
+    np.testing.assert_allclose(axis.get_ylim(), supported_limits)

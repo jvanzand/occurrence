@@ -205,6 +205,8 @@ def run_multiple(
         sigmoid_width_bounds=None,
         bpl_amplitude_bounds=(1e-6, 10.0),
         bpl_slope_bounds=(-4.0, 4.0),
+        loglinear_amplitude_bounds=(1e-6, 10.0),
+        model_fit_bounds=None,
         max_integrated_occurrence=1.0,
         model_plot_style="credible",
         n_posterior_draws=100,
@@ -216,13 +218,18 @@ def run_multiple(
     """Run and plot direct occurrence fits for multiple tier combinations.
 
     Registered models are ``piecewise``, ``logG``, ``escarpment``, ``sigmoid``,
-    and ``bpl``.
+    ``bpl``, and ``loglinear``. ``model_fit_bounds`` optionally maps any smooth
+    model to restricted ``"a"`` and/or ``"m"`` bounds. Mass bounds are
+    converted to mass ratio for mass-ratio Tier 1 runs in the same way as
+    ``m_edges``.
     Missing Tier 1 products
     are generated from ``recoveries_dir`` when ``prepare_missing`` is true.
     Set ``run_fits=False`` to regenerate plots from saved chains. Fit-level and
     MCMC-level parallelism are controlled separately.
     """
-    supported_models = {"piecewise", "logG", "escarpment", "sigmoid", "bpl"}
+    supported_models = {
+        "piecewise", "logG", "escarpment", "sigmoid", "bpl", "loglinear"
+    }
     run_models = list(run_models_list)
     plot_models = list(plot_models_list)
     unknown = (set(run_models) | set(plot_models)) - supported_models
@@ -233,6 +240,21 @@ def run_multiple(
         )
     if stack_dim not in {"a", "m"}:
         raise ValueError("stack_dim must be 'a' or 'm'")
+    model_fit_bounds = {} if model_fit_bounds is None else model_fit_bounds
+    boundable_models = supported_models - {"piecewise"}
+    unknown_bound_models = set(model_fit_bounds) - boundable_models
+    if unknown_bound_models:
+        raise ValueError(
+            f"model_fit_bounds contains unsupported models: "
+            f"{sorted(unknown_bound_models)}"
+        )
+    for model_name, bounds_by_coordinate in model_fit_bounds.items():
+        unknown_coordinates = set(bounds_by_coordinate) - {"a", "m"}
+        if unknown_coordinates:
+            raise ValueError(
+                f"model_fit_bounds[{model_name!r}] contains unknown "
+                f"coordinates: {sorted(unknown_coordinates)}"
+            )
 
     tier1_configurations = []
     for tier1_dir in tier1_list:
@@ -290,6 +312,14 @@ def run_multiple(
             query = cut_config.get("star_df_query")
             selected_stars = star_df.query(query).copy() if query else star_df.copy()
             y_edges = _y_edges_for_tier(m_edges, m_or_q, m_unit)
+            tier_model_fit_bounds = {}
+            for model_name, bounds_by_coordinate in model_fit_bounds.items():
+                tier_bounds = dict(bounds_by_coordinate)
+                if "m" in tier_bounds:
+                    tier_bounds["m"] = _y_edges_for_tier(
+                        tier_bounds["m"], m_or_q, m_unit
+                    )
+                tier_model_fit_bounds[model_name] = tier_bounds
             tier2_configurations.append({
                 "t1_dir": tier1_dir,
                 "t2_dir": tier2_dir,
@@ -337,6 +367,10 @@ def run_multiple(
                     "sigmoid_width_bounds": sigmoid_width_bounds,
                     "bpl_amplitude_bounds": bpl_amplitude_bounds,
                     "bpl_slope_bounds": bpl_slope_bounds,
+                    "loglinear_amplitude_bounds": loglinear_amplitude_bounds,
+                    "model_fit_bounds": (
+                        tier_model_fit_bounds
+                    ),
                     "max_integrated_occurrence": max_integrated_occurrence,
                     "model_plot_style": model_plot_style,
                     "n_posterior_draws": n_posterior_draws,
@@ -524,17 +558,20 @@ def _run_configuration(configuration):
                         configuration["m_unit"],
                         title,
                     )
-            elif model_name in {"logG", "escarpment", "sigmoid", "bpl"}:
+            elif model_name in {
+                    "logG", "escarpment", "sigmoid", "bpl", "loglinear"}:
                 amplitude_key = {
                     "logG": "logg_amplitude_bounds",
                     "escarpment": "escarpment_amplitude_bounds",
                     "sigmoid": "sigmoid_amplitude_bounds",
                     "bpl": "bpl_amplitude_bounds",
+                    "loglinear": "loglinear_amplitude_bounds",
                 }[model_name]
                 width_bounds = (
                     configuration["sigmoid_width_bounds"]
-                    if model_name == "sigmoid"
-                    else configuration["logg_sigma_bounds"]
+                    if model_name == "sigmoid" else
+                    configuration["logg_sigma_bounds"]
+                    if model_name == "logG" else None
                 )
                 try:
                     _, chain_paths = mcmc.fit_smooth_file(
@@ -543,6 +580,9 @@ def _run_configuration(configuration):
                         m_edges=configuration["m_edges"],
                         stack_dim=configuration["stack_dim"],
                         model_name=model_name,
+                        model_fit_bounds=configuration[
+                            "model_fit_bounds"
+                        ].get(model_name),
                         save_dir=os.path.join(
                             configuration["tier1_dir"],
                             configuration["tier2_dir"],

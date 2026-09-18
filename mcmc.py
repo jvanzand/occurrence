@@ -118,6 +118,8 @@ def physical_smooth_parameters(model_name, transformed_theta):
         parameters[..., 3] = np.exp(parameters[..., 3])
     elif model_name == "bpl":
         parameters[..., 0] = np.exp(parameters[..., 0])
+    elif model_name == "loglinear":
+        parameters[..., :2] = np.exp(parameters[..., :2])
     else:
         raise ValueError(f"unsupported smooth model {model_name!r}")
     return parameters
@@ -126,8 +128,8 @@ def physical_smooth_parameters(model_name, transformed_theta):
 def integrated_smooth_occurrence(model_name, transformed_theta, cache):
     """Numerically integrate a registered smooth ORD over the fitted region."""
     physical = physical_smooth_parameters(model_name, transformed_theta)
-    density = mcmc_powerlaw.get_model_spec(model_name).function(
-        physical, 10**cache.log_x_grid
+    density = mcmc_powerlaw.evaluate_density(
+        model_name, physical, 10**cache.log_x_grid, cache.model_bounds
     )
     model_weights = dl._trapezoid_weights(cache.log_x_grid)
     stack_width = np.log10(cache.stack_bounds[1]/cache.stack_bounds[0])
@@ -183,6 +185,13 @@ def log_prior_smooth(
             slope_bounds[0] <= gamma <= slope_bounds[1]
         )
         jacobian = transformed_theta[0]
+    elif model_name == "loglinear":
+        low_rate, high_rate = physical
+        valid = (
+            amplitude_bounds[0] <= low_rate <= amplitude_bounds[1] and
+            amplitude_bounds[0] <= high_rate <= amplitude_bounds[1]
+        )
+        jacobian = transformed_theta[0] + transformed_theta[1]
     else:
         raise ValueError(f"unsupported smooth model {model_name!r}")
     if not valid:
@@ -207,8 +216,11 @@ def log_probability_smooth(
     if not np.isfinite(prior):
         return -np.inf
     physical = physical_smooth_parameters(model_name, transformed_theta)
+    density_function = lambda theta, x: mcmc_powerlaw.evaluate_density(
+        model_name, theta, x, cache.model_bounds
+    )
     likelihood = dl.cached_smooth_log_likelihood(
-        physical, cache, mcmc_powerlaw.get_model_spec(model_name).function
+        physical, cache, density_function
     )
     return prior + likelihood if np.isfinite(likelihood) else -np.inf
 
@@ -265,6 +277,8 @@ def initialize_smooth(
             normalized_amplitude, amplitude_bounds[0]*10, amplitude_bounds[1]/10
         )
         return np.array([np.log(normalized_amplitude), center, 0.0, 1.0])
+    if model_name == "loglinear":
+        return np.log([amplitude, amplitude])
     raise ValueError(f"unsupported smooth model {model_name!r}")
 
 
@@ -273,12 +287,12 @@ def mcmc_smooth(
         parallel=False, save_path=None, random_seed=None,
         amplitude_bounds=(1e-6, 10.0), slope_bounds=(-4.0, 4.0),
         width_bounds=None,
-        max_integrated_occurrence=1.0):
+        max_integrated_occurrence=1.0, display_model_bounds=None,
+        display_stack_index=None):
     """Fit one registered direct smooth model in one stack interval."""
-    if model_name not in {"logG", "escarpment", "sigmoid", "bpl"}:
-        raise ValueError(
-            "model_name must be 'logG', 'escarpment', 'sigmoid', or 'bpl'"
-        )
+    if model_name not in {
+            "logG", "escarpment", "sigmoid", "bpl", "loglinear"}:
+        raise ValueError(f"unsupported smooth model {model_name!r}")
     ndim = mcmc_powerlaw.MODEL_REGISTRY[model_name].ndim
     if nwalkers < 2*ndim:
         raise ValueError(f"nwalkers must be at least {2*ndim} for {model_name}")
@@ -291,7 +305,7 @@ def mcmc_smooth(
         if integrated > 0.8*max_integrated_occurrence:
             adjustment = np.log(0.8*max_integrated_occurrence/integrated)
             center[0] += adjustment
-            if model_name in {"escarpment", "sigmoid"}:
+            if model_name in {"escarpment", "sigmoid", "loglinear"}:
                 center[1] += adjustment
     if model_name == "logG":
         scales = np.array([0.05, 0.02, 0.05])
@@ -299,6 +313,8 @@ def mcmc_smooth(
         scales = np.array([0.05, 0.05, 0.02, 0.02])
     elif model_name == "sigmoid":
         scales = np.array([0.05, 0.05, 0.02, 0.05])
+    elif model_name == "loglinear":
+        scales = np.array([0.05, 0.05])
     else:
         scales = np.array([0.05, 0.02, 0.05, 0.05])
     arguments = (
@@ -352,6 +368,13 @@ def mcmc_smooth(
         max_integrated_occurrence=(np.nan if max_integrated_occurrence is None
                                    else max_integrated_occurrence),
         model_bounds=np.asarray(cache.model_bounds),
+        display_model_bounds=np.asarray(
+            cache.model_bounds if display_model_bounds is None
+            else display_model_bounds
+        ),
+        display_stack_index=(
+            -1 if display_stack_index is None else int(display_stack_index)
+        ),
         stack_bounds=np.asarray(cache.stack_bounds),
         model_coordinate=cache.model_coordinate,
         stack_coordinate=cache.stack_coordinate,
@@ -362,25 +385,60 @@ def mcmc_smooth(
 
 def fit_smooth_file(
         fit_path, a_edges, m_edges, stack_dim, model_name,
-        **mcmc_options):
-    """Fit one registered smooth model in every stack interval."""
+        model_fit_bounds=None, **mcmc_options):
+    """Fit one registered model, optionally within a rectangular subdomain.
+
+    ``model_fit_bounds`` uses ``"a"`` and ``"m"`` coordinate keys. Bounds on
+    the model coordinate restrict its likelihood and exposure integral;
+    bounds on the stacked coordinate are intersected with the supplied stack
+    bins. The full model-coordinate edges remain saved as display bounds.
+    """
     companions, exposure = dfu.load_fit_data(fit_path)
     a_edges = dl._validate_edges(a_edges, "a_edges")
     m_edges = dl._validate_edges(m_edges, "m_edges")
     stack_edges = a_edges if stack_dim == "a" else m_edges
+    fit_bounds = {} if model_fit_bounds is None else dict(model_fit_bounds)
+    model_key = "m" if stack_dim == "a" else "a"
+    stack_key = "a" if stack_dim == "a" else "m"
+    model_bounds = fit_bounds.get(model_key)
+    stack_limit = fit_bounds.get(stack_key)
+    if model_bounds is not None:
+        model_bounds = dl._validate_bounds_pair(
+            model_bounds, f"{model_name} {model_key} fit bounds"
+        )
+    if stack_limit is not None:
+        stack_limit = dl._validate_bounds_pair(
+            stack_limit, f"{model_name} {stack_key} fit bounds"
+        )
+    display_model_bounds = (
+        tuple(m_edges[[0, -1]]) if stack_dim == "a"
+        else tuple(a_edges[[0, -1]])
+    )
     base_path = Path(mcmc_options.pop(
         "save_dir", Path(fit_path).parents[1] / "saved_chains"
     ))
     base_path.mkdir(parents=True, exist_ok=True)
     samplers, paths = [], []
     for index, bounds in enumerate(zip(stack_edges[:-1], stack_edges[1:])):
-        cache = dl.build_smooth_cache(companions, exposure, stack_dim, bounds)
-        path = base_path / f"chains_{model_name}_bin{index}.npz"
+        if stack_limit is not None:
+            bounds = (
+                max(bounds[0], stack_limit[0]),
+                min(bounds[1], stack_limit[1]),
+            )
+            if bounds[0] >= bounds[1]:
+                continue
+        cache = dl.build_smooth_cache(
+            companions, exposure, stack_dim, bounds,
+            model_bounds=model_bounds,
+        )
+        path = base_path / f"chains_{model_name}_bin{len(paths)}.npz"
         options = dict(mcmc_options)
         if options.get("random_seed") is not None:
             options["random_seed"] += index
         samplers.append(mcmc_smooth(
-            cache, model_name, save_path=path, **options
+            cache, model_name, save_path=path,
+            display_model_bounds=display_model_bounds,
+            display_stack_index=index, **options
         ))
         paths.append(str(path))
     return samplers, paths
@@ -441,6 +499,9 @@ def sample_smooth_prior(
             ])
             transformed = physical.copy()
             transformed[0] = np.log(transformed[0])
+        elif model_name == "loglinear":
+            physical = rng.uniform(*amplitude_bounds, size=2)
+            transformed = np.log(physical)
         else:
             raise ValueError(f"unsupported smooth model {model_name!r}")
         if np.isfinite(log_prior_smooth(
@@ -517,42 +578,77 @@ def add_smooth_model_to_figures(
                 "samples": samples,
                 "maximum_likelihood_sample": maximum_likelihood_sample,
                 "model_bounds": tuple(data["model_bounds"]),
+                "display_model_bounds": tuple(
+                    data["display_model_bounds"]
+                    if "display_model_bounds" in data
+                    else data["model_bounds"]
+                ),
                 "stack_bounds": tuple(data["stack_bounds"]),
                 "model_coordinate": str(data["model_coordinate"]),
                 "stack_coordinate": str(data["stack_coordinate"]),
+                "display_stack_index": int(
+                    data["display_stack_index"]
+                    if "display_stack_index" in data else len(loaded)
+                ),
             })
 
     coordinate = loaded[0]["model_coordinate"]
     if any(item["model_coordinate"] != coordinate for item in loaded):
         raise ValueError("all model chains must use the same model coordinate")
     model_color = mcmc_powerlaw.MODEL_REGISTRY[model_name].color
-    density_function = mcmc_powerlaw.get_model_spec(model_name).function
     paths = {}
     for stack_index, item in enumerate(loaded):
-        grid = np.logspace(*np.log10(item["model_bounds"]), 300)
+        display_stack_index = item["display_stack_index"]
+        grid = np.unique(np.concatenate((
+            np.logspace(*np.log10(item["display_model_bounds"]), 500),
+            np.asarray(item["model_bounds"], dtype=float),
+        )))
+        fit_mask = (
+            (grid >= item["model_bounds"][0]) &
+            (grid <= item["model_bounds"][1])
+        )
+        density_function = lambda theta, x: mcmc_powerlaw.evaluate_density(
+            model_name, theta, x, item["model_bounds"]
+        )
         samples = item["samples"]
         curves = np.asarray([
             density_function(sample, grid) for sample in samples
         ])
-        label = model_name
+        label = "log-linear" if model_name == "loglinear" else model_name
         if len(loaded) > 1:
             label += " (" + _stack_interval_label(
                 item["stack_coordinate"], item["stack_bounds"], m_unit
             ) + ")"
         if plot_density:
-            axis = _axis_for_stack(figures["density"][1], stack_index)
+            axis = _axis_for_stack(
+                figures["density"][1], display_stack_index
+            )
             if model_plot_style == "credible":
                 _plot_credible_curves(
-                    axis, grid, curves, label, color=model_color
+                    axis, grid[fit_mask], curves[:, fit_mask], label,
+                    color=model_color
+                )
+                _queue_credible_extrapolation(
+                    axis, grid, curves, fit_mask, model_color
                 )
             else:
-                _plot_posterior_draws(
-                    axis, grid, curves, item["maximum_likelihood_sample"],
+                selected = _plot_posterior_draws(
+                    axis, grid[fit_mask], curves[:, fit_mask],
+                    item["maximum_likelihood_sample"],
                     n_posterior_draws, rng, label, density_function,
                     color=model_color,
                 )
+                maximum_curve = density_function(
+                    item["maximum_likelihood_sample"], grid
+                )
+                _queue_draw_extrapolation(
+                    axis, grid, curves[selected], maximum_curve, fit_mask,
+                    model_color,
+                )
         if plot_occurrence:
-            axis = _axis_for_stack(figures["occurrence"][1], stack_index)
+            axis = _axis_for_stack(
+                figures["occurrence"][1], display_stack_index
+            )
             if model_edges is None:
                 log_grid = np.log10(grid)
                 increments = 0.5*(curves[:, 1:] + curves[:, :-1])*np.diff(log_grid)
@@ -581,7 +677,9 @@ def add_smooth_model_to_figures(
                 item["stack_bounds"][1]/item["stack_bounds"][0]
             )
             _plot_credible_curves(
-                _axis_for_stack(figures["cumulative"][1], stack_index),
+                _axis_for_stack(
+                    figures["cumulative"][1], display_stack_index
+                ),
                 grid, cumulative, label, color=model_color,
             )
 
@@ -639,6 +737,7 @@ def save_model_figures(
     for name, (figure, axes) in figures.items():
         ylabel, filename = plot_specs[name]
         for axis in np.atleast_1d(axes):
+            _draw_queued_extrapolations(axis)
             axis.set_xscale("log")
             axis.set_xlim(
                 10**(log_edges[0] - padding),
@@ -653,7 +752,7 @@ def save_model_figures(
             axis.xaxis.set_major_formatter(FuncFormatter(formatter))
             axis.xaxis.set_minor_locator(NullLocator())
             legend_fontsize = (
-                1.5*plt.rcParams["font.size"]
+                1.7*plt.rcParams["font.size"]
                 if name in {"density", "occurrence"} else None
             )
             pu.legend_with_label_last(
@@ -728,6 +827,81 @@ def _plot_posterior_draws(
     ml_curve = density_function(maximum_likelihood_sample, x_values)
     axis.plot(x_values, ml_curve, color=color, linewidth=2.5,
               label=f"{label}")
+    return indices
+
+
+def _outside_segments(mask):
+    """Return contiguous index arrays outside a fitted-domain mask."""
+    outside = np.flatnonzero(~np.asarray(mask, dtype=bool))
+    if outside.size == 0:
+        return []
+    segments = np.split(outside, np.flatnonzero(np.diff(outside) > 1) + 1)
+    size = len(mask)
+    connected = []
+    for segment in segments:
+        if segment[0] == 0 and segment[-1] + 1 < size:
+            segment = np.r_[segment, segment[-1] + 1]
+        elif segment[-1] == size - 1 and segment[0] > 0:
+            segment = np.r_[segment[0] - 1, segment]
+        connected.append(segment)
+    return connected
+
+
+def _queue_credible_extrapolation(axis, x_values, curves, fit_mask, color):
+    """Defer credible extrapolations until supported y-limits are known."""
+    low, median, high = np.percentile(curves, [16, 50, 84], axis=0)
+    queue = getattr(axis, "_occurrence_extrapolations", [])
+    for indices in _outside_segments(fit_mask):
+        queue.append({
+            "kind": "credible", "x": x_values[indices],
+            "low": low[indices], "median": median[indices],
+            "high": high[indices], "color": color,
+        })
+    axis._occurrence_extrapolations = queue
+
+
+def _queue_draw_extrapolation(
+        axis, x_values, curves, maximum_curve, fit_mask, color):
+    """Defer posterior-draw extrapolations until supported limits are known."""
+    queue = getattr(axis, "_occurrence_extrapolations", [])
+    for indices in _outside_segments(fit_mask):
+        queue.append({
+            "kind": "draws", "x": x_values[indices],
+            "curves": curves[:, indices],
+            "maximum": maximum_curve[indices], "color": color,
+        })
+    axis._occurrence_extrapolations = queue
+
+
+def _draw_queued_extrapolations(axis):
+    """Draw dashed extrapolations without allowing them to change y-limits."""
+    queued = getattr(axis, "_occurrence_extrapolations", [])
+    if not queued:
+        return
+    y_limits = axis.get_ylim()
+    for item in queued:
+        if item["kind"] == "credible":
+            axis.fill_between(
+                item["x"], item["low"], item["high"],
+                color=item["color"], alpha=0.28,
+            )
+            axis.plot(
+                item["x"], item["median"], color=item["color"],
+                linestyle="--", alpha=0.65, scaley=False,
+            )
+        else:
+            for curve in item["curves"]:
+                axis.plot(
+                    item["x"], curve, color=item["color"],
+                    linestyle="--", alpha=0.08, linewidth=0.8,
+                    scaley=False,
+                )
+            axis.plot(
+                item["x"], item["maximum"], color=item["color"],
+                linestyle="--", linewidth=2.5, scaley=False,
+            )
+    axis.set_ylim(y_limits)
+    axis._occurrence_extrapolations = []
 
 
 def _physical_log_jacobian(model_name, samples):
@@ -743,6 +917,8 @@ def _physical_log_jacobian(model_name, samples):
         )
     if model_name == "bpl":
         return np.log(samples[:, 0])
+    if model_name == "loglinear":
+        return np.log(samples[:, 0]) + np.log(samples[:, 1])
     raise ValueError(f"unsupported smooth model {model_name!r}")
 
 

@@ -30,6 +30,7 @@ _MODEL_PARAMETER_MACROS = {
         "Escarpment", ("COne", "CTwo", "BPOne", "BPTwo")
     ),
     "sigmoid": ("Sigmoid", ("COne", "CTwo", "Center", "Width")),
+    "loglinear": ("LogLinear", ("CLow", "CHigh")),
 }
 
 _MODEL_PARAMETER_LABELS = {
@@ -39,6 +40,7 @@ _MODEL_PARAMETER_LABELS = {
         r"$\log_{10}(x_{t,2})$",
     ),
     "sigmoid": (r"$C_1$", r"$C_2$", "Center", "Width"),
+    "loglinear": (r"$C_{\rm low}$", r"$C_{\rm high}$"),
 }
 
 _THREE_PARAMETER_TIER2_DIRS = (
@@ -135,10 +137,14 @@ def _integrated_occurrence_samples(model_name, samples, model_bounds,
         raise ValueError("model_bounds and stack_bounds must be positive pairs")
     grid = np.logspace(*np.log10(model_bounds), 300)
     log_grid = np.log10(grid)
-    density_function = mcmc_powerlaw.get_model_spec(model_name).function
     stack_width = np.log10(stack_bounds[1]/stack_bounds[0])
     return np.asarray([
-        np.trapz(density_function(sample, grid), log_grid)*stack_width
+        np.trapz(
+            mcmc_powerlaw.evaluate_density(
+                model_name, sample, grid, model_bounds
+            ),
+            log_grid,
+        )*stack_width
         for sample in samples
     ])
 
@@ -346,18 +352,25 @@ def calculate_delta_bic(fit_path, chain_dir, stack_dim="a"):
         model_deltas = []
         for path in paths:
             with np.load(path) as chain:
-                if "stack_bounds" not in chain:
-                    raise KeyError(f"{path} does not contain 'stack_bounds'")
+                if "stack_bounds" not in chain or "model_bounds" not in chain:
+                    raise KeyError(
+                        f"{path} must contain stack_bounds and model_bounds"
+                    )
                 stack_bounds = tuple(np.asarray(chain["stack_bounds"], dtype=float))
+                model_bounds = tuple(np.asarray(chain["model_bounds"], dtype=float))
             cache = dl.build_smooth_cache(
-                companions, exposure, stack_dim, stack_bounds
+                companions, exposure, stack_dim, stack_bounds,
+                model_bounds=model_bounds,
             )
             _, flat_log_likelihood = _optimize_flat_model(cache)
             draw = _maximum_likelihood_draw(path, model_name)
             if draw.size != len(parameter_names):
                 raise ValueError(f"parameter count in {path} does not match {model_name}")
+            density_function = lambda theta, x: mcmc_powerlaw.evaluate_density(
+                model_name, theta, x, model_bounds
+            )
             model_log_likelihood = dl.cached_smooth_log_likelihood(
-                draw, cache, mcmc_powerlaw.get_model_spec(model_name).function
+                draw, cache, density_function
             )
             if not np.isfinite(model_log_likelihood):
                 raise ValueError(f"maximum-likelihood draw in {path} is invalid")

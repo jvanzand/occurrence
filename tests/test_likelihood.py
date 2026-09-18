@@ -152,6 +152,26 @@ def test_smooth_likelihood_allows_an_empty_stack_interval():
     assert value < 0
 
 
+def test_smooth_cache_restricts_model_coordinate_with_boundary_interpolation():
+    companion = _companion(
+        "b", [0.5, 0.5, 0.5], x_samples=[2.0, 5.0, 9.0]
+    )
+    cache = dl.build_smooth_cache(
+        {"b": companion}, _exposure(), "m", (1.0, 10.0),
+        model_bounds=(2.0, 8.0),
+    )
+
+    assert cache.model_bounds == (2.0, 8.0)
+    assert 9.0 not in 10**cache.log_x_samples
+    np.testing.assert_allclose(10**cache.log_x_grid[[0, -1]], [2.0, 8.0])
+
+
+def test_log_linear_density_uses_rates_at_fit_boundaries():
+    x = np.array([1.0, np.sqrt(10.0), 10.0])
+    density = dl.log_linear_density([0.1, 0.5], x, (1.0, 10.0))
+    np.testing.assert_allclose(density, [0.1, 0.3, 0.5])
+
+
 @pytest.mark.parametrize(
     "model_name, theta",
     [

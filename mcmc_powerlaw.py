@@ -41,6 +41,12 @@ MODEL_REGISTRY = {
         ("C", r"$\log_{10}(x_0)$", r"$\beta$", r"$\gamma$"),
         "deeppink",
     ),
+    "loglinear": ModelSpec(
+        dl.log_linear_density,
+        2,
+        (r"$C_{\rm low}$", r"$C_{\rm high}$"),
+        "red",
+    ),
 }
 
 
@@ -50,3 +56,11 @@ def get_model_spec(model_name):
         return MODEL_REGISTRY[model_name]
     except KeyError:
         raise ValueError(f"unknown parametric model: {model_name!r}")
+
+
+def evaluate_density(model_name, theta, x, model_bounds):
+    """Evaluate a registered model, supplying bounds when it requires them."""
+    function = get_model_spec(model_name).function
+    if model_name == "loglinear":
+        return function(theta, x, model_bounds=model_bounds)
+    return function(theta, x)

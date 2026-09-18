@@ -460,7 +460,9 @@ def plot_models(
         plot_uncorrected_occurrence_mle=False):
     """Plot selected direct models together while retaining separate corners."""
     selected = list(plot_models)
-    supported = {'piecewise', 'logG', 'escarpment', 'sigmoid', 'bpl'}
+    supported = {
+        'piecewise', 'logG', 'escarpment', 'sigmoid', 'bpl', 'loglinear'
+    }
     unknown = set(selected) - supported
     if unknown:
         raise ValueError(f"unsupported plot models: {sorted(unknown)}")

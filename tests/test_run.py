@@ -353,6 +353,39 @@ def test_run_multiple_dispatches_logg_through_smooth_apis(
     assert results[0]["chains"]["logG"] == ["chains_logG_bin0.npz"]
 
 
+def test_run_multiple_passes_model_specific_fit_bounds(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mtrue").mkdir()
+    calls = []
+    monkeypatch.setattr(run, "_tier1_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(
+        main, "prep_fit_materials", lambda **kwargs: "materials.npz"
+    )
+    monkeypatch.setattr(
+        run.mcmc, "fit_smooth_file",
+        lambda **kwargs: calls.append(kwargs) or ([], ["loglinear.npz"]),
+    )
+
+    run.run_multiple(
+        tier1_list=["mtrue"], tier2_list=["allstars"], tier3_list=["fit"],
+        a_edges=[0.1, 10.0], m_edges=[0.4, 50.0],
+        star_df=pd.DataFrame({"star_name": ["a"]}),
+        tier2_df_cuts_dict={
+            "allstars": [{"star_df_query": None}, "All Stars"]
+        },
+        run_models_list=["loglinear"], plot_models_list=[], make_plots=False,
+        model_fit_bounds={
+            "loglinear": {"a": (0.1, 10.0), "m": (1.3, 13.0)}
+        },
+    )
+
+    assert calls[0]["model_name"] == "loglinear"
+    np.testing.assert_allclose(
+        calls[0]["model_fit_bounds"]["m"], [1.3, 13.0]
+    )
+
+
 def test_run_multiple_dispatches_new_smooth_models(tmp_path, monkeypatch):
     """All new models should share the registered smooth-fit dispatcher."""
     monkeypatch.chdir(tmp_path)

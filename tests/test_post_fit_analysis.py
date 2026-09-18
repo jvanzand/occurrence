@@ -168,6 +168,7 @@ def test_calculate_delta_bic_uses_flat_minus_model_convention(
     np.savez(
         chain_dir / "chains_logG_bin0.npz",
         stack_bounds=np.array([1.0, 10.0]),
+        model_bounds=np.array([1.0, 10.0]),
     )
     cache = SimpleNamespace(companion_names=("one", "two", "three"))
     monkeypatch.setattr(
@@ -176,7 +177,7 @@ def test_calculate_delta_bic_uses_flat_minus_model_convention(
     )
     monkeypatch.setattr(
         post_fit_analysis.dl, "build_smooth_cache",
-        lambda *args: cache,
+        lambda *args, **kwargs: cache,
     )
     monkeypatch.setattr(
         post_fit_analysis, "_optimize_flat_model", lambda cache: (0.2, -12.0)

@@ -15,6 +15,7 @@ def test_model_registry_is_complete_and_consistent():
         "escarpment": (dl.escarpment_density, 4),
         "sigmoid": (dl.sigmoid_density, 4),
         "bpl": (dl.broken_powerlaw_density, 4),
+        "loglinear": (dl.log_linear_density, 2),
     }
     assert set(mcmc_powerlaw.MODEL_REGISTRY) == set(expected)
     for name, (function, ndim) in expected.items():
@@ -34,6 +35,12 @@ def test_sigmoid_parameter_names_describe_shape():
     assert mcmc_powerlaw.MODEL_REGISTRY["sigmoid"].parameter_names == (
         "C1", "C2", "center", "width",
     )
+
+
+def test_loglinear_is_red_and_uses_endpoint_rates():
+    spec = mcmc_powerlaw.MODEL_REGISTRY["loglinear"]
+    assert spec.color == "red"
+    assert spec.parameter_names == (r"$C_{\rm low}$", r"$C_{\rm high}$")
 
 
 def test_corner_explicitly_marks_sigmoid_width_reference(tmp_path, monkeypatch):

@@ -88,6 +88,19 @@ def broken_powerlaw_density(theta, x):
     return amplitude*powerlaw*turnover
 
 
+def log_linear_density(theta, x, model_bounds=None):
+    """Evaluate an ORD linear in ``log10(x)`` between two endpoint rates."""
+    if model_bounds is None:
+        raise ValueError("model_bounds are required for the log-linear model")
+    low_rate, high_rate = np.asarray(theta, dtype=float)
+    log_x = np.log10(np.asarray(x, dtype=float))
+    log_low, log_high = np.log10(_validate_bounds_pair(
+        model_bounds, "model_bounds"
+    ))
+    fraction = (log_x - log_low)/(log_high - log_low)
+    return low_rate + (high_rate - low_rate)*fraction
+
+
 def cached_smooth_log_likelihood(theta, cache, density_function):
     """Evaluate a smooth model using parameter-independent cached arrays."""
     grid_density = np.asarray(
@@ -113,7 +126,7 @@ def cached_smooth_log_likelihood(theta, cache, density_function):
 
 
 def build_smooth_cache(
-        companions, exposure, stack_dim, stack_bounds):
+        companions, exposure, stack_dim, stack_bounds, model_bounds=None):
     """Precompute samples and collapsed exposure for one smooth-model fit.
 
     Stage 2 stores physical coordinates as ``(SMA, mass)``. ``stack_dim``
@@ -125,19 +138,40 @@ def build_smooth_cache(
     stack_bounds = _validate_bounds_pair(stack_bounds, "stack_bounds")
     if stack_dim == "a":
         model_coordinate, stack_coordinate = "mass", "sma"
-        model_bounds = exposure.y_bounds
+        full_model_bounds = exposure.y_bounds
         grid_model = exposure.y_values[0, :]
     else:
         model_coordinate, stack_coordinate = "sma", "mass"
-        model_bounds = exposure.x_bounds
+        full_model_bounds = exposure.x_bounds
         grid_model = exposure.x_values[:, 0]
+
+    model_bounds = _validate_bounds_pair(
+        full_model_bounds if model_bounds is None else model_bounds,
+        "model_bounds",
+    )
+    if (model_bounds[0] < full_model_bounds[0] or
+            model_bounds[1] > full_model_bounds[1]):
+        raise ValueError("model_bounds must lie inside the exposure domain")
 
     full_stack_bounds = exposure.x_bounds if stack_dim == "a" else exposure.y_bounds
     if stack_bounds[0] < full_stack_bounds[0] or stack_bounds[1] > full_stack_bounds[1]:
         raise ValueError("stack_bounds must lie inside the exposure domain")
-    exposure_weights = _collapse_exposure_over_stack(
+    collapsed_exposure = _collapse_exposure_over_stack(
         exposure, stack_dim, stack_bounds
     )
+    full_log_grid = np.log10(grid_model)
+    log_model_bounds = np.log10(model_bounds)
+    interior = (
+        (full_log_grid > log_model_bounds[0]) &
+        (full_log_grid < log_model_bounds[1])
+    )
+    log_x_grid = np.concatenate((
+        [log_model_bounds[0]], full_log_grid[interior], [log_model_bounds[1]]
+    ))
+    exposure_density = np.interp(
+        log_x_grid, full_log_grid, collapsed_exposure
+    )
+    exposure_weights = exposure_density*_trapezoid_weights(log_x_grid)
 
     sample_logs = []
     weight_logs = []
@@ -157,6 +191,10 @@ def build_smooth_cache(
         mask &= (
             (stacked_samples > stack_bounds[0]) &
             (stacked_samples <= stack_bounds[1])
+        )
+        mask &= (
+            (model_samples > model_bounds[0]) &
+            (model_samples <= model_bounds[1])
         )
         count = np.count_nonzero(mask)
         if count == 0:
@@ -182,7 +220,7 @@ def build_smooth_cache(
         companion_counts=np.asarray(counts, dtype=int),
         companion_weights=np.asarray(overlap_weights, dtype=float),
         companion_names=tuple(names),
-        log_x_grid=np.log10(grid_model),
+        log_x_grid=log_x_grid,
         exposure_weights=np.asarray(exposure_weights, dtype=float),
     )
 
@@ -192,8 +230,8 @@ def _collapse_exposure_over_stack(exposure, stack_dim, stack_bounds):
 
     Interpolated values at the requested boundaries prevent a stack bin from
     inheriting the full trapezoidal weight of a grid node outside that bin.
-    The remaining model-coordinate trapezoidal weights are included in the
-    returned one-dimensional exposure kernel.
+    Model-coordinate quadrature is applied later, after any model-domain
+    restriction and boundary interpolation.
     """
     log_a = np.log10(exposure.x_values[:, 0])
     log_m = np.log10(exposure.y_values[0, :])
@@ -204,12 +242,12 @@ def _collapse_exposure_over_stack(exposure, stack_dim, stack_bounds):
             _bounded_trapezoid(log_a, completeness[:, index], log_bounds)
             for index in range(completeness.shape[1])
         ])
-        return collapsed*_trapezoid_weights(log_m)
+        return collapsed
     collapsed = np.array([
         _bounded_trapezoid(log_m, completeness[index, :], log_bounds)
         for index in range(completeness.shape[0])
     ])
-    return collapsed*_trapezoid_weights(log_a)
+    return collapsed
 
 
 def _bounded_trapezoid(coordinates, values, bounds):
