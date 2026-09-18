@@ -58,9 +58,9 @@ def test_make_variables_expands_high_and_low_tier2_directories(tmp_path):
     )
     text = output.read_text()
 
-    assert r"\QFeHNstarsHigh" in text
-    assert r"\QFeHNeffHigh" in text
-    assert r"\QFeHAvgComplLow}{\ensuremath{0.80}}" in text
+    assert r"\QHighFeHNstars" in text
+    assert r"\QHighFeHNeff" in text
+    assert r"\QLowFeHAvgCompl}{\ensuremath{0.80}}" in text
     assert text.count("%"*72) == 2
     assert "\n\n" + "%"*72 in text
 
@@ -271,15 +271,20 @@ def test_make_parameter_table_references_variables_commands(
         tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     commands = [
-        "McMstarLogGParamAHighBinaZero",
-        "McMstarLogGParamMuHighBinaZero",
-        "McMstarLogGParamSigmaHighBinaZero",
-        "McMstarLogGIntOccHighBinaZero",
-        "McMstarEscarpmentParamCOneHighBinaZero",
-        "McMstarEscarpmentParamCTwoHighBinaZero",
-        "McMstarEscarpmentParamBPOneHighBinaZero",
-        "McMstarEscarpmentParamBPTwoHighBinaZero",
-        "McMstarEscarpmentIntOccHighBinaZero",
+        "McHighMstarLogGParamABinaZero",
+        "McHighMstarLogGParamMuBinaZero",
+        "McHighMstarLogGParamSigmaBinaZero",
+        "McHighMstarLogGIntOccBinaZero",
+        "McHighMstarEscarpmentParamCOneBinaZero",
+        "McHighMstarEscarpmentParamCTwoBinaZero",
+        "McHighMstarEscarpmentParamBPOneBinaZero",
+        "McHighMstarEscarpmentParamBPTwoBinaZero",
+        "McHighMstarEscarpmentIntOccBinaZero",
+        "McHighMstarSigmoidParamCOneBinaZero",
+        "McHighMstarSigmoidParamCTwoBinaZero",
+        "McHighMstarSigmoidParamCenterBinaZero",
+        "McHighMstarSigmoidParamWidthBinaZero",
+        "McHighMstarSigmoidIntOccBinaZero",
     ]
     paper_items = tmp_path / "paper_items"
     paper_items.mkdir()
@@ -289,9 +294,13 @@ def test_make_parameter_table_references_variables_commands(
 
     output = post_fit_analysis.make_parameter_table(
         tmp_path, "mtrue", "highMstar", "paper_bounds",
-        ["logG", "escaprment"], caption="Custom Fit Caption",
+        ["logG", "escaprment", "sigmoid"], caption="Custom Fit Caption",
     )
     text = output.read_text()
+    assert r"$\log_{10}(x_t)$" in text
+    assert r"$W$" in text
+    assert "Center &" not in text
+    assert "Width &" not in text
 
     assert output == (
         tmp_path / "paper_items" /
@@ -299,15 +308,23 @@ def test_make_parameter_table_references_variables_commands(
     )
     assert r"\caption{Custom Fit Caption}" in text
     assert r"\label{tab:model_params}" in text
-    assert r"$\mu$ & \McMstarLogGParamMuHighBinaZero \\" in text
+    assert r"$\mu$ & \McHighMstarLogGParamMuBinaZero \\" in text
     assert (
-        r"Occurrence & \McMstarEscarpmentIntOccHighBinaZero \\" in text
+        r"Occurrence & \McHighMstarEscarpmentIntOccBinaZero \\" in text
     )
     assert "1.0" not in text
 
 
 def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
         tmp_path):
+    models = ("logG", "escarpment", "sigmoid", "bpl", "loglinear")
+    for tier1 in ("mtrue", "qtrue"):
+        for tier2 in ("allstars", "highMstar", "lowMstar"):
+            chain_dir = tmp_path / tier1 / tier2 / "paper_bounds" / "saved_chains"
+            chain_dir.mkdir(parents=True)
+            for model in models:
+                if (tier1, tier2, model) != ("qtrue", "lowMstar", "loglinear"):
+                    (chain_dir / f"chains_{model}_bin0.npz").touch()
     output = post_fit_analysis.make_appendix_parameter_table(
         tmp_path,
         tier1_dirs=["mtrue", "qtrue"],
@@ -320,11 +337,10 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
         tmp_path / "paper_items" /
         "model_params_appendix_paper_bounds.tex"
     )
-    assert r"\begin{deluxetable*}{ccccccccccccc}" in text
-    assert r"\multicolumn{4}{c}{Log G Model}" in text
-    assert r"\multicolumn{5}{c}{Sigmoid Model}" in text
-    assert r"\cmidrule(lr){5-8}" in text
-    assert r"\cmidrule(lr){9-13}" in text
+    assert r"\begin{deluxetable*}{cccccccccccc}" in text
+    assert r"$\theta_1$ & $\theta_2$ & $\theta_3$ & $\theta_4$" in text
+    assert "\\startdata\n\n" not in text
+    assert "\n\n\\enddata" not in text
     rows = [line for line in text.splitlines() if line.startswith(("mtrue", "qtrue"))]
     assert [row.split(" & ")[:2] for row in rows] == [
         ["mtrue", "allstars"],
@@ -334,11 +350,31 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
         ["qtrue", "highMstar"],
         ["qtrue", "lowMstar"],
     ]
+    assert r"\McallstarsNstars" in rows[0]
+    assert r"\McallstarsNeffBinAZero" in rows[0]
+    assert r"\McallstarsAvgComplBinAZero" in rows[0]
+    assert r"\McallstarsLogGIntOccBinaZero" in rows[0]
     assert r"\McallstarsLogGParamABinaZero" in rows[0]
-    assert r"\McallstarsSigmoidParamCenterBinaZero" in rows[0]
-    assert r"\McMstarNeffHighBinAZero" in rows[1]
-    assert r"\McMstarSigmoidDbicLowBinaZero" in rows[2]
-    assert "Escarpment" not in text
+    assert r"\McHighMstarNeffBinAZero" in rows[1]
+    data = text.split(r"\startdata", 1)[1].split(r"\enddata", 1)[0]
+    all_data_rows = [
+        line for line in data.splitlines()
+        if line.strip() and line != r"\hline"
+    ]
+    assert len(all_data_rows) == 29
+    first_block = all_data_rows[:5]
+    assert [row.split(" & ")[5] for row in first_block] == [
+        r"\textbf{logG}", r"\textbf{escarpment}", r"\textbf{sigmoid}",
+        r"\textbf{bpl}", r"\textbf{loglinear}",
+    ]
+    assert r"\McallstarsSigmoidParamCenterBinaZero" in first_block[2]
+    assert r"\McallstarsBPLParamBetaBinaZero" in first_block[3]
+    assert r"\McallstarsLogLinearParamCHighBinaZero" in first_block[4]
+    assert r"\nodata" in first_block[0]
+    assert r"\McLowMstarSigmoidDbicBinaZero" in all_data_rows[12]
+    assert r"\QallstarsLogLinearIntOccBinaZero" in text
+    assert r"\QLowMstarLogLinearIntOccBinaZero" not in text
+    assert "tablecomments" not in text
 
 
 def test_make_three_parameter_tables_create_both_forms(tmp_path):

@@ -30,6 +30,7 @@ _MODEL_PARAMETER_MACROS = {
         "Escarpment", ("COne", "CTwo", "BPOne", "BPTwo")
     ),
     "sigmoid": ("Sigmoid", ("COne", "CTwo", "Center", "Width")),
+    "bpl": ("BPL", ("C", "LogBreak", "Beta", "Gamma")),
     "loglinear": ("LogLinear", ("CLow", "CHigh")),
 }
 
@@ -39,7 +40,10 @@ _MODEL_PARAMETER_LABELS = {
         r"$C_1$", r"$C_2$", r"$\log_{10}(x_{t,1})$",
         r"$\log_{10}(x_{t,2})$",
     ),
-    "sigmoid": (r"$C_1$", r"$C_2$", "Center", "Width"),
+    "sigmoid": (
+        r"$C_1$", r"$C_2$", r"$\log_{10}(x_t)$", r"$W$"
+    ),
+    "bpl": (r"$C$", r"$\log_{10}(x_0)$", r"$\beta$", r"$\gamma$"),
     "loglinear": (r"$C_{\rm low}$", r"$C_{\rm high}$"),
 }
 
@@ -60,6 +64,12 @@ def _latex_token(value):
 def _tier1_prefix(tier1_dir):
     name = Path(tier1_dir).name
     return _TIER1_LATEX_PREFIXES.get(name, _latex_token(name))
+
+
+def _tier2_command_token(tier2_dir):
+    """Return a command token that directly mirrors a Tier 2 directory."""
+    name = Path(tier2_dir).name
+    return "allstars" if name.lower() == "allstars" else _latex_token(name)
 
 
 def _tier2_directories(tier2_type):
@@ -149,8 +159,7 @@ def _integrated_occurrence_samples(model_name, samples, model_bounds,
     ])
 
 
-def _piecewise_integrated_values(chain_dir, prefix, split_suffix, stack_dim,
-                                 n_stack_bins):
+def _piecewise_integrated_values(chain_dir, prefix, stack_dim, n_stack_bins):
     """Collect per-stack integrated occurrence from the piecewise posterior."""
     path = chain_dir / "chains_piecewise.npz"
     if not path.is_file():
@@ -182,15 +191,14 @@ def _piecewise_integrated_values(chain_dir, prefix, split_suffix, stack_dim,
             integrated[:, bin_index], [16, 50, 84]
         )
         name = (
-            prefix + "PiecewiseIntOcc" + split_suffix +
+            prefix + "PiecewiseIntOcc" +
             f"Bin{stack_dim.lower()}{_number_word(bin_index)}"
         )
         values.append((name, _format_parameter(median, low, high)))
     return values
 
 
-def _parametric_values(chain_dir, prefix, split_suffix, stack_dim,
-                       n_stack_bins):
+def _parametric_values(chain_dir, prefix, stack_dim, n_stack_bins):
     """Collect formatted physical parameters from all saved smooth fits."""
     values = []
     dim = stack_dim.lower()
@@ -235,7 +243,7 @@ def _parametric_values(chain_dir, prefix, split_suffix, stack_dim,
             for parameter_index, parameter_macro in enumerate(parameter_macros):
                 name = (
                     prefix + model_macro + "Param" + parameter_macro +
-                    split_suffix + f"Bin{dim}{bin_label}"
+                    f"Bin{dim}{bin_label}"
                 )
                 value = _format_parameter(
                     median[parameter_index],
@@ -262,7 +270,7 @@ def _parametric_values(chain_dir, prefix, split_suffix, stack_dim,
                     slope_samples, [16, 50, 84]
                 )
                 model_values.append((
-                    prefix + model_macro + "ParamSlope" + split_suffix +
+                    prefix + model_macro + "ParamSlope" +
                     f"Bin{dim}{bin_label}",
                     _format_parameter(
                         slope_median, slope_low, slope_high
@@ -281,7 +289,7 @@ def _parametric_values(chain_dir, prefix, split_suffix, stack_dim,
                 integrated, [16, 50, 84]
             )
             model_values.append((
-                prefix + model_macro + "IntOcc" + split_suffix +
+                prefix + model_macro + "IntOcc" +
                 f"Bin{dim}{bin_label}",
                 _format_parameter(
                     integrated_median, integrated_low, integrated_high
@@ -418,17 +426,6 @@ def _result_key(tier1_dir, tier2_dir, tier3_dir):
     return Path(tier1_dir, tier2_dir, tier3_dir).as_posix()
 
 
-def _table_tier2_parts(tier2_dir):
-    """Convert a concrete Tier 2 directory to macro type and split suffix."""
-    tier2_dir = str(tier2_dir)
-    if tier2_dir.lower() == "allstars":
-        return tier2_dir, ""
-    for level, suffix in (("high", "High"), ("low", "Low")):
-        if tier2_dir.startswith(level) and len(tier2_dir) > len(level):
-            return tier2_dir[len(level):], suffix
-    return tier2_dir, ""
-
-
 def _variables_command_names(path):
     """Read the LaTeX command names defined in a variables file."""
     text = path.read_text(encoding="utf-8")
@@ -470,8 +467,7 @@ def make_parameter_table(
         )
 
     defined_commands = _variables_command_names(variables_path)
-    tier2_type, split_suffix = _table_tier2_parts(t2)
-    base_prefix = _tier1_prefix(t1) + tier2_type
+    base_prefix = _tier1_prefix(t1) + _tier2_command_token(t2)
     # Existing parameter variable names use forms such as "BinaZero".
     bin_suffix = "Bin" + stack_dim.lower() + _number_word(stack_bin)
 
@@ -481,7 +477,7 @@ def make_parameter_table(
     first_model_macro, first_parameters = _MODEL_PARAMETER_MACROS[first_model]
     probe_suffix = (
         first_model_macro + "Param" + first_parameters[0] +
-        split_suffix + bin_suffix
+        bin_suffix
     )
     prefixes = [base_prefix, base_prefix + _latex_token(Path(t3).name)]
     prefix = next(
@@ -514,7 +510,7 @@ def make_parameter_table(
         for label, parameter_macro in zip(labels, parameter_macros):
             command_name = (
                 prefix + model_macro + "Param" + parameter_macro +
-                split_suffix + bin_suffix
+                bin_suffix
             )
             if command_name not in defined_commands:
                 raise KeyError(
@@ -522,7 +518,7 @@ def make_parameter_table(
                 )
             lines.append(rf"{label} & \{command_name} \\")
         occurrence_name = (
-            prefix + model_macro + "IntOcc" + split_suffix + bin_suffix
+            prefix + model_macro + "IntOcc" + bin_suffix
         )
         if occurrence_name not in defined_commands:
             raise KeyError(
@@ -547,13 +543,16 @@ def make_appendix_parameter_table(
         stack_dim="a", caption="Fitted Model Parameters",
         label="tab:model_params_appendix", output_file=None,
         include_tier3_in_commands=False):
-    """Create the full Log G and sigmoid parameter table for the appendix.
+    """Create a hierarchical appendix table for all smooth fitted models.
 
-    Rows follow the legacy order: Tier 1 values in the supplied order, then
-    Tier 2 types in the supplied order, with ``allstars`` represented once and
-    every other type represented by its high row followed by its low row.
-    Numerical cells reference commands generated by :func:`make_variables`;
-    this function neither reads nor validates ``variables.tex``.
+    Each experiment contains one row for every smooth model whose requested
+    stack-bin chain exists.  Experiment-level cells are populated on the first
+    row and left blank on the remaining model rows.  Rows follow the legacy
+    experiment order: Tier 1 values in the supplied order, then Tier 2 types
+    in the supplied order, with ``allstars`` represented once and every other
+    type represented by its high row followed by its low row.  Numerical cells
+    reference commands generated by :func:`make_variables`; this function
+    neither reads nor validates ``variables.tex``.
 
     Set ``include_tier3_in_commands`` when ``make_variables`` was called with
     multiple Tier 3 directories and therefore included the Tier 3 token in its
@@ -575,63 +574,90 @@ def make_appendix_parameter_table(
 
     lines = [
         r"\begin{longrotatetable}",
-        r"\begin{deluxetable*}{ccccccccccccc}",
+        r"\begin{deluxetable*}{cccccccccccc}",
         rf"\tablecaption{{{caption}}}",
         rf"\label{{{label}}}",
         "",
         r"\tablehead{",
-        r"\multicolumn{4}{c}{} &",
-        r"\multicolumn{4}{c}{Log G Model} &",
-        r"\multicolumn{5}{c}{Sigmoid Model} \\",
-        r"\cmidrule(lr){5-8}",
-        r"\cmidrule(lr){9-13}",
         r"\shortstack{Mass\\Parameter} &",
         r"\shortstack{Stellar\\Subsample} &",
-        r"\shortstack{Integrated\\Occurrence Rate} &",
+        r"$N_\star$ &",
         r"\shortstack{$N_{\mathrm{eff}}$} &",
-        r"$A$ & $\mu$ & $\sigma$ & $\Delta\mathrm{BIC}$ &",
-        r"$C_1$ & $C_2$ & $\mathrm{Center}$ & $\mathrm{Width}$ & "
+        r"Completeness &",
+        r"Model &",
+        r"\shortstack{Integrated\\Occurrence Rate} &",
+        r"$\theta_1$ & $\theta_2$ & $\theta_3$ & $\theta_4$ &",
         r"$\Delta\mathrm{BIC}$",
         r"}",
         r"\startdata",
-        "",
     ]
+
+    model_order = ("logG", "escarpment", "sigmoid", "bpl", "loglinear")
 
     for tier1_dir in tier1_dirs:
         tier1_name = Path(tier1_dir).name
         for tier2_type in tier2_types:
-            for tier2_dir, split_suffix in _tier2_directories(tier2_type):
-                prefix = _tier1_prefix(tier1_name) + str(tier2_type)
+            for tier2_dir, _ in _tier2_directories(tier2_type):
+                prefix = (
+                    _tier1_prefix(tier1_name) +
+                    _tier2_command_token(tier2_dir)
+                )
                 if include_tier3_in_commands:
                     prefix += _latex_token(Path(t3).name)
-                commands = [
-                    prefix + "PiecewiseIntOcc" + split_suffix +
-                    parameter_bin_suffix,
-                    prefix + "Neff" + split_suffix + statistic_bin_suffix,
-                    prefix + "LogGParamA" + split_suffix +
-                    parameter_bin_suffix,
-                    prefix + "LogGParamMu" + split_suffix +
-                    parameter_bin_suffix,
-                    prefix + "LogGParamSigma" + split_suffix +
-                    parameter_bin_suffix,
-                    prefix + "LogGDbic" + split_suffix +
-                    parameter_bin_suffix,
-                    prefix + "SigmoidParamCOne" + split_suffix +
-                    parameter_bin_suffix,
-                    prefix + "SigmoidParamCTwo" + split_suffix +
-                    parameter_bin_suffix,
-                    prefix + "SigmoidParamCenter" + split_suffix +
-                    parameter_bin_suffix,
-                    prefix + "SigmoidParamWidth" + split_suffix +
-                    parameter_bin_suffix,
-                    prefix + "SigmoidDbic" + split_suffix +
-                    parameter_bin_suffix,
+                experiment_cells = [
+                    tier1_name,
+                    tier2_dir,
+                    f"\\{prefix}Nstars",
+                    f"\\{prefix}Neff{statistic_bin_suffix}",
+                    f"\\{prefix}AvgCompl{statistic_bin_suffix}",
                 ]
-                row = [tier1_name, tier2_dir] + [f"\\{name}" for name in commands]
-                lines.append(" & ".join(row) + r" \\")
+                chain_dir = (
+                    results_dir / tier1_dir / tier2_dir / t3 / "saved_chains"
+                )
+                calculated_models = [
+                    model_name for model_name in model_order
+                    if (chain_dir /
+                        f"chains_{model_name}_bin{stack_bin}.npz").is_file()
+                ]
+                for model_index, model_name in enumerate(calculated_models):
+                    model_macro, parameter_macros = _MODEL_PARAMETER_MACROS[
+                        model_name
+                    ]
+                    parameter_labels = _MODEL_PARAMETER_LABELS[model_name]
+                    parameter_cells = []
+                    for parameter_label, parameter_macro in zip(
+                            parameter_labels, parameter_macros):
+                        command = (
+                            prefix + model_macro + "Param" + parameter_macro +
+                            parameter_bin_suffix
+                        )
+                        parameter_cells.append(
+                            rf"\shortstack{{{parameter_label}\\\{command}}}"
+                        )
+                    parameter_cells.extend(
+                        [r"\nodata"]*(4 - len(parameter_cells))
+                    )
+                    occurrence = (
+                        prefix + model_macro + "IntOcc" +
+                        parameter_bin_suffix
+                    )
+                    delta_bic = (
+                        prefix + model_macro + "Dbic" +
+                        parameter_bin_suffix
+                    )
+                    row = (
+                        experiment_cells if model_index == 0 else ["", "", "", "", ""]
+                    ) + [
+                        rf"\textbf{{{model_name}}}",
+                        f"\\{occurrence}",
+                        *parameter_cells,
+                        f"\\{delta_bic}",
+                    ]
+                    lines.append(" & ".join(row) + r" \\")
+                if calculated_models:
+                    lines.append(r"\hline")
 
     lines.extend([
-        "",
         r"\enddata",
         r"\end{deluxetable*}",
         r"\end{longrotatetable}",
@@ -1045,9 +1071,9 @@ def make_variables(
     ``Neff`` and ``AvgCompl`` for every bin along ``stack_dim``.  Stack-bin
     labels are zero-based, matching the legacy analysis (for example,
     ``NeffBinAZero``).
-    With one Tier 3 directory, command names retain the legacy form, for
-    example ``\\McallstarsNeff`` and ``\\McMassNeffHigh``.  When several Tier
-    3 directories are supplied, their names are included to keep commands
+    With one Tier 3 directory, command names mirror the directory hierarchy,
+    for example ``\\McallstarsNeff`` and ``\\McHighMassNeff``.  When several
+    Tier 3 directories are supplied, their names are included to keep commands
     unique.  Available three-parameter subset results beneath
     ``three_parameter_t3`` are also included.  Missing subsets are reported
     and omitted without interrupting generation of the other commands.
@@ -1077,7 +1103,7 @@ def make_variables(
         tier1_name = Path(tier1_dir).name
         tier1_path = results_dir / tier1_dir
         for tier2_type in tier2_types:
-            for tier2_dir, split_suffix in _tier2_directories(tier2_type):
+            for tier2_dir, _ in _tier2_directories(tier2_type):
                 for tier3_dir in tier3_dirs:
                     summary_path = (
                         tier1_path / tier2_dir / tier3_dir / "saved_dicts" /
@@ -1116,25 +1142,26 @@ def make_variables(
                         )
                         n_stack_bins = len(bin_neff)
 
-                    prefix = _tier1_prefix(tier1_name) + str(tier2_type)
+                    prefix = (
+                        _tier1_prefix(tier1_name) +
+                        _tier2_command_token(tier2_dir)
+                    )
                     if include_tier3:
                         prefix += _latex_token(Path(tier3_dir).name)
                     values = {
                         "Nstars": str(int(nstars)),
-                        f"Neff{split_suffix}": f"{neff:.1f}",
-                        f"AvgCompl{split_suffix}": f"{avg_compl:.2f}",
+                        "Neff": f"{neff:.1f}",
+                        "AvgCompl": f"{avg_compl:.2f}",
                     }
-                    if split_suffix:
-                        values[f"Nstars{split_suffix}"] = values.pop("Nstars")
                     dim = stack_dim.upper()
                     for bin_index, (neff_value, compl_value) in enumerate(
                             zip(bin_neff, bin_avg_compl)):
                         bin_label = _number_word(bin_index)
                         values[
-                            f"Neff{split_suffix}Bin{dim}{bin_label}"
+                            f"NeffBin{dim}{bin_label}"
                         ] = f"{neff_value:.1f}"
                         values[
-                            f"AvgCompl{split_suffix}Bin{dim}{bin_label}"
+                            f"AvgComplBin{dim}{bin_label}"
                         ] = f"{compl_value:.2f}"
 
                     block = [
@@ -1152,8 +1179,7 @@ def make_variables(
                         tier1_path / tier2_dir / tier3_dir / "saved_chains"
                     )
                     piecewise_values = _piecewise_integrated_values(
-                        chain_dir, prefix, split_suffix, stack_dim,
-                        n_stack_bins,
+                        chain_dir, prefix, stack_dim, n_stack_bins,
                     )
                     if piecewise_values:
                         block.extend([
@@ -1167,8 +1193,7 @@ def make_variables(
                             command_names.add(name)
                             block.append(_command(name, value))
                     parametric_groups = _parametric_values(
-                            chain_dir, prefix, split_suffix, stack_dim,
-                            n_stack_bins)
+                            chain_dir, prefix, stack_dim, n_stack_bins)
                     for model_name, model_values in parametric_groups:
                         block.extend(["", "%"*36, f"% Parametric model: {model_name}"])
                         for name, value in model_values:
@@ -1186,7 +1211,7 @@ def make_variables(
                             model_macro = _MODEL_PARAMETER_MACROS[model_name][0]
                             for bin_index, delta in enumerate(deltas):
                                 name = (
-                                    prefix + model_macro + "Dbic" + split_suffix +
+                                    prefix + model_macro + "Dbic" +
                                     f"Bin{stack_dim.lower()}{_number_word(bin_index)}"
                                 )
                                 if name in command_names:
