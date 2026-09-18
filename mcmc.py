@@ -626,7 +626,7 @@ def add_smooth_model_to_figures(
             if model_plot_style == "credible":
                 _plot_credible_curves(
                     axis, grid[fit_mask], curves[:, fit_mask], label,
-                    color=model_color
+                    color=model_color, fill=False,
                 )
                 _queue_credible_extrapolation(
                     axis, grid, curves, fit_mask, model_color
@@ -809,11 +809,21 @@ def add_uncorrected_mle_to_figures(
             )
 
 
-def _plot_credible_curves(axis, x_values, curves, label, color=None):
+def _plot_credible_curves(
+        axis, x_values, curves, label, color=None, fill=True):
     """Add a posterior median and central 68 percent band to an axis."""
     low68, median, high68 = np.percentile(curves, [16, 50, 84], axis=0)
     line, = axis.plot(x_values, median, label=label, color=color)
-    axis.fill_between(x_values, low68, high68, color=line.get_color(), alpha=0.28)
+    if fill:
+        axis.fill_between(
+            x_values, low68, high68, color=line.get_color(), alpha=0.28,
+        )
+    else:
+        # Invisible supported-interval bounds participate in autoscaling. This
+        # lets the full credible band be deferred without letting its
+        # extrapolated portion enlarge the final y-axis.
+        axis.plot(x_values, low68, color=line.get_color(), alpha=0)
+        axis.plot(x_values, high68, color=line.get_color(), alpha=0)
 
 
 def _plot_posterior_draws(
@@ -850,15 +860,14 @@ def _outside_segments(mask):
 
 
 def _queue_credible_extrapolation(axis, x_values, curves, fit_mask, color):
-    """Defer credible extrapolations until supported y-limits are known."""
+    """Defer a full credible band and its dashed extrapolated medians."""
     low, median, high = np.percentile(curves, [16, 50, 84], axis=0)
     queue = getattr(axis, "_occurrence_extrapolations", [])
-    for indices in _outside_segments(fit_mask):
-        queue.append({
-            "kind": "credible", "x": x_values[indices],
-            "low": low[indices], "median": median[indices],
-            "high": high[indices], "color": color,
-        })
+    queue.append({
+        "kind": "credible", "x": x_values,
+        "low": low, "median": median, "high": high,
+        "fit_mask": np.asarray(fit_mask, dtype=bool), "color": color,
+    })
     axis._occurrence_extrapolations = queue
 
 
@@ -887,10 +896,12 @@ def _draw_queued_extrapolations(axis):
                 item["x"], item["low"], item["high"],
                 color=item["color"], alpha=0.28,
             )
-            axis.plot(
-                item["x"], item["median"], color=item["color"],
-                linestyle="--", alpha=0.65, scaley=False,
-            )
+            for indices in _outside_segments(item["fit_mask"]):
+                axis.plot(
+                    item["x"][indices], item["median"][indices],
+                    color=item["color"], linestyle="--", alpha=0.65,
+                    scaley=False,
+                )
         else:
             for curve in item["curves"]:
                 axis.plot(

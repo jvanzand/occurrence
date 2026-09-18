@@ -624,6 +624,8 @@ def test_credible_extrapolation_is_dashed_fainter_and_does_not_rescale(tmp_path)
     assert all(line.get_alpha() == pytest.approx(0.65) for line in dashed)
     assert all(collection.get_alpha() == pytest.approx(0.28)
                for collection in axis.collections)
+    assert len(axis.collections) == 1
+    assert axis.collections[0].get_edgecolors().size > 0
     np.testing.assert_allclose(axis.get_ylim(), supported_limits)
 
 
