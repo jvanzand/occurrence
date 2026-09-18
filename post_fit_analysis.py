@@ -48,7 +48,7 @@ _MODEL_PARAMETER_LABELS = {
 }
 
 _APPENDIX_MODEL_ORDER = (
-    "logG", "sigmoid", "escarpment", "loglinear",
+    "sigmoid", "escarpment", "logG", "loglinear",
 )
 
 _THREE_PARAMETER_TIER2_DIRS = (
