@@ -361,17 +361,17 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
         line for line in data.splitlines()
         if line.strip() and line != r"\hline"
     ]
-    assert len(all_data_rows) == 29
-    first_block = all_data_rows[:5]
+    assert len(all_data_rows) == 23
+    first_block = all_data_rows[:4]
     assert [row.split(" & ")[5] for row in first_block] == [
-        r"\textbf{logG}", r"\textbf{escarpment}", r"\textbf{sigmoid}",
-        r"\textbf{bpl}", r"\textbf{loglinear}",
+        r"\textbf{logG}", r"\textbf{sigmoid}", r"\textbf{escarpment}",
+        r"\textbf{loglinear}",
     ]
-    assert r"\McallstarsSigmoidParamCenterBinaZero" in first_block[2]
-    assert r"\McallstarsBPLParamBetaBinaZero" in first_block[3]
-    assert r"\McallstarsLogLinearParamCHighBinaZero" in first_block[4]
+    assert r"\McallstarsSigmoidParamCenterBinaZero" in first_block[1]
+    assert r"\McallstarsEscarpmentParamBPOneBinaZero" in first_block[2]
+    assert r"\McallstarsLogLinearParamCHighBinaZero" in first_block[3]
     assert r"\nodata" in first_block[0]
-    assert r"\McLowMstarSigmoidDbicBinaZero" in all_data_rows[12]
+    assert r"\McLowMstarLogLinearDbicBinaZero" in all_data_rows[11]
     assert r"\QallstarsLogLinearIntOccBinaZero" in text
     assert r"\QLowMstarLogLinearIntOccBinaZero" not in text
     assert "tablecomments" not in text

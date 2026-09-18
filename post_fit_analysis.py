@@ -47,6 +47,10 @@ _MODEL_PARAMETER_LABELS = {
     "loglinear": (r"$C_{\rm low}$", r"$C_{\rm high}$"),
 }
 
+_APPENDIX_MODEL_ORDER = (
+    "logG", "sigmoid", "escarpment", "loglinear",
+)
+
 _THREE_PARAMETER_TIER2_DIRS = (
     "highMstarhighFeHhighAct", "highMstarhighFeHlowAct",
     "highMstarlowFeHhighAct", "highMstarlowFeHlowAct",
@@ -592,8 +596,6 @@ def make_appendix_parameter_table(
         r"\startdata",
     ]
 
-    model_order = ("logG", "escarpment", "sigmoid", "bpl", "loglinear")
-
     for tier1_dir in tier1_dirs:
         tier1_name = Path(tier1_dir).name
         for tier2_type in tier2_types:
@@ -615,7 +617,7 @@ def make_appendix_parameter_table(
                     results_dir / tier1_dir / tier2_dir / t3 / "saved_chains"
                 )
                 calculated_models = [
-                    model_name for model_name in model_order
+                    model_name for model_name in _APPENDIX_MODEL_ORDER
                     if (chain_dir /
                         f"chains_{model_name}_bin{stack_bin}.npz").is_file()
                 ]
