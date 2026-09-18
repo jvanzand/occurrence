@@ -345,13 +345,11 @@ def _optimize_flat_model(cache):
 def calculate_delta_bic(fit_path, chain_dir, stack_dim="a"):
     """Compare every saved parametric fit with an optimized flat model.
 
-    The comparison is performed separately in each stack bin.  Models fitted
-    on a restricted model-coordinate interval are evaluated across their full
-    saved display interval, including extrapolated regions.  The fitted-model
-    parameters are not reoptimized on that larger interval.  The returned
-    values use ``BIC_flat - BIC_model``; positive values favor the parametric
-    model.  The sample size in the BIC penalty is the number of companion
-    systems contributing posterior support to the evaluation interval.
+    The comparison is performed separately in each stack bin and over the
+    model-coordinate interval used for the fit.  The returned values use
+    ``BIC_flat - BIC_model``; positive values favor the parametric model.  The
+    sample size in the BIC penalty is the number of companion systems
+    contributing posterior support to that fitted interval.
 
     Returns
     -------
@@ -386,22 +384,15 @@ def calculate_delta_bic(fit_path, chain_dir, stack_dim="a"):
                     )
                 stack_bounds = tuple(np.asarray(chain["stack_bounds"], dtype=float))
                 model_bounds = tuple(np.asarray(chain["model_bounds"], dtype=float))
-                evaluation_bounds = tuple(np.asarray(
-                    chain["display_model_bounds"]
-                    if "display_model_bounds" in chain else chain["model_bounds"],
-                    dtype=float,
-                ))
             cache = dl.build_smooth_cache(
                 companions, exposure, stack_dim, stack_bounds,
-                model_bounds=evaluation_bounds,
+                model_bounds=model_bounds,
             )
             _, flat_log_likelihood = _optimize_flat_model(cache)
             draw = _maximum_likelihood_draw(path, model_name)
             if draw.size != len(parameter_names):
                 raise ValueError(f"parameter count in {path} does not match {model_name}")
             density_function = lambda theta, x: mcmc_powerlaw.evaluate_density(
-                # Preserve the parameterization learned on the fit interval;
-                # for loglinear these bounds define its two endpoint rates.
                 model_name, theta, x, model_bounds
             )
             model_log_likelihood = dl.cached_smooth_log_likelihood(

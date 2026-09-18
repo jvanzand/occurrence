@@ -204,17 +204,15 @@ def test_calculate_delta_bic_uses_flat_minus_model_convention(
         chain_dir / "chains_logG_bin0.npz",
         stack_bounds=np.array([1.0, 10.0]),
         model_bounds=np.array([1.0, 10.0]),
-        display_model_bounds=np.array([0.4, 50.0]),
     )
     cache = SimpleNamespace(companion_names=("one", "two", "three"))
-    cache_calls = []
     monkeypatch.setattr(
         post_fit_analysis.dfu, "load_fit_data",
         lambda path: ({}, object()),
     )
     monkeypatch.setattr(
         post_fit_analysis.dl, "build_smooth_cache",
-        lambda *args, **kwargs: cache_calls.append((args, kwargs)) or cache,
+        lambda *args, **kwargs: cache,
     )
     monkeypatch.setattr(
         post_fit_analysis, "_optimize_flat_model", lambda cache: (0.2, -12.0)
@@ -234,7 +232,6 @@ def test_calculate_delta_bic_uses_flat_minus_model_convention(
 
     expected = (np.log(3) + 24.0) - (3*np.log(3) + 16.0)
     np.testing.assert_allclose(result["logG"], [expected])
-    assert cache_calls[0][1]["model_bounds"] == (0.4, 50.0)
 
 
 def test_calculate_all_delta_bics_saves_results_for_every_folder(
