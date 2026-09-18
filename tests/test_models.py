@@ -37,9 +37,9 @@ def test_sigmoid_parameter_names_describe_shape():
     )
 
 
-def test_loglinear_is_red_and_uses_endpoint_rates():
+def test_loglinear_is_purple_and_uses_endpoint_rates():
     spec = mcmc_powerlaw.MODEL_REGISTRY["loglinear"]
-    assert spec.color == "red"
+    assert spec.color == "purple"
     assert spec.parameter_names == (r"$C_{\rm low}$", r"$C_{\rm high}$")
 
 

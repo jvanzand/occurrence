@@ -45,7 +45,7 @@ MODEL_REGISTRY = {
         dl.log_linear_density,
         2,
         (r"$C_{\rm low}$", r"$C_{\rm high}$"),
-        "red",
+        "purple",
     ),
 }
 

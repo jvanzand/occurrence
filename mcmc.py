@@ -614,7 +614,7 @@ def add_smooth_model_to_figures(
         curves = np.asarray([
             density_function(sample, grid) for sample in samples
         ])
-        label = "log-linear" if model_name == "loglinear" else model_name
+        label = model_name
         if len(loaded) > 1:
             label += " (" + _stack_interval_label(
                 item["stack_coordinate"], item["stack_bounds"], m_unit

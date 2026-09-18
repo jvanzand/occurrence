@@ -620,7 +620,7 @@ def test_credible_extrapolation_is_dashed_fainter_and_does_not_rescale(tmp_path)
 
     dashed = [line for line in axis.lines if line.get_linestyle() == "--"]
     assert len(dashed) == 2
-    assert all(line.get_color() == "red" for line in axis.lines)
+    assert all(line.get_color() == "purple" for line in axis.lines)
     assert all(line.get_alpha() == pytest.approx(0.65) for line in dashed)
     assert all(collection.get_alpha() == pytest.approx(0.28)
                for collection in axis.collections)
