@@ -155,10 +155,45 @@ def test_make_variables_collects_parametric_fit_chains(tmp_path, monkeypatch):
     ).read_text()
 
     assert r"\McallstarsEscarpmentParamBPTwoBinaZero" in text
+    assert r"\McallstarsEscarpmentParamSlopeBinaZero" in text
     assert r"\ensuremath{1.30^{+0.07}_{-0.07}}" in text
     assert r"\McallstarsEscarpmentIntOccBinaZero" in text
     assert "% Parametric model: escarpment" in text
     assert r"\McallstarsEscarpmentDbicBinaZero}{\ensuremath{4.2}}" in text
+
+
+def test_make_variables_derives_loglinear_slope_from_fit_bounds(
+        tmp_path, monkeypatch):
+    tier1 = tmp_path / "mtrue"
+    _write_summary(
+        tier1, "allstars", "roi", n_abins=1, n_mbins=1,
+        cell_weights=np.array([4.0]), cell_compls=np.array([0.5]),
+        a_m_lims_pairs=np.array([[[1.0, 10.0], [1.0, 10.0]]]),
+    )
+    chain_dir = tier1 / "allstars" / "roi" / "saved_chains"
+    chain_dir.mkdir()
+    offsets = np.linspace(-0.1, 0.1, 101)
+    np.savez(
+        chain_dir / "chains_loglinear_bin0.npz",
+        flat_chains=np.column_stack([1.0 + offsets, 3.0 + 2.0*offsets]),
+        model_bounds=np.array([1.0, 100.0]),
+        stack_bounds=np.array([1.0, 10.0]),
+    )
+    monkeypatch.setattr(
+        post_fit_analysis, "calculate_all_delta_bics",
+        lambda *args: {"mtrue/allstars/roi": {"loglinear": [2.0]}},
+    )
+
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["allstars"], ["roi"]
+    ).read_text()
+
+    assert r"\McallstarsLogLinearParamSlopeBinaZero" in text
+    # The median slope is (3 - 1) / log10(100 / 1) = 1.
+    assert (
+        r"\McallstarsLogLinearParamSlopeBinaZero}"
+        r"{\ensuremath{1.00^{+0.03}_{-0.03}}}"
+    ) in text
 
 
 def test_calculate_delta_bic_uses_flat_minus_model_convention(

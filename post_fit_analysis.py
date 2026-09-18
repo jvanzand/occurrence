@@ -243,6 +243,31 @@ def _parametric_values(chain_dir, prefix, split_suffix, stack_dim,
                     high[parameter_index],
                 )
                 model_values.append((name, value))
+            if model_name in {"escarpment", "loglinear"}:
+                if model_name == "escarpment":
+                    denominator = samples[:, 3] - samples[:, 2]
+                else:
+                    denominator = np.full(
+                        samples.shape[0],
+                        np.log10(model_bounds[1]/model_bounds[0]),
+                    )
+                if (not np.isfinite(denominator).all() or
+                        np.any(denominator <= 0)):
+                    raise ValueError(
+                        f"{model_name} slope denominator must be positive in "
+                        f"{path}"
+                    )
+                slope_samples = (samples[:, 1] - samples[:, 0])/denominator
+                slope_low, slope_median, slope_high = np.percentile(
+                    slope_samples, [16, 50, 84]
+                )
+                model_values.append((
+                    prefix + model_macro + "ParamSlope" + split_suffix +
+                    f"Bin{dim}{bin_label}",
+                    _format_parameter(
+                        slope_median, slope_low, slope_high
+                    ),
+                ))
             cdf_samples = samples[::10]
             if cdf_samples.shape[0] > 10000:
                 indices = np.linspace(
