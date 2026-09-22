@@ -99,7 +99,7 @@ def _adaptive_decimal_tick_formatter(tick_values, value_name):
         return decimal_label(value, required_precision)
 
     format_tick.decimal_places = required_precision
-    format_tick.rotate_labels = required_precision >= 2 or values.size > 7
+    format_tick.rotate_labels = required_precision >= 3 or values.size > 7
 
     return format_tick
 
