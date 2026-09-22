@@ -92,6 +92,10 @@ def test_run_multiple_applies_tier2_cuts_and_plot_controls(
     assert [len(call["star_df"]) for call in prep_calls] == [3, 2]
     assert len(fit_calls) == 2
     assert [call["nstars"] for call in plot_calls] == [3, 2]
+    assert [call["title"] for call in plot_calls] == [
+        "Companion Mass Function (All Stars)",
+        "Companion Mass Function (High Mass)",
+    ]
     assert all(call["plot_density"] is False for call in plot_calls)
     assert all(call["plot_catalog_roi"] is True for call in plot_calls)
     assert all(call["plot_roi_occurrence"] is True for call in plot_calls)

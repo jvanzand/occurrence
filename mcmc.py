@@ -615,6 +615,8 @@ def add_smooth_model_to_figures(
             density_function(sample, grid) for sample in samples
         ])
         label = model_name
+        label = 'Log-normal' if model_name == 'logG' else label
+        label = 'Broken power law' if model_name == 'bpl' else label
         if len(loaded) > 1:
             label += " (" + _stack_interval_label(
                 item["stack_coordinate"], item["stack_bounds"], m_unit
@@ -712,18 +714,18 @@ def save_model_figures(
     output_dir.mkdir(parents=True, exist_ok=True)
     coordinate = "mass" if stack_dim == "a" else "sma"
     if coordinate == "sma":
-        x_label = "Semimajor axis (AU)"
+        x_label = "Semi-major axis [AU]"
     elif mtype in {"qtrue", "qsini"}:
-        x_label = r"Mass Ratio ($M_c/M_{\star}$)"
+        x_label = r"Mass Ratio [$M_c/M_{\star}$]"
     else:
         x_label = (
-            "Companion mass ($M_{Jup}$)" if m_unit == "jupiter"
-            else "Companion mass ($M_{Earth}$)"
+            "Companion mass [$M_{Jup}$]" if m_unit == "jupiter"
+            else "Companion mass [$M_{Earth}$]"
         )
     plot_specs = {
         "density": (
-            "Occurrence rate density\n"
-            r"[Planets/star/$\Delta \log_{10}(\omega)$]",
+            "Occurrence rate density",#\n"
+            # r"[Planets/star/$\Delta \log_{10}(\omega)$]",
             "occurrence_ORD.png",
         ),
         "occurrence": (
@@ -749,13 +751,20 @@ def save_model_figures(
                 10**(log_edges[-1] + padding),
             )
             axis.xaxis.set_major_locator(FixedLocator(model_edges))
-            formatter = (
-                pu.mass_ratio_tick_formatter(model_edges)
-                if coordinate == "mass" and mtype in {"qtrue", "qsini"}
-                else lambda value, position: f"{value:g}"
-            )
+            if coordinate == "mass" and mtype in {"qtrue", "qsini"}:
+                formatter = pu.mass_ratio_tick_formatter(model_edges)
+            elif coordinate == "mass" and mtype in {"mtrue", "msini"}:
+                formatter = pu.mass_tick_formatter(model_edges)
+            elif coordinate == "sma":
+                formatter = pu.sma_tick_formatter(model_edges)
+            else:
+                formatter = lambda value, position: f"{value:g}"
             axis.xaxis.set_major_formatter(FuncFormatter(formatter))
             axis.xaxis.set_minor_locator(NullLocator())
+            if ((coordinate == "sma" or
+                 (coordinate == "mass" and mtype in {"mtrue", "msini"})) and
+                    formatter.rotate_labels):
+                plt.setp(axis.get_xticklabels(), rotation=45, ha="right")
             legend_fontsize = (
                 1.6*plt.rcParams["font.size"]
                 if name in {"density", "occurrence"} else None

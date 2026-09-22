@@ -65,6 +65,55 @@ def mass_ratio_tick_formatter(tick_values):
     return format_tick
 
 
+def _adaptive_decimal_tick_formatter(tick_values, value_name):
+    """Return decimal labels precise enough to distinguish every tick.
+
+    Only the minimum number of decimal places required for uniqueness is used.
+    The selected precision is exposed as ``decimal_places`` on the returned
+    formatter so plotting paths can rotate especially precise labels.
+    """
+    values = np.asarray(tick_values, dtype=float).reshape(-1)
+    if values.size == 0 or not np.isfinite(values).all():
+        raise ValueError(f"{value_name} tick values must be nonempty and finite")
+
+    def decimal_label(value, precision):
+        label = f"{value:.{precision}f}"
+        if "." in label:
+            label = label.rstrip("0").rstrip(".")
+        return "0" if label in {"-0", ""} else label
+
+    unique = np.unique(values)
+    required_precision = 0
+    for precision in range(16):
+        labels = [decimal_label(value, precision) for value in unique]
+        preserves_nonzero = all(
+            value == 0 or label != "0"
+            for value, label in zip(unique, labels)
+        )
+        if len(set(labels)) == len(labels) and preserves_nonzero:
+            required_precision = precision
+            break
+    else:
+        raise ValueError(f"{value_name} ticks cannot be distinguished")
+    def format_tick(value, position=None):
+        return decimal_label(value, required_precision)
+
+    format_tick.decimal_places = required_precision
+    format_tick.rotate_labels = required_precision >= 2 or values.size > 7
+
+    return format_tick
+
+
+def mass_tick_formatter(tick_values):
+    """Return adaptive decimal labels for true-mass ticks."""
+    return _adaptive_decimal_tick_formatter(tick_values, "mass")
+
+
+def sma_tick_formatter(tick_values):
+    """Return adaptive decimal labels for semimajor-axis ticks."""
+    return _adaptive_decimal_tick_formatter(tick_values, "SMA")
+
+
 def legend_with_label_last(axis, last_label, fontsize=None, loc=None):
     """Draw an axis legend with every occurrence of ``last_label`` last."""
     handles, labels = axis.get_legend_handles_labels()
@@ -600,6 +649,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         fig, ax = plt.subplots(figsize=figsize)
 
         if n_a > 1:
+            x_is_sma = True
             x_edges = a_edges
             y_edges = m_edges
             y = mode[0]
@@ -613,6 +663,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
             yunit_label = m_unit_label
             
         else:
+            x_is_sma = False
             x_edges = m_edges
             y_edges = a_edges
             y = mode[:, 0]
@@ -659,17 +710,23 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
 
         ax.set_xscale('log')
         # Set ticks at bin edges and format
-        tick_label_fmt_fn = int_or_one_decimal if mtype in ['mtrue', 'msini'] \
-                       else mass_ratio_tick_formatter(x_edges) if mtype in ['qtrue', 'qsini'] \
-                       else None
+        tick_label_fmt_fn = (
+            sma_tick_formatter(x_edges) if x_is_sma
+            else mass_tick_formatter(x_edges) if mtype in ['mtrue', 'msini']
+            else mass_ratio_tick_formatter(x_edges)
+            if mtype in ['qtrue', 'qsini'] else None
+        )
 
         ax.xaxis.set_major_locator(FixedLocator(x_edges))
         ax.xaxis.set_major_formatter(FuncFormatter(tick_label_fmt_fn))
         ax.xaxis.set_minor_locator(NullLocator())
         ax.tick_params(axis='both', which='major', labelsize=tick_size)
         
-        if mtype in ['qtrue', 'qsini']:
+        if not x_is_sma and mtype in ['qtrue', 'qsini']:
             plt.setp(ax.get_xticklabels(), rotation=90, ha='left')
+        elif ((x_is_sma or mtype in ['mtrue', 'msini']) and
+              tick_label_fmt_fn.rotate_labels):
+            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
 
         ax.set_xlabel(xlabel)
         ax.set_ylabel(plot_ylabel, fontsize=label_size, labelpad=20)
@@ -701,6 +758,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         if stack_dim == 'm':
             # One subplot per mass bin (rows)
             x_edges = a_edges
+            tick_label_fmt_fn = sma_tick_formatter(x_edges)
             centers = np.sqrt(x_edges[:-1] * x_edges[1:])
             widths = np.diff(x_edges)
 
@@ -746,6 +804,11 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                     )
 
                 ax_i.set_xscale('log')
+                ax_i.xaxis.set_major_locator(FixedLocator(x_edges))
+                ax_i.xaxis.set_major_formatter(
+                    FuncFormatter(tick_label_fmt_fn)
+                )
+                ax_i.xaxis.set_minor_locator(NullLocator())
 
                 # Add right-side vertical label showing mass range for this subplot
                 m_lo = m_edges[i]
@@ -769,6 +832,8 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
             fig.supylabel(plot_ylabel, fontsize=label_size)
             # Set x-label on bottom-most axis (after reversing it's index 0)
             ax[0].set_xlabel('SMA [AU]', fontsize=label_size)
+            if tick_label_fmt_fn.rotate_labels:
+                plt.setp(ax[0].get_xticklabels(), rotation=45, ha='right')
 
         elif stack_dim == 'a':
             # One subplot per SMA bin (rows), x-axis is mass
@@ -819,12 +884,18 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 ax_i.xaxis.set_major_locator(FixedLocator(x_edges))
                 tick_label_fmt_fn = (
                     mass_ratio_tick_formatter(x_edges)
-                    if mtype in ['qtrue', 'qsini'] else int_or_one_decimal
+                    if mtype in ['qtrue', 'qsini']
+                    else mass_tick_formatter(x_edges)
                 )
                 ax_i.xaxis.set_major_formatter(FuncFormatter(tick_label_fmt_fn))
                 ax_i.xaxis.set_minor_locator(NullLocator())
                 #ax_i.yaxis.set_minor_locator(NullLocator())
                 ax_i.tick_params(axis='both', which='major', labelsize=tick_size)
+                if (mtype in ['mtrue', 'msini'] and
+                        tick_label_fmt_fn.rotate_labels):
+                    plt.setp(
+                        ax_i.get_xticklabels(), rotation=45, ha='right'
+                    )
 
                 # Add right-side vertical label showing SMA range for this subplot
                 a_lo = a_edges[i]
@@ -838,7 +909,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 
             
             
-        if mtype in ['qtrue', 'qsini']:
+        if stack_dim == 'a' and mtype in ['qtrue', 'qsini']:
             plt.setp(ax[0].get_xticklabels(), rotation=90, ha='left')
 
         # Compute a single y-axis upper limit across all subplots and apply

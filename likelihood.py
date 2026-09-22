@@ -200,7 +200,7 @@ def build_smooth_cache(
         if count == 0:
             continue
         ratios = companion.completeness_over_prior[mask]
-        if not np.isfinite(ratios).all() or np.any(ratios <= 0):
+        if not np.isfinite(ratios).all() or np.any(ratios < 0):
             raise ValueError(f"{name} has invalid completeness/prior in the fit interval")
         starts.append(offset)
         counts.append(count)

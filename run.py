@@ -466,10 +466,10 @@ def _run_configuration(configuration):
         "chains": {},
         "plots": {},
     }
-    title = (
-        f"{len(configuration['star_df'])} Stars "
-        f"({_format_subsample_title(configuration['title'])})"
-    )
+    subsample_title = _format_subsample_title(configuration["title"]).strip()
+    title = "Mass Function"
+    if subsample_title:
+        title += f" ({subsample_title})"
     early_plot_paths = {}
     roi_occurrence_future = None
     plot_executor = None

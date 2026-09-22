@@ -534,7 +534,7 @@ def test_mass_ratio_figures_use_mass_ratio_axis_label(tmp_path):
         "test", m_unit="jupiter", mtype="qtrue",
     )
 
-    assert axis.get_xlabel() == r"Mass Ratio ($M_c/M_{\star}$)"
+    assert axis.get_xlabel() == r"Mass Ratio [$M_c/M_{\star}$]"
 
 
 def test_mass_ratio_tick_formatter_selects_notation_and_distinct_precision():
@@ -559,6 +559,80 @@ def test_mass_ratio_tick_formatter_selects_notation_and_distinct_precision():
     assert [extra_precision_formatter(value) for value in extra_precision_ticks] == [
         "1.214e-3", "1.224e-3", "0.1214", "0.1224",
     ]
+
+
+def test_mass_tick_formatter_uses_distinguishing_decimal_precision():
+    from occurrence import plotting_utils
+
+    ticks = [1.214, 1.224, 1.234, 13.0]
+    formatter = plotting_utils.mass_tick_formatter(ticks)
+
+    assert [formatter(value) for value in ticks] == [
+        "1.21", "1.22", "1.23", "13",
+    ]
+    assert formatter.decimal_places == 2
+
+
+def test_sma_tick_formatter_uses_distinguishing_decimal_precision():
+    from occurrence import plotting_utils
+
+    ticks = [0.1214, 0.1224, 0.1234, 10.0]
+    formatter = plotting_utils.sma_tick_formatter(ticks)
+
+    assert [formatter(value) for value in ticks] == [
+        "0.121", "0.122", "0.123", "10",
+    ]
+    assert formatter.decimal_places == 3
+
+
+def test_sma_tick_formatter_does_not_round_nonzero_tick_to_zero():
+    from occurrence import plotting_utils
+
+    ticks = [0.03, 1.0, 10.0]
+    formatter = plotting_utils.sma_tick_formatter(ticks)
+
+    assert [formatter(value) for value in ticks] == ["0.03", "1", "10"]
+    assert formatter.decimal_places == 2
+    assert formatter.rotate_labels is True
+
+
+def test_adaptive_tick_rotation_also_applies_to_more_than_seven_labels():
+    from occurrence import plotting_utils
+
+    formatter = plotting_utils.sma_tick_formatter(np.arange(1.0, 9.0))
+
+    assert formatter.decimal_places == 0
+    assert formatter.rotate_labels is True
+
+
+def test_saved_sma_figure_uses_adaptive_tick_formatter(tmp_path):
+    import matplotlib.pyplot as plt
+
+    edges = [0.1214, 0.1224, 0.1234, 10.0]
+    figure, axis = plt.subplots()
+    mcmc.save_model_figures(
+        {"density": (figure, axis)}, tmp_path, "m", edges, "test",
+        mtype="qtrue",
+    )
+
+    labels = [axis.xaxis.get_major_formatter()(value) for value in edges]
+    assert labels == ["0.121", "0.122", "0.123", "10"]
+    assert all(label.get_rotation() == 45 for label in axis.get_xticklabels())
+
+
+def test_saved_true_mass_figure_uses_adaptive_tick_formatter(tmp_path):
+    import matplotlib.pyplot as plt
+
+    edges = [1.214, 1.224, 1.234, 13.0]
+    figure, axis = plt.subplots()
+    mcmc.save_model_figures(
+        {"density": (figure, axis)}, tmp_path, "a", edges, "test",
+        m_unit="jupiter", mtype="mtrue",
+    )
+
+    labels = [axis.xaxis.get_major_formatter()(value) for value in edges]
+    assert labels == ["1.21", "1.22", "1.23", "13"]
+    assert all(label.get_rotation() == 45 for label in axis.get_xticklabels())
 
 
 def test_saved_mass_ratio_model_figure_retains_compact_tick_formatter(tmp_path):
