@@ -271,6 +271,12 @@ def _plot_companions_for_result(
         ycol="inj_mtrue", m_unit="jupiter",
     )
     axis = figure.axes[0]
+    completeness_colorbar_axis = figure.axes[1]
+    axis.xaxis.label.set_size(24)
+    axis.yaxis.label.set_size(24)
+    axis.tick_params(axis="both", which="both", labelsize=22)
+    completeness_colorbar_axis.yaxis.label.set_size(20)
+    completeness_colorbar_axis.tick_params(labelsize=20)
     if parameter_key == "age":
         from matplotlib import colors
         from matplotlib.cm import ScalarMappable
