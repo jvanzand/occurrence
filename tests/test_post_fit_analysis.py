@@ -488,12 +488,17 @@ def test_make_three_parameter_tables_can_embed_numerical_values(
         lambda result_dir: np.array([0.1, 0.2, 0.3]),
     )
     catalog_path = tmp_path / "stars.csv"
-    pd.DataFrame([
+    rows = [
         {"Mstar": mass, "feh": feh, "age": age}
-        for mass in (0.8, 1.2)
+        for mass in (0.82, 1.21)
         for feh in (-0.3, 0.2)
         for age in (2.0, 8.0)
-    ]).to_csv(catalog_path, index=False)
+    ]
+    rows.extend([
+        {"Mstar": 0.5, "feh": 0.2, "age": 8.0},
+        {"Mstar": 2.0, "feh": 0.2, "age": 8.0},
+    ])
+    pd.DataFrame(rows).to_csv(catalog_path, index=False)
 
     outputs = post_fit_analysis.make_three_parameter_tables(
         tmp_path, use_latex_variables=False,
@@ -511,9 +516,9 @@ def test_make_three_parameter_tables_can_embed_numerical_values(
     ) in original
     assert r"\McHighMstarHighFeHYoungIntOcc" not in reordered
     assert reordered.count(r"$0.0\,\sigma$") == 12
-    assert reordered.count(" & 1.50 ") == 4
-    assert reordered.count(" & 3.16 ") == 4
-    assert reordered.count(" & 4.00 ") == 4
+    assert reordered.count(" & 1.5 ") == 4
+    assert reordered.count(" & 3.2 ") == 4
+    assert reordered.count(" & 4.0 ") == 4
 
 
 def test_posterior_difference_significance_uses_sign_probability():
@@ -544,7 +549,7 @@ def test_three_parameter_dynamic_ranges_use_stellar_medians(tmp_path):
     catalog_path = tmp_path / "stars.csv"
     pd.DataFrame([
         {"Mstar": mass, "feh": feh, "age": age}
-        for mass in (0.8, 1.2)
+        for mass in (0.82, 1.21)
         for feh in (-0.3, 0.2)
         for age in (2.0, 8.0)
     ]).to_csv(catalog_path, index=False)
@@ -553,7 +558,9 @@ def test_three_parameter_dynamic_ranges_use_stellar_medians(tmp_path):
         catalog_path
     )
 
-    assert dynamic_ranges[("Mass", ("high", "old"))] == pytest.approx(1.5)
+    assert dynamic_ranges[("Mass", ("high", "old"))] == pytest.approx(
+        1.21/0.82
+    )
     assert dynamic_ranges[("FeH", ("high", "old"))] == pytest.approx(
         10**0.2/10**-0.3
     )
@@ -627,7 +634,7 @@ def test_make_variables_adds_three_parameter_significances(
     catalog_path = tmp_path / "stars.csv"
     pd.DataFrame([
         {"Mstar": mass, "feh": feh, "age": age}
-        for mass in (0.8, 1.2)
+        for mass in (0.82, 1.21)
         for feh in (-0.3, 0.2)
         for age in (2.0, 8.0)
     ]).to_csv(catalog_path, index=False)

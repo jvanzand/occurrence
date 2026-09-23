@@ -63,6 +63,8 @@ _THREE_PARAMETER_DEFAULT_CUTS = {
     "Mstar": 1.0,
     "feh": 0.0,
     "age": 5.0,
+    "Mstar_min": 0.82,
+    "Mstar_max": 1.21,
 }
 
 
@@ -1079,10 +1081,12 @@ def _three_parameter_dynamic_range_command_name(
 def _three_parameter_dynamic_ranges(catalog_path=None, cuts=None):
     """Calculate median stellar-property ratios for all table comparisons.
 
-    The catalog is divided using the same mass, metallicity, and age cuts
-    represented by the three-parameter Tier 2 directory names.  Ratios are
-    always reported as the larger median divided by the smaller median.  The
-    metallicity medians are converted from dex to linear abundance first.
+    The catalog is first restricted to the stellar-mass interval where the
+    age-activity relation is valid, then divided using the mass, metallicity,
+    and age cuts represented by the three-parameter Tier 2 directory names.
+    Ratios are always reported as the larger median divided by the smaller
+    median.  The metallicity medians are converted from dex to linear
+    abundance first.
     """
     import pandas as pd
 
@@ -1103,12 +1107,23 @@ def _three_parameter_dynamic_ranges(catalog_path=None, cuts=None):
         parameter_cuts.update(cuts)
 
     catalog = pd.read_csv(catalog_path)
-    required = set(parameter_cuts)
+    required = {"Mstar", "feh", "age"}
     missing = sorted(required - set(catalog.columns))
     if missing:
         raise KeyError(f"{catalog_path} lacks columns {missing}")
     for column in required:
         catalog[column] = pd.to_numeric(catalog[column], errors="coerce")
+
+    mstar_min = parameter_cuts["Mstar_min"]
+    mstar_max = parameter_cuts["Mstar_max"]
+    if not np.isfinite(mstar_min) or not np.isfinite(mstar_max):
+        raise ValueError("Mstar_min and Mstar_max must be finite")
+    if mstar_min > mstar_max:
+        raise ValueError("Mstar_min cannot exceed Mstar_max")
+    valid_age_activity_range = (
+        (catalog["Mstar"] >= mstar_min) &
+        (catalog["Mstar"] <= mstar_max)
+    )
 
     def level_mask(column, level):
         values = catalog[column]
@@ -1126,6 +1141,7 @@ def _three_parameter_dynamic_ranges(catalog_path=None, cuts=None):
         for levels in (low_levels, high_levels):
             mass, metallicity, age = levels
             mask = (
+                valid_age_activity_range &
                 level_mask("Mstar", mass) &
                 level_mask("feh", metallicity) &
                 level_mask("age", age)
@@ -1639,9 +1655,10 @@ def make_variables(
     chains are available, the file also includes the posterior significance
     of every comparison in the reordered three-parameter table.  Dynamic
     ranges use ``stellar_catalog_path`` and ``three_parameter_cuts``; their
-    defaults are the repository CLS stellar catalog and cuts at 1 solar mass,
-    zero dex, and 5 Gyr.  Missing subsets or comparison chains are reported
-    and omitted without interrupting generation of the other commands.
+    defaults are the repository CLS stellar catalog, the inclusive stellar
+    mass range 0.82--1.21 solar masses, and cuts at 1 solar mass, zero dex,
+    and 5 Gyr.  Missing subsets or comparison chains are reported and omitted
+    without interrupting generation of the other commands.
 
     Returns
     -------
