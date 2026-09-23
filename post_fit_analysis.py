@@ -352,13 +352,15 @@ def _plot_companions_for_result(
 
 def plot_companions_by_stellar_parameter(
         results_dir, tier1_dirs, tier2_types, tier3_dirs,
-        stellar_parameter, catalog_path=None):
+        stellar_parameters, catalog_path=None):
     """Create host-colored companion plots for requested result folders.
 
     The directory arguments follow :func:`make_variables`.  Tier 2 types such
     as ``"Mstar"`` are expanded to their ``highMstar`` and ``lowMstar``
     directories, while ``"allstars"`` remains a single directory.  Every
-    plot is saved in the matching Tier 3 experiment's ``plots`` directory.
+    requested stellar parameter gets its own plot in the matching Tier 3
+    experiment's ``plots`` directory.  A single parameter string is also
+    accepted for convenience.
 
     Returns
     -------
@@ -369,9 +371,15 @@ def plot_companions_by_stellar_parameter(
     tier1_dirs = list(tier1_dirs)
     tier2_types = list(tier2_types)
     tier3_dirs = list(tier3_dirs)
-    if not tier1_dirs or not tier2_types or not tier3_dirs:
+    if isinstance(stellar_parameters, str):
+        stellar_parameters = [stellar_parameters]
+    else:
+        stellar_parameters = list(stellar_parameters)
+    if (not tier1_dirs or not tier2_types or not tier3_dirs or
+            not stellar_parameters):
         raise ValueError(
-            "tier1_dirs, tier2_types, and tier3_dirs cannot be empty"
+            "tier1_dirs, tier2_types, tier3_dirs, and stellar_parameters "
+            "cannot be empty"
         )
 
     outputs = {}
@@ -382,13 +390,17 @@ def plot_companions_by_stellar_parameter(
                     experiment_dir = (
                         results_dir / tier1_dir / tier2_dir / tier3_dir
                     )
-                    key = _result_key(tier1_dir, tier2_dir, tier3_dir)
-                    outputs[key] = _plot_companions_for_result(
-                        experiment_dir,
-                        stellar_parameter=stellar_parameter,
-                        catalog_path=catalog_path,
-                        tier1_name=Path(tier1_dir).name,
+                    result_key = _result_key(
+                        tier1_dir, tier2_dir, tier3_dir
                     )
+                    for stellar_parameter in stellar_parameters:
+                        key = f"{result_key}/{stellar_parameter}"
+                        outputs[key] = _plot_companions_for_result(
+                            experiment_dir,
+                            stellar_parameter=stellar_parameter,
+                            catalog_path=catalog_path,
+                            tier1_name=Path(tier1_dir).name,
+                        )
     return outputs
 
 

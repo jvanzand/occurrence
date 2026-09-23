@@ -526,13 +526,15 @@ def test_plot_companions_by_stellar_parameter_uses_saved_hosts(
         "age": [5.0, 5.0, 2.0],
     }).to_csv(catalog_path, index=False)
 
-    plotted = {}
+    plotted = []
     original_scatter = Axes.scatter
 
     def capture_scatter(axis, x, y, *args, **kwargs):
-        plotted["x"] = np.asarray(x)
-        plotted["y"] = np.asarray(y)
-        plotted["color"] = np.asarray(kwargs["c"])
+        plotted.append({
+            "x": np.asarray(x),
+            "y": np.asarray(y),
+            "color": np.asarray(kwargs["c"]),
+        })
         return original_scatter(axis, x, y, *args, **kwargs)
 
     monkeypatch.setattr(Axes, "scatter", capture_scatter)
@@ -541,16 +543,20 @@ def test_plot_companions_by_stellar_parameter_uses_saved_hosts(
         tier1_dirs=["mtrue"],
         tier2_types=["allstars"],
         tier3_dirs=["fit"],
-        stellar_parameter="FeH",
+        stellar_parameters=["FeH", "Mstar"],
         catalog_path=catalog_path,
     )
-    output = outputs["mtrue/allstars/fit"]
+    feh_output = outputs["mtrue/allstars/fit/FeH"]
+    mass_output = outputs["mtrue/allstars/fit/Mstar"]
 
-    assert output == result_dir / "plots" / "companions_by_feh.png"
-    assert output.is_file()
-    np.testing.assert_allclose(plotted["x"], [0.5, 2.5])
-    np.testing.assert_allclose(plotted["y"], [1.5, 4.0])
-    np.testing.assert_allclose(plotted["color"], [-0.2, -0.2])
+    assert feh_output == result_dir / "plots" / "companions_by_feh.png"
+    assert mass_output == result_dir / "plots" / "companions_by_mstar.png"
+    assert feh_output.is_file()
+    assert mass_output.is_file()
+    np.testing.assert_allclose(plotted[0]["x"], [0.5, 2.5])
+    np.testing.assert_allclose(plotted[0]["y"], [1.5, 4.0])
+    np.testing.assert_allclose(plotted[0]["color"], [-0.2, -0.2])
+    np.testing.assert_allclose(plotted[1]["color"], [0.8, 0.8])
 
 
 def test_plot_companions_by_age_handles_missing_age_and_mass_cut(
