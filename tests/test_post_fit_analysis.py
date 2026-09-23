@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pytest
 from types import SimpleNamespace
 import json
@@ -396,6 +397,18 @@ def test_make_three_parameter_tables_create_both_forms(tmp_path):
         in text
     )
     assert r"\label{tab:three_param_OR_reordered}" in text
+    assert r"\begin{deluxetable*}{cccccc}" in text
+    assert r"\multicolumn{2}{c}{Occurrence Rate}" in text
+    assert r"\colhead{Significance}" in text
+    assert r"\colhead{Dynamic Range}" in text
+    assert r"\colhead{Low}" not in text
+    assert r"\colhead{High}" not in text
+    assert r"\textbf{Low Mass} & \textbf{High Mass}" in text
+    assert r"\textbf{Low [Fe/H]} & \textbf{High [Fe/H]}" in text
+    assert r"\textbf{Young} & \textbf{Old}" in text
+    assert "Mass OR" not in text
+    assert "[Fe/H] OR" not in text
+    assert "Young OR" not in text
     lho = post_fit_analysis._three_parameter_command_name(
         "mtrue", "stellar3params", ("low", "high", "old")
     )
@@ -405,8 +418,36 @@ def test_make_three_parameter_tables_create_both_forms(tmp_path):
     hhy = post_fit_analysis._three_parameter_command_name(
         "mtrue", "stellar3params", ("high", "high", "young")
     )
-    assert rf"high & old & \{lho} & \{hho} \\" in text
-    assert rf"high & high & \{hhy} & \{hho} \\" in text
+    mass_significance = (
+        post_fit_analysis._three_parameter_significance_command_name(
+            "mtrue", "stellar3params", "Mass", ("high", "old")
+        )
+    )
+    age_significance = (
+        post_fit_analysis._three_parameter_significance_command_name(
+            "mtrue", "stellar3params", "Age", ("high", "high")
+        )
+    )
+    mass_dynamic_range = (
+        post_fit_analysis._three_parameter_dynamic_range_command_name(
+            "mtrue", "stellar3params", "Mass", ("high", "old")
+        )
+    )
+    age_dynamic_range = (
+        post_fit_analysis._three_parameter_dynamic_range_command_name(
+            "mtrue", "stellar3params", "Age", ("high", "high")
+        )
+    )
+    assert (
+        rf"high & old & \{lho} & \{hho} & \{mass_significance} & "
+        rf"\{mass_dynamic_range} \\"
+        in text
+    )
+    assert (
+        rf"high & high & \{hhy} & \{hho} & \{age_significance} & "
+        rf"\{age_dynamic_range} \\"
+        in text
+    )
     assert text.count(rf"\{hhy}") == 3
 
     original = outputs["original"].read_text()
@@ -442,9 +483,21 @@ def test_make_three_parameter_tables_can_embed_numerical_values(
         post_fit_analysis, "_three_parameter_statistics",
         lambda result_dir: values,
     )
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_occurrence_samples",
+        lambda result_dir: np.array([0.1, 0.2, 0.3]),
+    )
+    catalog_path = tmp_path / "stars.csv"
+    pd.DataFrame([
+        {"Mstar": mass, "feh": feh, "age": age}
+        for mass in (0.8, 1.2)
+        for feh in (-0.3, 0.2)
+        for age in (2.0, 8.0)
+    ]).to_csv(catalog_path, index=False)
 
     outputs = post_fit_analysis.make_three_parameter_tables(
-        tmp_path, use_latex_variables=False
+        tmp_path, use_latex_variables=False,
+        stellar_catalog_path=catalog_path,
     )
     reordered = outputs["reordered"].read_text()
     original = outputs["original"].read_text()
@@ -457,6 +510,54 @@ def test_make_three_parameter_tables_can_embed_numerical_values(
         + formatted_occurrence
     ) in original
     assert r"\McHighMstarHighFeHYoungIntOcc" not in reordered
+    assert reordered.count(r"$0.0\,\sigma$") == 12
+    assert reordered.count(" & 1.50 ") == 4
+    assert reordered.count(" & 3.16 ") == 4
+    assert reordered.count(" & 4.00 ") == 4
+
+
+def test_posterior_difference_significance_uses_sign_probability():
+    probability, z_score, lower_bound = (
+        post_fit_analysis._posterior_difference_significance(
+            low_samples=[0.0, 2.0], high_samples=[1.0, 3.0]
+        )
+    )
+    assert probability == pytest.approx(0.75)
+    assert z_score == pytest.approx(0.67448975)
+    assert not lower_bound
+
+    probability, z_score, lower_bound = (
+        post_fit_analysis._posterior_difference_significance(
+            low_samples=[0.0, 1.0, 2.0, 3.0],
+            high_samples=[4.0, 5.0, 6.0, 7.0],
+        )
+    )
+    assert probability == 1.0
+    assert z_score == pytest.approx(0.67448975)
+    assert lower_bound
+    assert post_fit_analysis._format_posterior_significance(
+        z_score, lower_bound
+    ) == r">0.7\,\sigma"
+
+
+def test_three_parameter_dynamic_ranges_use_stellar_medians(tmp_path):
+    catalog_path = tmp_path / "stars.csv"
+    pd.DataFrame([
+        {"Mstar": mass, "feh": feh, "age": age}
+        for mass in (0.8, 1.2)
+        for feh in (-0.3, 0.2)
+        for age in (2.0, 8.0)
+    ]).to_csv(catalog_path, index=False)
+
+    dynamic_ranges = post_fit_analysis._three_parameter_dynamic_ranges(
+        catalog_path
+    )
+
+    assert dynamic_ranges[("Mass", ("high", "old"))] == pytest.approx(1.5)
+    assert dynamic_ranges[("FeH", ("high", "old"))] == pytest.approx(
+        10**0.2/10**-0.3
+    )
+    assert dynamic_ranges[("Age", ("high", "high"))] == pytest.approx(4.0)
 
 
 def test_make_variables_adds_available_three_parameter_results(
@@ -488,6 +589,72 @@ def test_make_variables_adds_available_three_parameter_results(
     output = capsys.readouterr().out
     assert "three-parameter occurrence results have not been calculated" in output
     assert "lowMstarlowFeHlowAct" in output
+
+
+def test_make_variables_adds_three_parameter_significances(
+        tmp_path, monkeypatch):
+    tier1 = tmp_path / "mtrue"
+    _write_summary(tier1, "allstars", "roi")
+    for index, tier2_dir in enumerate(
+            post_fit_analysis._THREE_PARAMETER_TIER2_DIRS):
+        result_dir = tier1 / tier2_dir / "stellar3params"
+        summary_dir = result_dir / "saved_dicts"
+        chain_dir = result_dir / "saved_chains"
+        summary_dir.mkdir(parents=True)
+        chain_dir.mkdir()
+        (summary_dir / post_fit_analysis.SUMMARY_FILENAME).touch()
+        (chain_dir / "chains_piecewise.npz").touch()
+
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_statistics",
+        lambda path: {
+            "Nstars": "47", "Neff": "4.0", "AvgCompl": "0.64",
+            "IntOcc": r"0.12^{+0.08}_{-0.05}",
+        },
+    )
+
+    def samples_for_result(result_dir):
+        tier2_dir = result_dir.parent.name
+        offset = post_fit_analysis._THREE_PARAMETER_TIER2_DIRS.index(
+            tier2_dir
+        )
+        return np.arange(1.0, 11.0) + offset
+
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_occurrence_samples",
+        samples_for_result,
+    )
+    catalog_path = tmp_path / "stars.csv"
+    pd.DataFrame([
+        {"Mstar": mass, "feh": feh, "age": age}
+        for mass in (0.8, 1.2)
+        for feh in (-0.3, 0.2)
+        for age in (2.0, 8.0)
+    ]).to_csv(catalog_path, index=False)
+
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["allstars"], ["roi"],
+        stellar_catalog_path=catalog_path,
+    ).read_text()
+    comparison_names = [
+        post_fit_analysis._three_parameter_significance_command_name(
+            "mtrue", "stellar3params", varied_parameter, fixed_levels
+        )
+        for varied_parameter, fixed_levels, _, _ in
+        post_fit_analysis._three_parameter_comparisons()
+    ]
+    assert len(comparison_names) == 12
+    for name in comparison_names:
+        assert rf"\newcommand{{\{name}}}" in text
+    dynamic_range_names = [
+        post_fit_analysis._three_parameter_dynamic_range_command_name(
+            "mtrue", "stellar3params", varied_parameter, fixed_levels
+        )
+        for varied_parameter, fixed_levels, _, _ in
+        post_fit_analysis._three_parameter_comparisons()
+    ]
+    for name in dynamic_range_names:
+        assert rf"\newcommand{{\{name}}}" in text
 
 
 def test_plot_companions_by_stellar_parameter_uses_saved_hosts(

@@ -6,6 +6,7 @@ import re
 
 import numpy as np
 from scipy.optimize import minimize_scalar
+from scipy.stats import norm
 
 from occurrence import fit_utils as dfu
 from occurrence import likelihood as dl
@@ -57,6 +58,12 @@ _THREE_PARAMETER_TIER2_DIRS = (
     "lowMstarhighFeHhighAct", "lowMstarhighFeHlowAct",
     "lowMstarlowFeHhighAct", "lowMstarlowFeHlowAct",
 )
+
+_THREE_PARAMETER_DEFAULT_CUTS = {
+    "Mstar": 1.0,
+    "feh": 0.0,
+    "age": 5.0,
+}
 
 
 def _latex_token(value):
@@ -1011,31 +1018,219 @@ def _three_parameter_command_name(t1, t3, levels, statistic="IntOcc"):
     )
 
 
+def _three_parameter_comparisons():
+    """Return the twelve comparisons shown in the reordered table."""
+    comparisons = []
+    for metallicity in ("high", "low"):
+        for age in ("old", "young"):
+            comparisons.append((
+                "Mass", (metallicity, age),
+                ("low", metallicity, age),
+                ("high", metallicity, age),
+            ))
+    for mass in ("high", "low"):
+        for age in ("old", "young"):
+            comparisons.append((
+                "FeH", (mass, age),
+                (mass, "low", age),
+                (mass, "high", age),
+            ))
+    for mass in ("high", "low"):
+        for metallicity in ("high", "low"):
+            comparisons.append((
+                "Age", (mass, metallicity),
+                (mass, metallicity, "young"),
+                (mass, metallicity, "old"),
+            ))
+    return comparisons
+
+
+def _three_parameter_significance_command_name(
+        t1, t3, varied_parameter, fixed_levels):
+    """Return the variable-command name for one posterior comparison."""
+    prefix = _tier1_prefix(t1)
+    if str(t3) != "stellar3params":
+        prefix += _latex_token(Path(t3).name)
+    first, second = fixed_levels
+    if varied_parameter == "Mass":
+        fixed_token = first.capitalize() + "FeH" + second.capitalize()
+    elif varied_parameter == "FeH":
+        fixed_token = first.capitalize() + "Mstar" + second.capitalize()
+    elif varied_parameter == "Age":
+        fixed_token = (
+            first.capitalize() + "Mstar" + second.capitalize() + "FeH"
+        )
+    else:
+        raise ValueError(
+            "varied_parameter must be 'Mass', 'FeH', or 'Age'"
+        )
+    return prefix + varied_parameter + fixed_token + "Significance"
+
+
+def _three_parameter_dynamic_range_command_name(
+        t1, t3, varied_parameter, fixed_levels):
+    """Return the variable-command name for one stellar dynamic range."""
+    significance_name = _three_parameter_significance_command_name(
+        t1, t3, varied_parameter, fixed_levels
+    )
+    return significance_name[:-len("Significance")] + "DynamicRange"
+
+
+def _three_parameter_dynamic_ranges(catalog_path=None, cuts=None):
+    """Calculate median stellar-property ratios for all table comparisons.
+
+    The catalog is divided using the same mass, metallicity, and age cuts
+    represented by the three-parameter Tier 2 directory names.  Ratios are
+    always reported as the larger median divided by the smaller median.  The
+    metallicity medians are converted from dex to linear abundance first.
+    """
+    import pandas as pd
+
+    if catalog_path is None:
+        catalog_path = (
+            Path(__file__).resolve().parent / "cls_files" /
+            "cls_all_stars_all_params.csv"
+        )
+    else:
+        catalog_path = Path(catalog_path)
+    parameter_cuts = dict(_THREE_PARAMETER_DEFAULT_CUTS)
+    if cuts is not None:
+        unknown = set(cuts) - set(parameter_cuts)
+        if unknown:
+            raise ValueError(
+                f"unknown three-parameter cut names: {sorted(unknown)}"
+            )
+        parameter_cuts.update(cuts)
+
+    catalog = pd.read_csv(catalog_path)
+    required = set(parameter_cuts)
+    missing = sorted(required - set(catalog.columns))
+    if missing:
+        raise KeyError(f"{catalog_path} lacks columns {missing}")
+    for column in required:
+        catalog[column] = pd.to_numeric(catalog[column], errors="coerce")
+
+    def level_mask(column, level):
+        values = catalog[column]
+        cut = parameter_cuts[column]
+        if column == "age":
+            return values < cut if level == "young" else values >= cut
+        return values > cut if level == "high" else values <= cut
+
+    columns = {"Mass": "Mstar", "FeH": "feh", "Age": "age"}
+    dynamic_ranges = {}
+    for varied_parameter, fixed_levels, low_levels, high_levels in (
+            _three_parameter_comparisons()):
+        varied_column = columns[varied_parameter]
+        medians = []
+        for levels in (low_levels, high_levels):
+            mass, metallicity, age = levels
+            mask = (
+                level_mask("Mstar", mass) &
+                level_mask("feh", metallicity) &
+                level_mask("age", age)
+            )
+            values = catalog.loc[mask, varied_column].dropna().to_numpy()
+            if values.size == 0:
+                raise ValueError(
+                    f"no finite {varied_column} values for levels {levels} "
+                    f"in {catalog_path}"
+                )
+            medians.append(float(np.median(values)))
+        if varied_parameter == "FeH":
+            medians = [10**value for value in medians]
+        lower, upper = sorted(medians)
+        if lower <= 0:
+            raise ValueError(
+                f"dynamic-range medians must be positive; got {medians} for "
+                f"{varied_parameter} with fixed levels {fixed_levels}"
+            )
+        dynamic_ranges[(varied_parameter, fixed_levels)] = upper/lower
+    return dynamic_ranges
+
+
+def _three_parameter_occurrence_samples(result_dir):
+    """Load the integrated piecewise-occurrence posterior for one subset."""
+    chain_path = result_dir / "saved_chains" / "chains_piecewise.npz"
+    if not chain_path.is_file():
+        raise FileNotFoundError(f"piecewise chain not found: {chain_path}")
+    with np.load(chain_path) as chain:
+        if "flat_chains" not in chain or "x_edges" not in chain:
+            raise KeyError(
+                f"{chain_path} must contain 'flat_chains' and 'x_edges'"
+            )
+        y_key = "y_edges" if "y_edges" in chain else "stack_edges"
+        if y_key not in chain:
+            raise KeyError(
+                f"{chain_path} must contain 'y_edges' or 'stack_edges'"
+            )
+        samples = np.asarray(chain["flat_chains"], dtype=float)[::10]
+        a_edges = np.asarray(chain["x_edges"], dtype=float)
+        m_edges = np.asarray(chain[y_key], dtype=float)
+    cell_areas = np.outer(
+        np.diff(np.log10(m_edges)), np.diff(np.log10(a_edges))
+    ).reshape(-1)
+    if samples.ndim != 2 or samples.shape[1] != cell_areas.size:
+        raise ValueError(
+            f"piecewise chain dimensions do not match edges in {chain_path}"
+        )
+    integrated = np.sum(samples*cell_areas[None, :], axis=1)
+    if integrated.size < 2 or not np.isfinite(integrated).all():
+        raise ValueError(
+            f"integrated occurrence samples in {chain_path} must contain "
+            "at least two finite values"
+        )
+    return integrated
+
+
+def _posterior_difference_significance(low_samples, high_samples):
+    """Return P(either sign), its Gaussian Z equivalent, and bound status.
+
+    The probability is evaluated exactly for the two independent empirical
+    posteriors: every high-posterior value is compared with every low-posterior
+    value.  Exact ties contribute one half to each direction.
+    """
+    low_samples = np.asarray(low_samples, dtype=float).reshape(-1)
+    high_samples = np.asarray(high_samples, dtype=float).reshape(-1)
+    if (low_samples.size < 2 or high_samples.size < 2 or
+            not np.isfinite(low_samples).all() or
+            not np.isfinite(high_samples).all()):
+        raise ValueError(
+            "each occurrence posterior must contain at least two finite draws"
+        )
+
+    sorted_low = np.sort(low_samples)
+    positive = np.searchsorted(
+        sorted_low, high_samples, side="left"
+    ).sum(dtype=np.int64)
+    negative = (
+        low_samples.size - np.searchsorted(
+            sorted_low, high_samples, side="right"
+        )
+    ).sum(dtype=np.int64)
+    total_comparisons = low_samples.size*high_samples.size
+    ties = total_comparisons - int(positive + negative)
+    probability = (
+        max(positive, negative) + 0.5*ties
+    ) / total_comparisons
+    if probability == 1.0:
+        resolution = min(low_samples.size, high_samples.size)
+        finite_probability = 1.0 - 1.0/resolution
+        return probability, float(norm.ppf(finite_probability)), True
+    return probability, float(norm.ppf(probability)), False
+
+
+def _format_posterior_significance(z_score, lower_bound=False):
+    """Format an equivalent Gaussian significance for ``variables.tex``."""
+    relation = ">" if lower_bound else ""
+    return rf"{relation}{z_score:.1f}\,\sigma"
+
+
 def _three_parameter_occurrence(result_dir):
     """Return formatted integrated occurrence for one stellar subset."""
     chain_path = result_dir / "saved_chains" / "chains_piecewise.npz"
     if chain_path.is_file():
-        with np.load(chain_path) as chain:
-            if "flat_chains" not in chain or "x_edges" not in chain:
-                raise KeyError(
-                    f"{chain_path} must contain 'flat_chains' and 'x_edges'"
-                )
-            y_key = "y_edges" if "y_edges" in chain else "stack_edges"
-            if y_key not in chain:
-                raise KeyError(
-                    f"{chain_path} must contain 'y_edges' or 'stack_edges'"
-                )
-            samples = np.asarray(chain["flat_chains"], dtype=float)[::10]
-            a_edges = np.asarray(chain["x_edges"], dtype=float)
-            m_edges = np.asarray(chain[y_key], dtype=float)
-        cell_areas = np.outer(
-            np.diff(np.log10(m_edges)), np.diff(np.log10(a_edges))
-        ).reshape(-1)
-        if samples.ndim != 2 or samples.shape[1] != cell_areas.size:
-            raise ValueError(
-                f"piecewise chain dimensions do not match edges in {chain_path}"
-            )
-        integrated = np.sum(samples*cell_areas[None, :], axis=1)
+        integrated = _three_parameter_occurrence_samples(result_dir)
         low, median, high = np.percentile(integrated, [16, 50, 84])
         return _format_parameter(median, low, high)
 
@@ -1100,7 +1295,8 @@ def make_three_parameter_tables(
         ),
         original_label="tab:three_param_OR",
         reordered_output_file=None, original_output_file=None,
-        use_latex_variables=True):
+        use_latex_variables=True, stellar_catalog_path=None,
+        three_parameter_cuts=None):
     """Create reordered and legacy-form tables for three stellar parameters.
 
     The eight subsets vary stellar mass, metallicity, and activity.  Following
@@ -1111,6 +1307,8 @@ def make_three_parameter_tables(
     :func:`make_variables` emits, without requiring or inspecting
     ``variables.tex``.  Set ``use_latex_variables=False`` to read the saved
     results and write numerical values directly into both tables instead.
+    ``stellar_catalog_path`` and ``three_parameter_cuts`` control the stellar
+    samples used for the dynamic-range column.
     """
     results_dir = Path(results_dir)
     if tier2_dirs is None:
@@ -1148,15 +1346,57 @@ def make_three_parameter_tables(
         missing = sorted(expected - set(table_values))
         raise ValueError(f"three-parameter subsets are incomplete; missing {missing}")
 
+    significance_values = {}
+    dynamic_range_values = {}
+    posterior_samples = {}
+    numerical_dynamic_ranges = None
+    if not use_latex_variables:
+        numerical_dynamic_ranges = _three_parameter_dynamic_ranges(
+            stellar_catalog_path, three_parameter_cuts
+        )
+        for tier2_dir in tier2_dirs:
+            levels = _three_parameter_levels(tier2_dir)
+            posterior_samples[levels] = _three_parameter_occurrence_samples(
+                results_dir / t1 / tier2_dir / t3
+            )
+    for varied_parameter, fixed_levels, low_levels, high_levels in (
+            _three_parameter_comparisons()):
+        key = (varied_parameter, fixed_levels)
+        command_name = _three_parameter_significance_command_name(
+            t1, t3, varied_parameter, fixed_levels
+        )
+        if use_latex_variables:
+            significance_values[key] = rf"\{command_name}"
+            dynamic_range_name = (
+                _three_parameter_dynamic_range_command_name(
+                    t1, t3, varied_parameter, fixed_levels
+                )
+            )
+            dynamic_range_values[key] = rf"\{dynamic_range_name}"
+        else:
+            probability, z_score, lower_bound = (
+                _posterior_difference_significance(
+                    posterior_samples[low_levels],
+                    posterior_samples[high_levels],
+                )
+            )
+            significance_values[key] = (
+                f"${_format_posterior_significance(z_score, lower_bound)}$"
+            )
+            dynamic_range_values[key] = (
+                f"{numerical_dynamic_ranges[key]:.1f}"
+            )
+
     lines = [
-        r"\begin{deluxetable*}{cccc}",
+        r"\begin{deluxetable*}{cccccc}",
         rf"\tablecaption{{{reordered_caption}}}",
         rf"\label{{{reordered_label}}}",
         r"\tablehead{",
         r"\colhead{Fixed Parameter 1} &",
         r"\colhead{Fixed Parameter 2} &",
-        r"\colhead{Low} &",
-        r"\colhead{High}",
+        r"\multicolumn{2}{c}{Occurrence Rate} &",
+        r"\colhead{Significance} &",
+        r"\colhead{Dynamic Range}",
         r"}",
         r"\startdata",
     ]
@@ -1164,41 +1404,50 @@ def make_three_parameter_tables(
     def add_block(fixed_one, fixed_two, low_heading, high_heading, rows):
         lines.append(
             rf"\textbf{{{fixed_one}}} & \textbf{{{fixed_two}}} & "
-            rf"\textbf{{{low_heading}}} & \textbf{{{high_heading}}} \\"
+            rf"\textbf{{{low_heading}}} & \textbf{{{high_heading}}} & "
+            r"\textbf{Significance} & \textbf{Dynamic Range} \\"
         )
         lines.append(r"\hline")
-        for first, second, low_value, high_value in rows:
+        for (first, second, low_value, high_value, significance,
+                dynamic_range) in rows:
             lines.append(
-                rf"{first} & {second} & {low_value} & {high_value} \\"
+                rf"{first} & {second} & {low_value} & {high_value} & "
+                rf"{significance} & {dynamic_range} \\"
             )
         lines.append(r"\hline")
 
     add_block(
-        "[Fe/H]", "Age", "Low Mass OR", "High Mass OR",
+        "[Fe/H]", "Age", "Low Mass", "High Mass",
         [
             (metallicity, age,
              table_values[("low", metallicity, age)]["IntOcc"],
-             table_values[("high", metallicity, age)]["IntOcc"])
+             table_values[("high", metallicity, age)]["IntOcc"],
+             significance_values[("Mass", (metallicity, age))],
+             dynamic_range_values[("Mass", (metallicity, age))])
             for metallicity in ("high", "low")
             for age in ("old", "young")
         ],
     )
     add_block(
-        "Mass", "Age", "Low [Fe/H] OR", "High [Fe/H] OR",
+        "Mass", "Age", "Low [Fe/H]", "High [Fe/H]",
         [
             (mass, age,
              table_values[(mass, "low", age)]["IntOcc"],
-             table_values[(mass, "high", age)]["IntOcc"])
+             table_values[(mass, "high", age)]["IntOcc"],
+             significance_values[("FeH", (mass, age))],
+             dynamic_range_values[("FeH", (mass, age))])
             for mass in ("high", "low")
             for age in ("old", "young")
         ],
     )
     add_block(
-        "Mass", "[Fe/H]", "Young OR", "Old OR",
+        "Mass", "[Fe/H]", "Young", "Old",
         [
             (mass, metallicity,
              table_values[(mass, metallicity, "young")]["IntOcc"],
-             table_values[(mass, metallicity, "old")]["IntOcc"])
+             table_values[(mass, metallicity, "old")]["IntOcc"],
+             significance_values[("Age", (mass, metallicity))],
+             dynamic_range_values[("Age", (mass, metallicity))])
             for mass in ("high", "low")
             for metallicity in ("high", "low")
         ],
@@ -1364,7 +1613,8 @@ def _stack_statistics(summary, stack_dim, summary_path):
 
 def make_variables(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim="a",
-        three_parameter_t3="stellar3params"):
+        three_parameter_t3="stellar3params", stellar_catalog_path=None,
+        three_parameter_cuts=None):
     """Write non-model fit statistics to a LaTeX variables file.
 
     ``results_dir`` is the parent of all Tier 1 directories.  The output is
@@ -1385,7 +1635,12 @@ def make_variables(
     for example ``\\McallstarsNeff`` and ``\\McHighMassNeff``.  When several
     Tier 3 directories are supplied, their names are included to keep commands
     unique.  Available three-parameter subset results beneath
-    ``three_parameter_t3`` are also included.  Missing subsets are reported
+    ``three_parameter_t3`` are also included.  When both required piecewise
+    chains are available, the file also includes the posterior significance
+    of every comparison in the reordered three-parameter table.  Dynamic
+    ranges use ``stellar_catalog_path`` and ``three_parameter_cuts``; their
+    defaults are the repository CLS stellar catalog and cuts at 1 solar mass,
+    zero dex, and 5 Gyr.  Missing subsets or comparison chains are reported
     and omitted without interrupting generation of the other commands.
 
     Returns
@@ -1533,9 +1788,12 @@ def make_variables(
                     blocks.append("\n".join(block))
 
     missing_three_parameter_results = []
+    missing_three_parameter_comparisons = []
     if three_parameter_t3 is not None:
         for tier1_dir in tier1_dirs:
             tier1_name = Path(tier1_dir).name
+            occurrence_samples = {}
+            available_levels = set()
             for tier2_dir in _THREE_PARAMETER_TIER2_DIRS:
                 result_dir = (
                     results_dir / tier1_dir / tier2_dir / three_parameter_t3
@@ -1550,6 +1808,11 @@ def make_variables(
                     )
                     continue
                 levels = _three_parameter_levels(tier2_dir)
+                available_levels.add(levels)
+                if chain_path.is_file():
+                    occurrence_samples[levels] = (
+                        _three_parameter_occurrence_samples(result_dir)
+                    )
                 statistics = _three_parameter_statistics(result_dir)
                 block = [
                     "%"*72,
@@ -1564,11 +1827,74 @@ def make_variables(
                     command_names.add(name)
                     block.append(_command(name, value))
                 blocks.append("\n".join(block))
+
+            comparison_block = [
+                "%"*72,
+                f"% {tier1_name} / {three_parameter_t3} comparisons",
+            ]
+            dynamic_ranges = None
+            for varied_parameter, fixed_levels, low_levels, high_levels in (
+                    _three_parameter_comparisons()):
+                significance_name = _three_parameter_significance_command_name(
+                    tier1_name, three_parameter_t3,
+                    varied_parameter, fixed_levels,
+                )
+                if (low_levels not in occurrence_samples or
+                        high_levels not in occurrence_samples):
+                    missing_three_parameter_comparisons.append(
+                        significance_name
+                    )
+                else:
+                    probability, z_score, lower_bound = (
+                        _posterior_difference_significance(
+                            occurrence_samples[low_levels],
+                            occurrence_samples[high_levels],
+                        )
+                    )
+                    if significance_name in command_names:
+                        raise ValueError(
+                            "duplicate LaTeX command name: "
+                            f"{significance_name}"
+                        )
+                    command_names.add(significance_name)
+                    comparison_block.append(_command(
+                        significance_name,
+                        _format_posterior_significance(z_score, lower_bound),
+                    ))
+
+                if (low_levels in available_levels and
+                        high_levels in available_levels):
+                    if dynamic_ranges is None:
+                        dynamic_ranges = _three_parameter_dynamic_ranges(
+                            stellar_catalog_path, three_parameter_cuts
+                        )
+                    dynamic_name = (
+                        _three_parameter_dynamic_range_command_name(
+                            tier1_name, three_parameter_t3,
+                            varied_parameter, fixed_levels,
+                        )
+                    )
+                    if dynamic_name in command_names:
+                        raise ValueError(
+                            f"duplicate LaTeX command name: {dynamic_name}"
+                        )
+                    command_names.add(dynamic_name)
+                    comparison_block.append(_command(
+                        dynamic_name, f"{dynamic_ranges[(varied_parameter, fixed_levels)]:.2f}"
+                    ))
+            if len(comparison_block) > 2:
+                blocks.append("\n".join(comparison_block))
     if missing_three_parameter_results:
         print(
             "post_fit_analysis.make_variables: three-parameter occurrence "
             "results have not been calculated for: "
             + ", ".join(missing_three_parameter_results)
+        )
+    if missing_three_parameter_comparisons:
+        print(
+            "post_fit_analysis.make_variables: three-parameter significance "
+            "could not be calculated without both piecewise chains for: "
+            + ", ".join(missing_three_parameter_comparisons)
         )
 
     paper_items_dir = results_dir / PAPER_ITEMS_DIRNAME
