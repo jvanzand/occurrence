@@ -488,3 +488,127 @@ def test_make_variables_adds_available_three_parameter_results(
     output = capsys.readouterr().out
     assert "three-parameter occurrence results have not been calculated" in output
     assert "lowMstarlowFeHlowAct" in output
+
+
+def test_plot_companions_by_stellar_parameter_uses_saved_hosts(
+        tmp_path, monkeypatch):
+    import pandas as pd
+    from matplotlib.axes import Axes
+
+    result_dir = tmp_path / "mtrue" / "allstars" / "fit"
+    saved_dicts = result_dir / "saved_dicts"
+    saved_dicts.mkdir(parents=True)
+    np.savez(
+        saved_dicts / "fit_data.npz",
+        companion_names=np.array(["host1_0"]),
+        x_bounds=np.array([0.1, 10.0]),
+        y_bounds=np.array([0.5, 10.0]),
+    )
+    average_map = result_dir.parent / "avg_map"
+    average_map.mkdir()
+    np.save(average_map / "parent_xgrid.npy", [0.1, 1.0, 10.0])
+    np.save(average_map / "parent_ygrid.npy", [0.5, 2.0, 10.0])
+    np.save(
+        average_map / "parent_zgrid.npy",
+        [[0.1, 0.3, 0.5], [0.2, 0.5, 0.7], [0.4, 0.7, 0.9]],
+    )
+    catalog_path = tmp_path / "companions.csv"
+    pd.DataFrame({
+        "CPS Name": ["Host 1 b", "Host 1 c", "Host 2 b"],
+        "cps_identifier": ["host1", "host1", "host2"],
+        "comp_ind": [0, 1, 0],
+        "a_post_med": [0.5, np.nan, 1.0],
+        "a_pre_med": [0.4, 2.5, 0.9],
+        "Mtrue_post_med": [np.nan, 4.0, 2.0],
+        "Msini_pre_med": [1.5, 3.5, 1.8],
+        "Mstar": [0.8, 0.8, 1.1],
+        "feh": [-0.2, -0.2, 0.1],
+        "age": [5.0, 5.0, 2.0],
+    }).to_csv(catalog_path, index=False)
+
+    plotted = {}
+    original_scatter = Axes.scatter
+
+    def capture_scatter(axis, x, y, *args, **kwargs):
+        plotted["x"] = np.asarray(x)
+        plotted["y"] = np.asarray(y)
+        plotted["color"] = np.asarray(kwargs["c"])
+        return original_scatter(axis, x, y, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "scatter", capture_scatter)
+    outputs = post_fit_analysis.plot_companions_by_stellar_parameter(
+        tmp_path,
+        tier1_dirs=["mtrue"],
+        tier2_types=["allstars"],
+        tier3_dirs=["fit"],
+        stellar_parameter="FeH",
+        catalog_path=catalog_path,
+    )
+    output = outputs["mtrue/allstars/fit"]
+
+    assert output == result_dir / "plots" / "companions_by_feh.png"
+    assert output.is_file()
+    np.testing.assert_allclose(plotted["x"], [0.5, 2.5])
+    np.testing.assert_allclose(plotted["y"], [1.5, 4.0])
+    np.testing.assert_allclose(plotted["color"], [-0.2, -0.2])
+
+
+def test_plot_companions_by_age_handles_missing_age_and_mass_cut(
+        tmp_path, monkeypatch):
+    import pandas as pd
+    from matplotlib.axes import Axes
+
+    result_dir = tmp_path / "mtrue" / "allstars" / "fit"
+    saved_dicts = result_dir / "saved_dicts"
+    saved_dicts.mkdir(parents=True)
+    np.savez(
+        saved_dicts / "fit_data.npz",
+        companion_names=np.array(["host1_0", "host2_0", "host3_0"]),
+        x_bounds=np.array([0.1, 10.0]),
+        y_bounds=np.array([0.5, 10.0]),
+    )
+    average_map = result_dir.parent / "avg_map"
+    average_map.mkdir()
+    np.save(average_map / "parent_xgrid.npy", [0.01, 0.1, 10.0, 100.0])
+    np.save(average_map / "parent_ygrid.npy", [0.1, 0.5, 10.0, 100.0])
+    np.save(
+        average_map / "parent_zgrid.npy",
+        np.linspace(0.1, 0.9, 16).reshape(4, 4),
+    )
+    catalog_path = tmp_path / "companions.csv"
+    pd.DataFrame({
+        "cps_identifier": ["host1", "host2", "host3"],
+        "a_post_med": [0.5, 1.0, 2.0],
+        "a_pre_med": [0.5, 1.0, 2.0],
+        "Mtrue_post_med": [1.0, 2.0, 3.0],
+        "Msini_pre_med": [1.0, 2.0, 3.0],
+        "Mstar": [0.82, 1.21, 1.3],
+        "age": [5.0, np.nan, 7.0],
+    }).to_csv(catalog_path, index=False)
+
+    calls = []
+    original_scatter = Axes.scatter
+
+    def capture_scatter(axis, x, y, *args, **kwargs):
+        calls.append({
+            "x": np.asarray(x),
+            "color": kwargs.get("color"),
+            "marker": kwargs.get("marker"),
+            "c": np.asarray(kwargs["c"]) if "c" in kwargs else None,
+        })
+        return original_scatter(axis, x, y, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "scatter", capture_scatter)
+    output = post_fit_analysis._plot_companions_for_result(
+        result_dir, stellar_parameter="Age", catalog_path=catalog_path,
+        tier1_name="mtrue",
+    )
+
+    assert output.is_file()
+    np.testing.assert_allclose(calls[0]["x"], [0.5])
+    np.testing.assert_allclose(calls[0]["c"], [5.0])
+    np.testing.assert_allclose(calls[1]["x"], [1.0])
+    assert calls[1]["color"] == "gray"
+    np.testing.assert_allclose(calls[2]["x"], [2.0])
+    assert calls[2]["color"] == "black"
+    assert calls[2]["marker"] == "x"

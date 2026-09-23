@@ -596,10 +596,10 @@ def test_sma_tick_formatter_does_not_round_nonzero_tick_to_zero():
     assert formatter.rotate_labels is True
 
 
-def test_adaptive_tick_rotation_also_applies_to_more_than_seven_labels():
+def test_adaptive_tick_rotation_also_applies_to_more_than_eight_labels():
     from occurrence import plotting_utils
 
-    formatter = plotting_utils.sma_tick_formatter(np.arange(1.0, 9.0))
+    formatter = plotting_utils.sma_tick_formatter(np.arange(1.0, 10.0))
 
     assert formatter.decimal_places == 0
     assert formatter.rotate_labels is True

@@ -102,6 +102,296 @@ def _command(name, value):
     return rf"\newcommand{{\{name}}}{{\ensuremath{{{value}}}}}"
 
 
+def _plot_companions_for_result(
+        results_path, stellar_parameter, output_file=None,
+        catalog_path=None, tier1_name=None):
+    """Plot one result's median companion mass and SMA by host property.
+
+    ``results_path`` may be a Tier 3 experiment directory, its
+    ``saved_dicts`` directory, or the corresponding ``fit_data.npz`` file.
+    The included hosts are inferred from the saved companion names.  By
+    default the CLS companion catalog is loaded from this repository's
+    ``cls_files`` directory, and the plot is written beneath the experiment's
+    ``plots`` directory.
+    """
+    from matplotlib import pyplot as plt
+    import pandas as pd
+    from occurrence import plotting_utils as pu
+
+    plt.style.use(str(Path(__file__).resolve().parent / "matplotlibrc"))
+
+    parameter_configs = {
+        "mstar": ("Mstar", r"$M_{\star}$ [$M_{\odot}$]", "Blues"),
+        "mass": ("Mstar", r"$M_{\star}$ [$M_{\odot}$]", "Blues"),
+        "feh": ("feh", "[Fe/H]", "seismic"),
+        "metallicity": ("feh", "[Fe/H]", "seismic"),
+        "age": ("age", "Age [Gyr]", "Greens"),
+    }
+    parameter_key = re.sub(r"[^a-z]", "", str(stellar_parameter).lower())
+    try:
+        column, colorbar_label, colormap = parameter_configs[parameter_key]
+    except KeyError:
+        raise ValueError(
+            "stellar_parameter must be one of 'Mstar', 'FeH', or 'Age'"
+        )
+
+    supplied_path = Path(results_path)
+    candidates = []
+    if supplied_path.is_file():
+        candidates.append(supplied_path)
+    else:
+        candidates.extend([
+            supplied_path / "saved_dicts" / "fit_data.npz",
+            supplied_path / "fit_data.npz",
+        ])
+        if supplied_path.name == "saved_chains":
+            candidates.append(
+                supplied_path.parent / "saved_dicts" / "fit_data.npz"
+            )
+    fit_path = next((path for path in candidates if path.is_file()), None)
+    if fit_path is None:
+        raise FileNotFoundError(
+            f"could not find saved_dicts/fit_data.npz beneath {supplied_path}"
+        )
+
+    with np.load(fit_path, allow_pickle=False) as saved:
+        if "companion_names" not in saved:
+            raise KeyError(f"{fit_path} does not contain 'companion_names'")
+        companion_names = [str(name) for name in saved["companion_names"]]
+        x_bounds = (
+            tuple(np.asarray(saved["x_bounds"], dtype=float))
+            if "x_bounds" in saved else None
+        )
+        y_bounds = (
+            tuple(np.asarray(saved["y_bounds"], dtype=float))
+            if "y_bounds" in saved else None
+        )
+    if not companion_names:
+        raise ValueError(f"{fit_path} contains no companions")
+
+    host_names = {
+        name.rsplit("_", 1)[0].strip().lower() for name in companion_names
+    }
+    catalog_path = (
+        Path(__file__).resolve().parent / "cls_files" /
+        "cls_all_comps_with_stellar_params.csv"
+        if catalog_path is None else Path(catalog_path)
+    )
+    catalog = pd.read_csv(catalog_path)
+    required = {
+        "cps_identifier", "Mtrue_post_med", "a_post_med",
+        "Msini_pre_med", "a_pre_med", column,
+    }
+    if parameter_key == "age":
+        required.add("Mstar")
+    missing_columns = sorted(required - set(catalog.columns))
+    if missing_columns:
+        raise KeyError(f"{catalog_path} lacks columns {missing_columns}")
+
+    catalog_hosts = catalog["cps_identifier"].astype(str).str.strip().str.lower()
+    selected = catalog.loc[catalog_hosts.isin(host_names)].copy()
+    if selected.empty:
+        raise ValueError(
+            f"no catalog companions match the hosts saved in {fit_path}"
+        )
+    numeric_columns = {
+        "a_post_med", "a_pre_med", "Mtrue_post_med", "Msini_pre_med",
+        column,
+    }
+    if parameter_key == "age":
+        numeric_columns.add("Mstar")
+    for value_column in numeric_columns:
+        selected[value_column] = pd.to_numeric(
+            selected[value_column], errors="coerce"
+        )
+    selected["a_post_med"] = selected["a_post_med"].fillna(
+        selected["a_pre_med"]
+    )
+    selected["Mtrue_post_med"] = selected["Mtrue_post_med"].fillna(
+        selected["Msini_pre_med"]
+    )
+    valid_coordinates = (
+        np.isfinite(selected["a_post_med"]) &
+        np.isfinite(selected["Mtrue_post_med"]) &
+        (selected["a_post_med"] > 0) &
+        (selected["Mtrue_post_med"] > 0)
+    )
+    if not valid_coordinates.all():
+        invalid_names = selected.loc[
+            ~valid_coordinates,
+            "CPS Name" if "CPS Name" in selected else "cps_identifier"
+        ].astype(str).tolist()
+        raise ValueError(
+            "selected companions have missing or nonpositive plotting values: "
+            f"{invalid_names}"
+        )
+    if parameter_key != "age" and not np.isfinite(selected[column]).all():
+        invalid_names = selected.loc[
+            ~np.isfinite(selected[column]),
+            "CPS Name" if "CPS Name" in selected else "cps_identifier"
+        ].astype(str).tolist()
+        raise ValueError(
+            f"selected companions have missing {column} values: "
+            f"{invalid_names}"
+        )
+
+    experiment_dir = (
+        fit_path.parent.parent if fit_path.parent.name == "saved_dicts"
+        else fit_path.parent
+    )
+    if tier1_name is None:
+        tier1_name = experiment_dir.parent.parent.name
+    tier1_name = Path(tier1_name).name
+    if tier1_name != "mtrue":
+        raise ValueError(
+            "Mtrue_post_med points can only be overlaid consistently on an "
+            "mtrue completeness map"
+        )
+    average_map_dir = experiment_dir.parent / "avg_map"
+    grid_paths = {
+        name: average_map_dir / f"parent_{name}grid.npy"
+        for name in ("x", "y", "z")
+    }
+    missing_grids = [str(path) for path in grid_paths.values()
+                     if not path.is_file()]
+    if missing_grids:
+        raise FileNotFoundError(
+            f"average completeness grids are missing: {missing_grids}"
+        )
+    xgrid = np.load(grid_paths["x"])
+    ygrid = np.load(grid_paths["y"])
+    zgrid = np.load(grid_paths["z"])
+    roi_pairs = (
+        [(x_bounds, y_bounds)]
+        if x_bounds is not None and y_bounds is not None else None
+    )
+    figure = pu.completeness_plotter(
+        xgrid, ygrid, zgrid, save_path="", title="",
+        save_plot=False, a_m_lims_pairs=roi_pairs, zoom=True,
+        ycol="inj_mtrue", m_unit="jupiter",
+    )
+    axis = figure.axes[0]
+    if parameter_key == "age":
+        from matplotlib import colors
+        from matplotlib.cm import ScalarMappable
+
+        in_mass_range = (
+            np.isfinite(selected["Mstar"]) &
+            (selected["Mstar"] >= 0.82) &
+            (selected["Mstar"] <= 1.21)
+        )
+        has_age = np.isfinite(selected["age"])
+        colored = in_mass_range & has_age
+        missing_age = in_mass_range & ~has_age
+        outside_mass_range = ~in_mass_range
+
+        finite_ages = selected.loc[has_age, "age"].to_numpy(dtype=float)
+        if finite_ages.size:
+            age_min = float(np.min(finite_ages))
+            age_max = float(np.max(finite_ages))
+            if age_min == age_max:
+                age_min -= 0.5
+                age_max += 0.5
+        else:
+            age_min, age_max = 0.0, 1.0
+        age_norm = colors.Normalize(vmin=age_min, vmax=age_max)
+        if colored.any():
+            points = axis.scatter(
+                selected.loc[colored, "a_post_med"],
+                selected.loc[colored, "Mtrue_post_med"],
+                c=selected.loc[colored, "age"], cmap=colormap, norm=age_norm,
+                edgecolor="black", s=65, zorder=110,
+            )
+        else:
+            points = ScalarMappable(norm=age_norm, cmap=colormap)
+            points.set_array([])
+        if missing_age.any():
+            axis.scatter(
+                selected.loc[missing_age, "a_post_med"],
+                selected.loc[missing_age, "Mtrue_post_med"],
+                color="gray", edgecolor="black", s=65, zorder=110,
+            )
+        if outside_mass_range.any():
+            axis.scatter(
+                selected.loc[outside_mass_range, "a_post_med"],
+                selected.loc[outside_mass_range, "Mtrue_post_med"],
+                color="black", marker="x", s=65, linewidths=1.5, zorder=111,
+            )
+    else:
+        points = axis.scatter(
+            selected["a_post_med"], selected["Mtrue_post_med"],
+            c=selected[column], cmap=colormap, edgecolor="black", s=65,
+            zorder=110,
+        )
+    # Match the catalog/completeness layout: completeness colorbar at right,
+    # stellar-property colorbar above the main panel.
+    axis.set_title("")
+    figure.subplots_adjust(top=0.84, left=0.14, right=0.98, bottom=0.14)
+    bounds = axis.get_position()
+    colorbar_axis = figure.add_axes([
+        bounds.x0, bounds.y1, bounds.width, 0.03
+    ])
+    colorbar = figure.colorbar(
+        points, cax=colorbar_axis, orientation="horizontal"
+    )
+    colorbar.set_label(colorbar_label)
+    colorbar.ax.xaxis.set_ticks_position("top")
+    colorbar.ax.xaxis.set_label_position("top")
+    if output_file is None:
+        output_path = (
+            experiment_dir / "plots" /
+            f"companions_by_{column.lower()}.png"
+        )
+    else:
+        output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=300)
+    plt.close(figure)
+    return output_path
+
+
+def plot_companions_by_stellar_parameter(
+        results_dir, tier1_dirs, tier2_types, tier3_dirs,
+        stellar_parameter, catalog_path=None):
+    """Create host-colored companion plots for requested result folders.
+
+    The directory arguments follow :func:`make_variables`.  Tier 2 types such
+    as ``"Mstar"`` are expanded to their ``highMstar`` and ``lowMstar``
+    directories, while ``"allstars"`` remains a single directory.  Every
+    plot is saved in the matching Tier 3 experiment's ``plots`` directory.
+
+    Returns
+    -------
+    dict
+        Relative ``tier1/tier2/tier3`` keys mapped to generated plot paths.
+    """
+    results_dir = Path(results_dir)
+    tier1_dirs = list(tier1_dirs)
+    tier2_types = list(tier2_types)
+    tier3_dirs = list(tier3_dirs)
+    if not tier1_dirs or not tier2_types or not tier3_dirs:
+        raise ValueError(
+            "tier1_dirs, tier2_types, and tier3_dirs cannot be empty"
+        )
+
+    outputs = {}
+    for tier1_dir in tier1_dirs:
+        for tier2_type in tier2_types:
+            for tier2_dir, _ in _tier2_directories(tier2_type):
+                for tier3_dir in tier3_dirs:
+                    experiment_dir = (
+                        results_dir / tier1_dir / tier2_dir / tier3_dir
+                    )
+                    key = _result_key(tier1_dir, tier2_dir, tier3_dir)
+                    outputs[key] = _plot_companions_for_result(
+                        experiment_dir,
+                        stellar_parameter=stellar_parameter,
+                        catalog_path=catalog_path,
+                        tier1_name=Path(tier1_dir).name,
+                    )
+    return outputs
+
+
 def _number_word(number):
     """Return a letter-only, zero-based bin label for a LaTeX command."""
     words = (
