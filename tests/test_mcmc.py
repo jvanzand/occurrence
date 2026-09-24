@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from scipy.optimize import minimize
+from types import SimpleNamespace
 
 from occurrence import fit_utils as dfu
 from occurrence import mcmc
@@ -69,6 +70,103 @@ def test_piecewise_sampler_requires_matching_fit_domain():
         )
 
 
+def test_piecewise_prior_limits_total_integrated_occurrence():
+    cache = SimpleNamespace(cell_areas=np.array([0.5, 0.5]))
+
+    assert not np.isfinite(mcmc.log_probability_piecewise(
+        theta=[1.2, 1.2], cache=cache,
+    ))
+    assert not np.isfinite(mcmc.log_probability_piecewise(
+        theta=[0.6, 0.6], cache=cache, max_integrated_occurrence=0.5,
+    ))
+
+
+def test_piecewise_gp_density_has_explicit_total_occurrence():
+    areas = np.array([0.25, 0.75])
+    cholesky = np.eye(2)
+    first = mcmc.piecewise_gp_density(
+        0.4, np.array([-0.5, 0.5]), cholesky, areas
+    )
+    shifted = mcmc.piecewise_gp_density(
+        0.4, np.array([2.5, 3.5]), cholesky, areas
+    )
+
+    assert np.dot(first, areas) == pytest.approx(0.4)
+    np.testing.assert_allclose(first, shifted)
+
+
+def test_piecewise_gp_probability_enforces_total_rate_prior():
+    companions, exposure = _materials()
+    cache = mcmc.dl.build_piecewise_cache(
+        companions, exposure, [1.0, 10.0], [1.0, 10.0]
+    )
+    cholesky, _, _ = mcmc._piecewise_gp_cholesky(
+        [1.0, 10.0], [1.0, 10.0]
+    )
+
+    assert np.isfinite(mcmc.log_probability_piecewise_gp(
+        [0.5, 0.0], cache, cholesky, max_integrated_occurrence=1.0
+    ))
+    assert not np.isfinite(mcmc.log_probability_piecewise_gp(
+        [1.0, 0.0], cache, cholesky, max_integrated_occurrence=1.0
+    ))
+
+
+def test_hierarchical_piecewise_gp_enforces_log_hyperpriors():
+    companions, exposure = _materials()
+    cache = mcmc.dl.build_piecewise_cache(
+        companions, exposure, [1.0, 10.0], [1.0, 10.0]
+    )
+    squared_dx, squared_dy = mcmc._piecewise_gp_squared_distances(
+        [1.0, 10.0], [1.0, 10.0]
+    )
+    arguments = (
+        cache, squared_dx, squared_dy, (0.05, 5.0), (0.1, 2.0),
+        (0.1, 2.0), 1e-8, 1.0,
+    )
+
+    assert np.isfinite(mcmc.log_probability_piecewise_gp_hierarchical(
+        [0.5, np.log(1.0), np.log(0.5), np.log(0.5), 0.0],
+        *arguments,
+    ))
+    assert not np.isfinite(mcmc.log_probability_piecewise_gp_hierarchical(
+        [0.5, np.log(10.0), np.log(0.5), np.log(0.5), 0.0],
+        *arguments,
+    ))
+
+
+def test_piecewise_gp_sampler_saves_physical_and_latent_chains(tmp_path):
+    companions, exposure = _materials()
+    path = tmp_path / "gp.npz"
+    sampler = mcmc.mcmc_piecewise(
+        companions=companions,
+        exposure=exposure,
+        x_edges=[1.0, 10.0],
+        y_edges=[1.0, 10.0],
+        nwalkers=12,
+        nsteps=8,
+        burnin=5,
+        save_path=path,
+        random_seed=1234,
+        piecewise_parameterization="gp",
+    )
+
+    assert sampler.get_chain().shape[-1] == 5
+    with np.load(path) as chain:
+        assert str(chain["piecewise_parameterization"]) == "gp"
+        assert bool(chain["piecewise_gp_infer_hyperparameters"])
+        assert chain["flat_chains"].shape[1] == 1
+        assert chain["flat_latent_chains"].shape[1] == 5
+        assert chain["flat_gp_parameter_chains"].shape[1] == 4
+        assert np.all(chain["flat_gp_parameter_chains"][:, 1:] > 0)
+        integrated = chain["flat_chains"] @ chain["cell_areas"]
+        np.testing.assert_allclose(
+            integrated, chain["flat_total_occurrence_chains"]
+        )
+        assert np.all(integrated > 0)
+        assert np.all(integrated < 1)
+
+
 def test_piecewise_metadata_includes_uncorrected_poisson_mle():
     companions, exposure = _materials()
     cache = mcmc.dl.build_piecewise_cache(
@@ -132,6 +230,12 @@ def test_piecewise_plotting_produces_all_requested_outputs(tmp_path, monkeypatch
         flat_chains=np.array([[0.2], [0.3]]),
         flat_log_probs=np.array([-1.0, 0.0]),
         cell_areas=np.array([2.0]),
+        piecewise_parameterization="gp",
+        piecewise_gp_infer_hyperparameters=True,
+        flat_gp_parameter_chains=np.array([
+            [0.4, 0.8, 0.3, 0.4],
+            [0.6, 1.0, 0.4, 0.5],
+        ]),
     )
     paths = mcmc.plot_piecewise_results(
         fit_path="materials.npz",
@@ -142,12 +246,15 @@ def test_piecewise_plotting_produces_all_requested_outputs(tmp_path, monkeypatch
         m_unit="jupiter",
     )
     assert calls == ["OR", "ORD"]
-    assert len(corner_calls) == 2
+    assert len(corner_calls) == 3
     assert "parameter_scale" not in corner_calls[0]
     np.testing.assert_array_equal(corner_calls[1]["parameter_scale"], [2.0])
     assert corner_calls[1]["outpath"].endswith("corner_piecewise_OR.png")
+    assert corner_calls[2]["samples_key"] == "flat_gp_parameter_chains"
+    assert corner_calls[2]["outpath"].endswith("corner_piecewise_gp.png")
     assert set(paths) == {
-        "summary", "occurrence", "density", "corner", "corner_occurrence"
+        "summary", "occurrence", "density", "corner", "corner_occurrence",
+        "corner_gp",
     }
 
 

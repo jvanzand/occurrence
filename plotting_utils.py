@@ -463,6 +463,7 @@ def plot_corner_from_file(
     model_name=None,
     outpath="corner.png",
     param_names=None,
+    samples_key=None,
     thin=10,
     max_samples=50000,
     reference_values=None,
@@ -478,6 +479,8 @@ def plot_corner_from_file(
             ``param_names`` and ``reference_color`` are supplied directly.
         outpath (str): Output filename for plot
         param_names (list of str): Labels for parameters (if None, auto-generate based on model)
+        samples_key (str): Optional NPZ array to plot instead of the standard
+            physical ``flat_chains`` array.
         thin (int): Thinning factor
         max_samples (int): Max number of samples to plot
         parameter_scale (array-like): Optional factor applied independently to
@@ -487,8 +490,14 @@ def plot_corner_from_file(
 
     data = np.load(path_to_chains)
 
+    if samples_key is not None:
+        if samples_key not in data:
+            raise KeyError(f"{path_to_chains} does not contain {samples_key!r}")
+        samples = np.asarray(data[samples_key])
+        if samples.ndim != 2:
+            raise ValueError(f"{samples_key!r} must be a two-dimensional array")
     # Prefer flat chains if available
-    if "flat_chains" in data:
+    elif "flat_chains" in data:
         samples = data["flat_chains"]
     else:
         chains = data["chains"]  # (nsteps, nwalkers, ndim)

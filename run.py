@@ -209,6 +209,15 @@ def run_multiple(
         loglinear_amplitude_bounds=(1e-6, 10.0),
         model_fit_bounds=None,
         max_integrated_occurrence=1.0,
+        piecewise_parameterization="independent",
+        piecewise_gp_amplitude=1.0,
+        piecewise_gp_length_scale_a=None,
+        piecewise_gp_length_scale_m=None,
+        piecewise_gp_jitter=1e-8,
+        piecewise_gp_infer_hyperparameters=True,
+        piecewise_gp_amplitude_bounds=(0.05, 5.0),
+        piecewise_gp_length_scale_a_bounds=None,
+        piecewise_gp_length_scale_m_bounds=None,
         model_plot_style="credible",
         n_posterior_draws=100,
         plot_random_seed=None,
@@ -223,6 +232,13 @@ def run_multiple(
     model to restricted ``"a"`` and/or ``"m"`` bounds. Mass bounds are
     converted to mass ratio for mass-ratio Tier 1 runs in the same way as
     ``m_edges``.
+    Set ``piecewise_parameterization='gp'`` to use an explicit uniform total
+    occurrence parameter and a normalized log-GP shape.  The GP amplitude is
+    in natural-log density units and its two length scales are in dex.
+    By default those three positive hyperparameters are inferred with bounded
+    log-uniform priors; set ``piecewise_gp_infer_hyperparameters=False`` to
+    hold them fixed at the supplied values.
+    ``'independent'`` preserves the legacy piecewise priors.
     Missing Tier 1 products
     are generated from ``recoveries_dir`` when ``prepare_missing`` is true.
     Set ``run_fits=False`` to regenerate plots from saved chains. Fit-level and
@@ -241,6 +257,10 @@ def run_multiple(
         )
     if stack_dim not in {"a", "m"}:
         raise ValueError("stack_dim must be 'a' or 'm'")
+    if piecewise_parameterization not in {"independent", "gp"}:
+        raise ValueError(
+            "piecewise_parameterization must be 'independent' or 'gp'"
+        )
     model_fit_bounds = {} if model_fit_bounds is None else model_fit_bounds
     boundable_models = supported_models - {"piecewise"}
     unknown_bound_models = set(model_fit_bounds) - boundable_models
@@ -374,6 +394,27 @@ def run_multiple(
                         tier_model_fit_bounds
                     ),
                     "max_integrated_occurrence": max_integrated_occurrence,
+                    "piecewise_parameterization": piecewise_parameterization,
+                    "piecewise_gp_amplitude": piecewise_gp_amplitude,
+                    "piecewise_gp_length_scale_a": (
+                        piecewise_gp_length_scale_a
+                    ),
+                    "piecewise_gp_length_scale_m": (
+                        piecewise_gp_length_scale_m
+                    ),
+                    "piecewise_gp_jitter": piecewise_gp_jitter,
+                    "piecewise_gp_infer_hyperparameters": (
+                        piecewise_gp_infer_hyperparameters
+                    ),
+                    "piecewise_gp_amplitude_bounds": (
+                        piecewise_gp_amplitude_bounds
+                    ),
+                    "piecewise_gp_length_scale_a_bounds": (
+                        piecewise_gp_length_scale_a_bounds
+                    ),
+                    "piecewise_gp_length_scale_m_bounds": (
+                        piecewise_gp_length_scale_m_bounds
+                    ),
                     "model_plot_style": model_plot_style,
                     "n_posterior_draws": n_posterior_draws,
                     "plot_random_seed": plot_random_seed,
@@ -525,6 +566,36 @@ def _run_configuration(configuration):
                     parallel=configuration["parallel_mcmc"],
                     save_path=chain_path,
                     random_seed=configuration["random_seed"],
+                    max_integrated_occurrence=configuration[
+                        "max_integrated_occurrence"
+                    ],
+                    piecewise_parameterization=configuration[
+                        "piecewise_parameterization"
+                    ],
+                    piecewise_gp_amplitude=configuration[
+                        "piecewise_gp_amplitude"
+                    ],
+                    piecewise_gp_length_scale_x=configuration[
+                        "piecewise_gp_length_scale_a"
+                    ],
+                    piecewise_gp_length_scale_y=configuration[
+                        "piecewise_gp_length_scale_m"
+                    ],
+                    piecewise_gp_jitter=configuration[
+                        "piecewise_gp_jitter"
+                    ],
+                    piecewise_gp_infer_hyperparameters=configuration[
+                        "piecewise_gp_infer_hyperparameters"
+                    ],
+                    piecewise_gp_amplitude_bounds=configuration[
+                        "piecewise_gp_amplitude_bounds"
+                    ],
+                    piecewise_gp_length_scale_x_bounds=configuration[
+                        "piecewise_gp_length_scale_a_bounds"
+                    ],
+                    piecewise_gp_length_scale_y_bounds=configuration[
+                        "piecewise_gp_length_scale_m_bounds"
+                    ],
                 )
                 result["chains"][model_name] = chain_path
                 if (can_overlap_supplementary_plots and

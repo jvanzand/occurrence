@@ -400,7 +400,9 @@ def test_make_three_parameter_tables_create_both_forms(tmp_path):
     assert r"\begin{deluxetable*}{cccccc}" in text
     assert r"\multicolumn{2}{c}{Occurrence Rate}" in text
     assert r"\colhead{Significance}" in text
-    assert r"\colhead{Dynamic Range}" in text
+    assert r"\colhead{High/Low}" in text
+    assert r"\textbf{Significance}" not in text
+    assert r"\textbf{Dynamic Range}" not in text
     assert r"\colhead{Low}" not in text
     assert r"\colhead{High}" not in text
     assert r"\textbf{Low Mass} & \textbf{High Mass}" in text
@@ -521,6 +523,145 @@ def test_make_three_parameter_tables_can_embed_numerical_values(
     assert reordered.count(" & 4.0 ") == 4
 
 
+def test_make_three_parameter_tables_can_select_occurrence_model(
+        tmp_path, monkeypatch):
+    outputs = post_fit_analysis.make_three_parameter_tables(
+        tmp_path, occurrence_model="logG"
+    )
+    reordered = outputs["reordered"].read_text()
+    original = outputs["original"].read_text()
+    occurrence_name = (
+        post_fit_analysis._three_parameter_occurrence_command_name(
+            "mtrue", "stellar3params", ("high", "high", "young"),
+            "logG", "a", 0,
+        )
+    )
+    significance_name = (
+        post_fit_analysis._three_parameter_significance_command_name(
+            "mtrue", "stellar3params", "Mass", ("high", "old"),
+            "logG", "a", 0,
+        )
+    )
+    assert rf"\{occurrence_name}" in reordered
+    assert rf"\{occurrence_name}" in original
+    assert rf"\{significance_name}" in reordered
+    assert r"\McHighMstarHighFeHYoungIntOcc" not in reordered
+
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_statistics",
+        lambda result_dir: {
+            "Nstars": "47", "Neff": "4.0", "AvgCompl": "0.64",
+            "IntOcc": r"0.12^{+0.08}_{-0.05}",
+        },
+    )
+
+    def occurrence_samples(result_dir, occurrence_model, stack_bin):
+        assert occurrence_model == "logG"
+        assert stack_bin == 0
+        tier2_dir = result_dir.parent.name
+        offset = post_fit_analysis._THREE_PARAMETER_TIER2_DIRS.index(
+            tier2_dir
+        )
+        return np.linspace(0.1, 0.3, 101) + 0.01*offset
+
+    monkeypatch.setattr(
+        post_fit_analysis, "_model_occurrence_samples", occurrence_samples,
+    )
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_dynamic_ranges",
+        lambda *args: {
+            (varied, fixed): 2.0
+            for varied, fixed, _, _ in
+            post_fit_analysis._three_parameter_comparisons()
+        },
+    )
+    outputs = post_fit_analysis.make_three_parameter_tables(
+        tmp_path, occurrence_model="logG", use_latex_variables=False
+    )
+    reordered = outputs["reordered"].read_text()
+    assert r"$0.20^{+0.07}_{-0.07}$" in reordered
+    assert r"$0.12^{+0.08}_{-0.05}$" not in reordered
+
+
+def test_make_two_parameter_tables_create_both_forms(tmp_path):
+    outputs = post_fit_analysis.make_two_parameter_tables(tmp_path)
+    reordered = outputs["reordered"].read_text()
+    original = outputs["original"].read_text()
+
+    assert outputs["reordered"] == (
+        tmp_path / "paper_items" /
+        "two_parameter_OR_reordered_mtrue_stellar2params.tex"
+    )
+    assert outputs["original"] == (
+        tmp_path / "paper_items" /
+        "two_parameter_OR_mtrue_stellar2params.tex"
+    )
+    assert r"\begin{deluxetable*}{ccccc}" in reordered
+    assert r"\colhead{Fixed Parameter}" in reordered
+    assert r"\colhead{Significance}" in reordered
+    assert r"\colhead{High/Low}" in reordered
+    low_occurrence = post_fit_analysis._two_parameter_command_name(
+        "mtrue", "stellar2params", ("low", "high")
+    )
+    high_occurrence = post_fit_analysis._two_parameter_command_name(
+        "mtrue", "stellar2params", ("high", "high")
+    )
+    significance = post_fit_analysis._two_parameter_comparison_command_name(
+        "mtrue", "stellar2params", "Mass", "high", "Significance"
+    )
+    ratio = post_fit_analysis._two_parameter_comparison_command_name(
+        "mtrue", "stellar2params", "Mass", "high", "DynamicRange"
+    )
+    assert (
+        rf"high & \{low_occurrence} & \{high_occurrence} & "
+        rf"\{significance} & \{ratio} \\" in reordered
+    )
+    assert r"\begin{deluxetable*}{lccccc}" in original
+    assert r"\McHighMstarHighFeHNstars" in original
+    assert r"\McHighMstarHighFeHIntOcc" in original
+    assert not (tmp_path / "paper_items" / "variables.tex").exists()
+
+
+def test_make_two_parameter_tables_can_embed_values_without_mass_range(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_statistics",
+        lambda result_dir: {
+            "Nstars": "50", "Neff": "5.0", "AvgCompl": "0.70",
+            "IntOcc": r"0.10^{+0.02}_{-0.02}",
+        },
+    )
+
+    def occurrence_samples(result_dir):
+        tier2_dir = result_dir.parent.name
+        offset = post_fit_analysis._TWO_PARAMETER_TIER2_DIRS.index(tier2_dir)
+        return np.arange(1.0, 11.0) + offset
+
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_occurrence_samples",
+        occurrence_samples,
+    )
+    catalog_path = tmp_path / "stars.csv"
+    pd.DataFrame([
+        {"Mstar": mass, "feh": feh}
+        for mass in (0.5, 0.8, 1.2, 2.0)
+        for feh in (-0.3, 0.2)
+    ]).to_csv(catalog_path, index=False)
+
+    outputs = post_fit_analysis.make_two_parameter_tables(
+        tmp_path, use_latex_variables=False,
+        stellar_catalog_path=catalog_path,
+    )
+    reordered = outputs["reordered"].read_text()
+    original = outputs["original"].read_text()
+
+    assert reordered.count(" & 2.5 ") == 2
+    assert reordered.count(" & 3.2 ") == 2
+    assert r"\McHighMstarHighFeHIntOcc" not in reordered
+    assert r"$0.10^{+0.02}_{-0.02}$" in reordered
+    assert "high & high & 50 & 5.0 & 0.70" in original
+
+
 def test_posterior_difference_significance_uses_sign_probability():
     probability, z_score, lower_bound = (
         post_fit_analysis._posterior_difference_significance(
@@ -598,6 +739,45 @@ def test_make_variables_adds_available_three_parameter_results(
     assert "lowMstarlowFeHlowAct" in output
 
 
+def test_make_variables_adds_three_parameter_parametric_occurrence(tmp_path):
+    tier1 = tmp_path / "mtrue"
+    _write_summary(tier1, "allstars", "roi")
+    subset = "highMstarlowFeHhighAct"
+    _write_summary(
+        tier1, subset, "stellar3params",
+        cell_weights=np.array([4.0]),
+        cell_compls=np.array([0.6]),
+        n_abins=1,
+        n_mbins=1,
+        a_m_lims_pairs=np.array([[[1.0, 10.0], [1.0, 10.0]]]),
+        mode_OR_single=np.array([0.2]),
+        hdi_low_OR_single=np.array([0.15]),
+        hdi_high_OR_single=np.array([0.25]),
+    )
+    chain_dir = tier1 / subset / "stellar3params" / "saved_chains"
+    chain_dir.mkdir()
+    sample_axis = np.linspace(0.0, 1.0, 101)
+    np.savez(
+        chain_dir / "chains_logG_bin0.npz",
+        flat_chains=np.column_stack([
+            0.1 + 0.01*sample_axis,
+            0.4 + 0.02*sample_axis,
+            0.3 + 0.01*sample_axis,
+        ]),
+        model_bounds=np.array([1.0, 10.0]),
+        stack_bounds=np.array([1.0, 10.0]),
+    )
+
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["allstars"], ["roi"]
+    ).read_text()
+
+    assert r"\McHighMstarLowFeHYoungIntOcc" in text
+    assert r"\McHighMstarLowFeHYoungLogGIntOccBinaZero" in text
+    assert r"\McHighMstarLowFeHYoungLogGParamABinaZero" not in text
+    assert "% Parametric integrated occurrence: logG" in text
+
+
 def test_make_variables_adds_three_parameter_significances(
         tmp_path, monkeypatch):
     tier1 = tmp_path / "mtrue"
@@ -662,6 +842,12 @@ def test_make_variables_adds_three_parameter_significances(
     ]
     for name in dynamic_range_names:
         assert rf"\newcommand{{\{name}}}" in text
+    mass_name = post_fit_analysis._three_parameter_dynamic_range_command_name(
+        "mtrue", "stellar3params", "Mass", ("high", "old")
+    )
+    assert (
+        rf"\newcommand{{\{mass_name}}}{{\ensuremath{{1.5}}}}" in text
+    )
 
 
 def test_plot_companions_by_stellar_parameter_uses_saved_hosts(

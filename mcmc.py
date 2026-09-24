@@ -12,15 +12,197 @@ from occurrence import likelihood as dl
 from occurrence import mcmc_powerlaw
 
 
-def log_probability_piecewise(theta, cache):
+def log_probability_piecewise(
+        theta, cache, max_integrated_occurrence=1.0):
     """Apply physical cell-rate bounds to the direct piecewise likelihood."""
     theta = np.asarray(theta, dtype=float)
     if theta.shape != cache.cell_areas.shape:
         raise ValueError(f"piecewise model requires {cache.cell_areas.size} parameters")
     cell_rates = theta*cache.cell_areas
-    if not np.isfinite(theta).all() or np.any(cell_rates <= 0) or np.any(cell_rates > 1):
+    if (not np.isfinite(theta).all() or np.any(cell_rates <= 0) or
+            np.any(cell_rates > 1) or
+            (max_integrated_occurrence is not None and
+             np.sum(cell_rates) > max_integrated_occurrence)):
         return -np.inf
     return dl.cached_piecewise_log_likelihood(theta, cache)
+
+
+def _piecewise_gp_cholesky(
+        x_edges, y_edges, amplitude=1.0,
+        length_scale_x=None, length_scale_y=None, jitter=1e-8):
+    """Return the GP Cholesky factor and resolved length scales.
+
+    The GP operates on natural-log density contrasts at cell centers in
+    ``log10(x)`` and ``log10(y)``.  Separate length scales allow anisotropic
+    smoothing in the two coordinates.
+    """
+    x_edges = dl._validate_edges(x_edges, "x_edges")
+    y_edges = dl._validate_edges(y_edges, "y_edges")
+    amplitude = float(amplitude)
+    jitter = float(jitter)
+    if not np.isfinite(amplitude) or amplitude <= 0:
+        raise ValueError("piecewise_gp_amplitude must be positive")
+    if not np.isfinite(jitter) or jitter <= 0:
+        raise ValueError("piecewise_gp_jitter must be positive")
+
+    log_x_edges = np.log10(x_edges)
+    log_y_edges = np.log10(y_edges)
+    if length_scale_x is None:
+        length_scale_x = float(np.median(np.diff(log_x_edges)))
+    if length_scale_y is None:
+        length_scale_y = float(np.median(np.diff(log_y_edges)))
+    length_scale_x = float(length_scale_x)
+    length_scale_y = float(length_scale_y)
+    if (not np.isfinite(length_scale_x) or length_scale_x <= 0 or
+            not np.isfinite(length_scale_y) or length_scale_y <= 0):
+        raise ValueError("piecewise GP length scales must be positive")
+
+    squared_dx, squared_dy = _piecewise_gp_squared_distances(
+        x_edges, y_edges
+    )
+    cholesky = _piecewise_gp_factor_from_distances(
+        squared_dx, squared_dy, amplitude, length_scale_x, length_scale_y,
+        jitter,
+    )
+    return (
+        cholesky, length_scale_x, length_scale_y
+    )
+
+
+def _piecewise_gp_squared_distances(x_edges, y_edges):
+    """Return pairwise squared cell-center distances in logarithmic space."""
+    log_x_edges = np.log10(dl._validate_edges(x_edges, "x_edges"))
+    log_y_edges = np.log10(dl._validate_edges(y_edges, "y_edges"))
+    x_centers = 0.5*(log_x_edges[:-1] + log_x_edges[1:])
+    y_centers = 0.5*(log_y_edges[:-1] + log_y_edges[1:])
+    x_grid, y_grid = np.meshgrid(x_centers, y_centers, indexing="xy")
+    coordinates = np.column_stack((x_grid.ravel(), y_grid.ravel()))
+    dx = coordinates[:, None, 0] - coordinates[None, :, 0]
+    dy = coordinates[:, None, 1] - coordinates[None, :, 1]
+    return dx**2, dy**2
+
+
+def _piecewise_gp_factor_from_distances(
+        squared_dx, squared_dy, amplitude, length_scale_x, length_scale_y,
+        jitter):
+    """Build a squared-exponential covariance Cholesky factor."""
+    covariance = amplitude**2*np.exp(-0.5*(
+        squared_dx/length_scale_x**2 + squared_dy/length_scale_y**2
+    ))
+    covariance.flat[::covariance.shape[0] + 1] += jitter*amplitude**2
+    return np.linalg.cholesky(covariance)
+
+
+def _piecewise_gp_length_scale_bounds(edges):
+    """Return broad automatic log-uniform length-scale bounds in dex."""
+    log_edges = np.log10(dl._validate_edges(edges, "edges"))
+    widths = np.diff(log_edges)
+    lower = max(float(np.min(widths))/4.0, 1e-3)
+    upper = max(2.0*float(log_edges[-1] - log_edges[0]), 10.0*lower)
+    return lower, upper
+
+
+def _validate_positive_bounds(bounds, name):
+    """Validate a finite increasing pair of positive prior bounds."""
+    values = np.asarray(bounds, dtype=float)
+    if (values.shape != (2,) or not np.isfinite(values).all() or
+            values[0] <= 0 or values[1] <= values[0]):
+        raise ValueError(f"{name} must be an increasing positive pair")
+    return tuple(values)
+
+
+def piecewise_gp_density(total_occurrence, whitened_shape, cholesky,
+                         cell_areas):
+    """Convert an explicit total rate and normalized log-GP shape to density."""
+    total_occurrence = float(total_occurrence)
+    whitened_shape = np.asarray(whitened_shape, dtype=float)
+    cholesky = np.asarray(cholesky, dtype=float)
+    cell_areas = np.asarray(cell_areas, dtype=float)
+    if whitened_shape.shape != cell_areas.shape:
+        raise ValueError("GP shape must contain one value per piecewise cell")
+    if cholesky.shape != (cell_areas.size, cell_areas.size):
+        raise ValueError("GP Cholesky factor has the wrong shape")
+    if (not np.isfinite(total_occurrence) or total_occurrence <= 0 or
+            not np.isfinite(whitened_shape).all() or
+            not np.isfinite(cholesky).all() or
+            not np.isfinite(cell_areas).all() or np.any(cell_areas <= 0)):
+        raise ValueError("GP piecewise parameters must be finite and positive")
+
+    log_shape = cholesky @ whitened_shape
+    log_shape -= np.max(log_shape)
+    relative_density = np.exp(log_shape)
+    normalization = np.dot(relative_density, cell_areas)
+    return total_occurrence*relative_density/normalization
+
+
+def log_probability_piecewise_gp(
+        parameters, cache, cholesky, max_integrated_occurrence=1.0):
+    """Evaluate a normalized log-GP piecewise model with explicit total rate."""
+    parameters = np.asarray(parameters, dtype=float)
+    if parameters.shape != (cache.cell_areas.size + 1,):
+        raise ValueError(
+            "GP piecewise model requires total occurrence plus one latent "
+            "value per cell"
+        )
+    total_occurrence = parameters[0]
+    whitened_shape = parameters[1:]
+    if (not np.isfinite(parameters).all() or total_occurrence <= 0 or
+            total_occurrence >= max_integrated_occurrence):
+        return -np.inf
+    try:
+        density = piecewise_gp_density(
+            total_occurrence, whitened_shape, cholesky, cache.cell_areas
+        )
+    except ValueError:
+        return -np.inf
+    log_prior = -0.5*np.dot(whitened_shape, whitened_shape)
+    return log_prior + dl.cached_piecewise_log_likelihood(density, cache)
+
+
+def log_probability_piecewise_gp_hierarchical(
+        parameters, cache, squared_dx, squared_dy, amplitude_bounds,
+        length_scale_x_bounds, length_scale_y_bounds, jitter,
+        max_integrated_occurrence=1.0):
+    """Evaluate a normalized GP while inferring its three hyperparameters."""
+    parameters = np.asarray(parameters, dtype=float)
+    if parameters.shape != (cache.cell_areas.size + 4,):
+        raise ValueError(
+            "hierarchical GP piecewise model requires R, three GP "
+            "hyperparameters, and one latent value per cell"
+        )
+    total_occurrence = parameters[0]
+    log_amplitude, log_length_x, log_length_y = parameters[1:4]
+    whitened_shape = parameters[4:]
+    if (not np.isfinite(parameters).all() or total_occurrence <= 0 or
+            total_occurrence >= max_integrated_occurrence):
+        return -np.inf
+    log_bounds = tuple(
+        np.log(bounds) for bounds in (
+            amplitude_bounds, length_scale_x_bounds, length_scale_y_bounds
+        )
+    )
+    if not all(
+            bounds[0] <= value <= bounds[1]
+            for value, bounds in zip(
+                (log_amplitude, log_length_x, log_length_y), log_bounds
+            )):
+        return -np.inf
+    amplitude, length_x, length_y = np.exp(
+        [log_amplitude, log_length_x, log_length_y]
+    )
+    try:
+        cholesky = _piecewise_gp_factor_from_distances(
+            squared_dx, squared_dy, amplitude, length_x, length_y, jitter
+        )
+        density = piecewise_gp_density(
+            total_occurrence, whitened_shape, cholesky, cache.cell_areas
+        )
+    except (ValueError, np.linalg.LinAlgError):
+        return -np.inf
+    # Sampling the logarithms makes these bounded constant priors equivalent
+    # to log-uniform priors on the three positive physical hyperparameters.
+    log_prior = -0.5*np.dot(whitened_shape, whitened_shape)
+    return log_prior + dl.cached_piecewise_log_likelihood(density, cache)
 
 
 def mcmc_piecewise(
@@ -33,8 +215,25 @@ def mcmc_piecewise(
         burnin=1000,
         parallel=False,
         save_path="chains_piecewise.npz",
-        random_seed=None):
-    """Fit cell-wise densities directly to companion posterior samples."""
+        random_seed=None,
+        max_integrated_occurrence=1.0,
+        piecewise_parameterization="independent",
+        piecewise_gp_amplitude=1.0,
+        piecewise_gp_length_scale_x=None,
+        piecewise_gp_length_scale_y=None,
+        piecewise_gp_jitter=1e-8,
+        piecewise_gp_infer_hyperparameters=True,
+        piecewise_gp_amplitude_bounds=(0.05, 5.0),
+        piecewise_gp_length_scale_x_bounds=None,
+        piecewise_gp_length_scale_y_bounds=None):
+    """Fit piecewise densities with independent or normalized log-GP priors.
+
+    ``piecewise_parameterization='independent'`` preserves the legacy model.
+    ``'gp'`` samples an explicit total occurrence with a uniform prior from
+    zero to ``max_integrated_occurrence`` and a GP-smoothed, normalized shape.
+    Its positive hyperparameters are inferred with bounded log-uniform priors
+    unless ``piecewise_gp_infer_hyperparameters`` is false.
+    """
     x_edges = dl._validate_edges(x_edges, "x_edges")
     y_edges = dl._validate_edges(y_edges, "y_edges")
     if not np.allclose(x_edges[[0, -1]], exposure.x_bounds):
@@ -45,17 +244,135 @@ def mcmc_piecewise(
         companions, exposure, x_edges, y_edges
     )
     cell_areas = cache.cell_areas
-    ndim = cell_areas.size
+    if piecewise_parameterization not in {"independent", "gp"}:
+        raise ValueError(
+            "piecewise_parameterization must be 'independent' or 'gp'"
+        )
+    if not isinstance(piecewise_gp_infer_hyperparameters, (bool, np.bool_)):
+        raise TypeError("piecewise_gp_infer_hyperparameters must be boolean")
+    gp_extra_parameters = (
+        4 if (piecewise_parameterization == "gp" and
+              piecewise_gp_infer_hyperparameters) else
+        1 if piecewise_parameterization == "gp" else 0
+    )
+    ndim = cell_areas.size + gp_extra_parameters
     if nwalkers < 2*ndim:
-        raise ValueError("nwalkers must be at least twice the number of cells")
+        raise ValueError(
+            f"nwalkers must be at least {2*ndim} for the "
+            f"{piecewise_parameterization} piecewise parameterization"
+        )
+    if (max_integrated_occurrence is not None and
+            (not np.isfinite(max_integrated_occurrence) or
+             max_integrated_occurrence <= 0)):
+        raise ValueError("max_integrated_occurrence must be positive or None")
 
     rng = np.random.RandomState(random_seed) if random_seed is not None else np.random
-    center = rng.uniform(0.01, 0.05, size=ndim)/cell_areas
-    pos = center*(1 + 1e-2*rng.randn(nwalkers, ndim))
-    pos = np.clip(pos, 1e-8, 0.99/cell_areas)
-    arguments = (cache,)
+    gp_metadata = {}
+    if piecewise_parameterization == "independent":
+        center = rng.uniform(0.01, 0.05, size=ndim)/cell_areas
+        if max_integrated_occurrence is not None:
+            integrated = np.dot(center, cell_areas)
+            if integrated > 0.8*max_integrated_occurrence:
+                center *= 0.8*max_integrated_occurrence/integrated
+        pos = center*(1 + 1e-2*rng.randn(nwalkers, ndim))
+        pos = np.clip(pos, 1e-8, 0.99/cell_areas)
+        probability_function = log_probability_piecewise
+        arguments = (cache, max_integrated_occurrence)
+    else:
+        if max_integrated_occurrence is None:
+            raise ValueError(
+                "GP piecewise fits require a finite max_integrated_occurrence"
+            )
+        cholesky, gp_length_x, gp_length_y = _piecewise_gp_cholesky(
+            x_edges, y_edges, amplitude=piecewise_gp_amplitude,
+            length_scale_x=piecewise_gp_length_scale_x,
+            length_scale_y=piecewise_gp_length_scale_y,
+            jitter=piecewise_gp_jitter,
+        )
+        total_area = np.sum(cell_areas)
+        exposure_per_occurrence = np.sum(cache.cell_exposure)/total_area
+        mle_scale = (
+            np.sum(cache.effective_counts)/exposure_per_occurrence
+            if exposure_per_occurrence > 0 else
+            0.5*max_integrated_occurrence
+        )
+        initial_total = np.clip(
+            mle_scale, 0.05*max_integrated_occurrence,
+            0.8*max_integrated_occurrence,
+        )
+        pos = np.empty((nwalkers, ndim), dtype=float)
+        pos[:, 0] = initial_total*(1 + 0.05*rng.randn(nwalkers))
+        pos[:, 0] = np.clip(
+            pos[:, 0], 1e-8, 0.99*max_integrated_occurrence
+        )
+        if piecewise_gp_infer_hyperparameters:
+            amplitude_bounds = _validate_positive_bounds(
+                piecewise_gp_amplitude_bounds,
+                "piecewise_gp_amplitude_bounds",
+            )
+            length_x_bounds = _validate_positive_bounds(
+                (_piecewise_gp_length_scale_bounds(x_edges)
+                 if piecewise_gp_length_scale_x_bounds is None else
+                 piecewise_gp_length_scale_x_bounds),
+                "piecewise_gp_length_scale_x_bounds",
+            )
+            length_y_bounds = _validate_positive_bounds(
+                (_piecewise_gp_length_scale_bounds(y_edges)
+                 if piecewise_gp_length_scale_y_bounds is None else
+                 piecewise_gp_length_scale_y_bounds),
+                "piecewise_gp_length_scale_y_bounds",
+            )
+            initial_hyperparameters = np.array([
+                piecewise_gp_amplitude, gp_length_x, gp_length_y
+            ], dtype=float)
+            hyper_bounds = (
+                amplitude_bounds, length_x_bounds, length_y_bounds
+            )
+            initial_hyperparameters = np.array([
+                np.clip(value, bounds[0]*1.01, bounds[1]/1.01)
+                for value, bounds in zip(initial_hyperparameters, hyper_bounds)
+            ])
+            pos[:, 1:4] = (
+                np.log(initial_hyperparameters)[None, :] +
+                0.03*rng.randn(nwalkers, 3)
+            )
+            for index, bounds in enumerate(hyper_bounds, start=1):
+                pos[:, index] = np.clip(
+                    pos[:, index], np.log(bounds[0])+1e-8,
+                    np.log(bounds[1])-1e-8,
+                )
+            pos[:, 4:] = 0.05*rng.randn(nwalkers, cell_areas.size)
+            squared_dx, squared_dy = _piecewise_gp_squared_distances(
+                x_edges, y_edges
+            )
+            probability_function = log_probability_piecewise_gp_hierarchical
+            arguments = (
+                cache, squared_dx, squared_dy, amplitude_bounds,
+                length_x_bounds, length_y_bounds, piecewise_gp_jitter,
+                max_integrated_occurrence,
+            )
+        else:
+            pos[:, 1:] = 0.05*rng.randn(nwalkers, cell_areas.size)
+            probability_function = log_probability_piecewise_gp
+            arguments = (cache, cholesky, max_integrated_occurrence)
+        gp_metadata = {
+            "piecewise_gp_amplitude": float(piecewise_gp_amplitude),
+            "piecewise_gp_length_scale_x": gp_length_x,
+            "piecewise_gp_length_scale_y": gp_length_y,
+            "piecewise_gp_jitter": float(piecewise_gp_jitter),
+            "piecewise_gp_cholesky": cholesky,
+            "piecewise_gp_infer_hyperparameters": (
+                piecewise_gp_infer_hyperparameters
+            ),
+        }
+        if piecewise_gp_infer_hyperparameters:
+            gp_metadata.update({
+                "piecewise_gp_amplitude_bounds": amplitude_bounds,
+                "piecewise_gp_length_scale_x_bounds": length_x_bounds,
+                "piecewise_gp_length_scale_y_bounds": length_y_bounds,
+            })
     initial_log_probabilities = np.array([
-        log_probability_piecewise(position, *arguments) for position in pos
+        probability_function(position, *arguments) for position in pos
     ])
     if not np.isfinite(initial_log_probabilities).all():
         unsupported = [
@@ -69,30 +386,109 @@ def mcmc_piecewise(
     if parallel:
         with mp.Pool() as pool:
             sampler = emcee.EnsembleSampler(
-                nwalkers, ndim, log_probability_piecewise, args=arguments, pool=pool
+                nwalkers, ndim, probability_function, args=arguments, pool=pool
             )
             _run_sampler(sampler, pos, burnin, nsteps, rng, random_seed)
     else:
         sampler = emcee.EnsembleSampler(
-            nwalkers, ndim, log_probability_piecewise, args=arguments
+            nwalkers, ndim, probability_function, args=arguments
         )
         _run_sampler(sampler, pos, burnin, nsteps, rng, random_seed)
 
     log_probabilities = sampler.get_log_prob()
     if not np.isfinite(log_probabilities).all():
         raise RuntimeError("MCMC produced nonfinite log probabilities")
+    sampled_chains = sampler.get_chain()
+    flat_sampled_chains = sampler.get_chain(flat=True)
+    if piecewise_parameterization == "gp":
+        latent_chains = sampled_chains
+        flat_latent_chains = flat_sampled_chains
+        total_occurrence_chains = sampled_chains[..., 0]
+        flat_total_occurrence_chains = flat_sampled_chains[:, 0]
+        if piecewise_gp_infer_hyperparameters:
+            flat_gp_parameter_chains = np.column_stack((
+                flat_total_occurrence_chains,
+                np.exp(flat_sampled_chains[:, 1:4]),
+            ))
+            squared_dx, squared_dy = _piecewise_gp_squared_distances(
+                x_edges, y_edges
+            )
+            flat_physical_chains = np.empty(
+                (flat_sampled_chains.shape[0], cell_areas.size), dtype=float
+            )
+            for index, row in enumerate(flat_sampled_chains):
+                amplitude, length_x, length_y = np.exp(row[1:4])
+                factor = _piecewise_gp_factor_from_distances(
+                    squared_dx, squared_dy, amplitude, length_x, length_y,
+                    piecewise_gp_jitter,
+                )
+                flat_physical_chains[index] = piecewise_gp_density(
+                    row[0], row[4:], factor, cell_areas
+                )
+        else:
+            flat_gp_parameter_chains = np.column_stack((
+                flat_total_occurrence_chains,
+                np.full(flat_sampled_chains.shape[0], piecewise_gp_amplitude),
+                np.full(flat_sampled_chains.shape[0], gp_length_x),
+                np.full(flat_sampled_chains.shape[0], gp_length_y),
+            ))
+            log_shapes = (
+                flat_sampled_chains[:, 1:] @
+                gp_metadata["piecewise_gp_cholesky"].T
+            )
+            log_shapes -= np.max(log_shapes, axis=1, keepdims=True)
+            relative_densities = np.exp(log_shapes)
+            normalizations = relative_densities @ cell_areas
+            flat_physical_chains = (
+                flat_total_occurrence_chains[:, None]*relative_densities /
+                normalizations[:, None]
+            )
+        physical_chains = flat_physical_chains.reshape(
+            sampled_chains.shape[:-1] + (cell_areas.size,)
+        )
+        gp_parameter_chains = flat_gp_parameter_chains.reshape(
+            sampled_chains.shape[:-1] + (4,)
+        )
+    else:
+        physical_chains = sampled_chains
+        flat_physical_chains = flat_sampled_chains
+        latent_chains = np.empty((0,))
+        flat_latent_chains = np.empty((0,))
+        total_occurrence_chains = np.sum(
+            physical_chains*cell_areas, axis=-1
+        )
+        flat_total_occurrence_chains = np.sum(
+            flat_physical_chains*cell_areas, axis=-1
+        )
+        gp_parameter_chains = np.empty((0,))
+        flat_gp_parameter_chains = np.empty((0,))
     np.savez_compressed(
         save_path,
-        chains=sampler.get_chain(),
+        chains=physical_chains,
         log_probs=log_probabilities,
-        flat_chains=sampler.get_chain(flat=True),
+        flat_chains=flat_physical_chains,
         flat_log_probs=sampler.get_log_prob(flat=True),
+        latent_chains=latent_chains,
+        flat_latent_chains=flat_latent_chains,
+        total_occurrence_chains=total_occurrence_chains,
+        flat_total_occurrence_chains=flat_total_occurrence_chains,
+        gp_parameter_chains=gp_parameter_chains,
+        flat_gp_parameter_chains=flat_gp_parameter_chains,
+        gp_parameter_names=np.asarray((
+            "R", "sigma_gp", "ell_a", "ell_m"
+        )),
+        piecewise_parameterization=piecewise_parameterization,
         x_edges=x_edges,
         y_edges=y_edges,
         cell_areas=cache.cell_areas,
         cell_exposure=cache.cell_exposure,
         effective_counts=cache.effective_counts,
         log_weight_constant=cache.log_weight_constant,
+        max_integrated_occurrence=(
+            np.nan if max_integrated_occurrence is None
+            else max_integrated_occurrence
+        ),
+        **gp_metadata,
     )
     return sampler
 
@@ -1184,6 +1580,7 @@ def plot_piecewise_results(
     ord_path = output_dir / "occurrence_ORD.png"
     corner_path = output_dir / "corner_piecewise.png"
     occurrence_corner_path = output_dir / "corner_piecewise_OR.png"
+    gp_corner_path = output_dir / "corner_piecewise_gp.png"
     common = dict(
         summary_dict=summary, stack_dim=stack_dim, m_unit=m_unit,
         mtype=mtype, title=title,
@@ -1206,10 +1603,31 @@ def plot_piecewise_results(
     if plot_corner:
         with np.load(chain_path) as chain_data:
             flat_chains = np.asarray(chain_data["flat_chains"])
-            maximum_likelihood = flat_chains[
-                np.argmax(np.asarray(chain_data["flat_log_probs"]))
-            ]
+            maximum_index = np.argmax(
+                np.asarray(chain_data["flat_log_probs"])
+            )
+            maximum_likelihood = flat_chains[maximum_index]
             cell_areas = np.asarray(chain_data["cell_areas"], dtype=float)
+            parameterization = (
+                str(np.asarray(chain_data["piecewise_parameterization"]).item())
+                if "piecewise_parameterization" in chain_data else
+                "independent"
+            )
+            infer_gp_hyperparameters = (
+                bool(np.asarray(
+                    chain_data["piecewise_gp_infer_hyperparameters"]
+                ).item())
+                if "piecewise_gp_infer_hyperparameters" in chain_data else
+                False
+            )
+            gp_reference = (
+                np.asarray(chain_data["flat_gp_parameter_chains"])[
+                    maximum_index
+                ]
+                if (parameterization == "gp" and
+                    infer_gp_hyperparameters) else
+                None
+            )
         pu.plot_corner_from_file(
             path_to_chains=chain_path,
             param_names=[
@@ -1235,6 +1653,20 @@ def plot_piecewise_results(
             parameter_scale=cell_areas,
         )
         paths["corner_occurrence"] = str(occurrence_corner_path)
+        if gp_reference is not None:
+            pu.plot_corner_from_file(
+                path_to_chains=chain_path,
+                samples_key="flat_gp_parameter_chains",
+                param_names=[
+                    r"$R$", r"$\sigma_{\rm GP}$",
+                    r"$\ell_a$ [dex]", r"$\ell_M$ [dex]",
+                ],
+                outpath=str(gp_corner_path),
+                thin=10,
+                max_samples=50000,
+                reference_values=gp_reference,
+            )
+            paths["corner_gp"] = str(gp_corner_path)
     if plot_catalog_roi or plot_roi_occurrence:
         if tier1_dir is None or tier2_dir is None:
             raise ValueError(

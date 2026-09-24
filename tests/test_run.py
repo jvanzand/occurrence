@@ -86,11 +86,24 @@ def test_run_multiple_applies_tier2_cuts_and_plot_controls(
         plot_roi_occurrence=True,
         plot_uncorrected_occurrence_mle=True,
         occurrence_legend_loc="lower left",
+        piecewise_parameterization="gp",
+        piecewise_gp_amplitude=0.7,
+        piecewise_gp_length_scale_a=0.4,
+        piecewise_gp_length_scale_m=0.3,
     )
 
     assert [result["nstars"] for result in results] == [3, 2]
     assert [len(call["star_df"]) for call in prep_calls] == [3, 2]
     assert len(fit_calls) == 2
+    assert all(call["max_integrated_occurrence"] == 1.0 for call in fit_calls)
+    assert all(call["piecewise_parameterization"] == "gp" for call in fit_calls)
+    assert all(call["piecewise_gp_amplitude"] == 0.7 for call in fit_calls)
+    assert all(call["piecewise_gp_length_scale_x"] == 0.4 for call in fit_calls)
+    assert all(call["piecewise_gp_length_scale_y"] == 0.3 for call in fit_calls)
+    assert all(
+        call["piecewise_gp_infer_hyperparameters"] is True
+        for call in fit_calls
+    )
     assert [call["nstars"] for call in plot_calls] == [3, 2]
     assert [call["title"] for call in plot_calls] == [
         "Mass Function (All Stars)",

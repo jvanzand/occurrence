@@ -59,6 +59,11 @@ _THREE_PARAMETER_TIER2_DIRS = (
     "lowMstarlowFeHhighAct", "lowMstarlowFeHlowAct",
 )
 
+_TWO_PARAMETER_TIER2_DIRS = (
+    "highMstarhighFeH", "highMstarlowFeH",
+    "lowMstarhighFeH", "lowMstarlowFeH",
+)
+
 _THREE_PARAMETER_DEFAULT_CUTS = {
     "Mstar": 1.0,
     "feh": 0.0,
@@ -1020,6 +1025,29 @@ def _three_parameter_command_name(t1, t3, levels, statistic="IntOcc"):
     )
 
 
+def _three_parameter_occurrence_command_name(
+        t1, t3, levels, occurrence_model="piecewise",
+        stack_dim="a", stack_bin=0):
+    """Return the integrated-occurrence command for a selected model."""
+    if occurrence_model == "piecewise":
+        return _three_parameter_command_name(t1, t3, levels, "IntOcc")
+    if occurrence_model not in _MODEL_PARAMETER_MACROS:
+        raise ValueError(
+            "occurrence_model must be 'piecewise' or one of "
+            f"{tuple(_MODEL_PARAMETER_MACROS)}"
+        )
+    if stack_dim not in {"a", "m"}:
+        raise ValueError("stack_dim must be 'a' or 'm'")
+    if not isinstance(stack_bin, (int, np.integer)) or stack_bin < 0:
+        raise ValueError("stack_bin must be a nonnegative integer")
+    prefix = _three_parameter_command_name(t1, t3, levels, statistic="")
+    model_macro = _MODEL_PARAMETER_MACROS[occurrence_model][0]
+    return (
+        prefix + model_macro + "IntOcc" +
+        f"Bin{stack_dim}{_number_word(int(stack_bin))}"
+    )
+
+
 def _three_parameter_comparisons():
     """Return the twelve comparisons shown in the reordered table."""
     comparisons = []
@@ -1048,7 +1076,8 @@ def _three_parameter_comparisons():
 
 
 def _three_parameter_significance_command_name(
-        t1, t3, varied_parameter, fixed_levels):
+        t1, t3, varied_parameter, fixed_levels,
+        occurrence_model="piecewise", stack_dim="a", stack_bin=0):
     """Return the variable-command name for one posterior comparison."""
     prefix = _tier1_prefix(t1)
     if str(t3) != "stellar3params":
@@ -1066,7 +1095,22 @@ def _three_parameter_significance_command_name(
         raise ValueError(
             "varied_parameter must be 'Mass', 'FeH', or 'Age'"
         )
-    return prefix + varied_parameter + fixed_token + "Significance"
+    name = prefix + varied_parameter + fixed_token
+    if occurrence_model != "piecewise":
+        if occurrence_model not in _MODEL_PARAMETER_MACROS:
+            raise ValueError(
+                "occurrence_model must be 'piecewise' or one of "
+                f"{tuple(_MODEL_PARAMETER_MACROS)}"
+            )
+        if stack_dim not in {"a", "m"}:
+            raise ValueError("stack_dim must be 'a' or 'm'")
+        if not isinstance(stack_bin, (int, np.integer)) or stack_bin < 0:
+            raise ValueError("stack_bin must be a nonnegative integer")
+        name += (
+            _MODEL_PARAMETER_MACROS[occurrence_model][0] +
+            f"Bin{stack_dim}{_number_word(int(stack_bin))}"
+        )
+    return name + "Significance"
 
 
 def _three_parameter_dynamic_range_command_name(
@@ -1165,6 +1209,126 @@ def _three_parameter_dynamic_ranges(catalog_path=None, cuts=None):
     return dynamic_ranges
 
 
+def _two_parameter_levels(tier2_dir):
+    """Extract mass and metallicity levels from a subset directory."""
+    match = re.fullmatch(
+        r"(high|low)Mstar(high|low)FeH", str(tier2_dir)
+    )
+    if match is None:
+        raise ValueError(
+            f"invalid two-parameter Tier 2 directory: {tier2_dir!r}"
+        )
+    return match.groups()
+
+
+def _two_parameter_command_name(t1, t3, levels, statistic="IntOcc"):
+    """Return a variable-command name for a mass-metallicity subset."""
+    mass, metallicity = levels
+    prefix = _tier1_prefix(t1)
+    if str(t3) != "stellar2params":
+        prefix += _latex_token(Path(t3).name)
+    return (
+        prefix + mass.capitalize() + "Mstar" +
+        metallicity.capitalize() + "FeH" + statistic
+    )
+
+
+def _two_parameter_comparisons():
+    """Return the four comparisons shown in the reordered table."""
+    comparisons = []
+    for metallicity in ("high", "low"):
+        comparisons.append((
+            "Mass", metallicity,
+            ("low", metallicity), ("high", metallicity),
+        ))
+    for mass in ("high", "low"):
+        comparisons.append((
+            "FeH", mass,
+            (mass, "low"), (mass, "high"),
+        ))
+    return comparisons
+
+
+def _two_parameter_comparison_command_name(
+        t1, t3, varied_parameter, fixed_level, statistic):
+    """Return a command name for a two-parameter comparison statistic."""
+    prefix = _tier1_prefix(t1)
+    if str(t3) != "stellar2params":
+        prefix += _latex_token(Path(t3).name)
+    if varied_parameter == "Mass":
+        fixed_token = fixed_level.capitalize() + "FeH"
+    elif varied_parameter == "FeH":
+        fixed_token = fixed_level.capitalize() + "Mstar"
+    else:
+        raise ValueError("varied_parameter must be 'Mass' or 'FeH'")
+    return prefix + varied_parameter + fixed_token + statistic
+
+
+def _two_parameter_dynamic_ranges(catalog_path=None, cuts=None):
+    """Calculate mass and metallicity median ratios without a mass-range cut."""
+    import pandas as pd
+
+    if catalog_path is None:
+        catalog_path = (
+            Path(__file__).resolve().parent / "cls_files" /
+            "cls_all_stars_all_params.csv"
+        )
+    else:
+        catalog_path = Path(catalog_path)
+    parameter_cuts = {
+        "Mstar": _THREE_PARAMETER_DEFAULT_CUTS["Mstar"],
+        "feh": _THREE_PARAMETER_DEFAULT_CUTS["feh"],
+    }
+    if cuts is not None:
+        unknown = set(cuts) - set(parameter_cuts)
+        if unknown:
+            raise ValueError(
+                f"unknown two-parameter cut names: {sorted(unknown)}"
+            )
+        parameter_cuts.update(cuts)
+
+    catalog = pd.read_csv(catalog_path)
+    missing = sorted(set(parameter_cuts) - set(catalog.columns))
+    if missing:
+        raise KeyError(f"{catalog_path} lacks columns {missing}")
+    for column in parameter_cuts:
+        catalog[column] = pd.to_numeric(catalog[column], errors="coerce")
+
+    def level_mask(column, level):
+        values = catalog[column]
+        cut = parameter_cuts[column]
+        return values > cut if level == "high" else values <= cut
+
+    columns = {"Mass": "Mstar", "FeH": "feh"}
+    dynamic_ranges = {}
+    for varied_parameter, fixed_level, low_levels, high_levels in (
+            _two_parameter_comparisons()):
+        varied_column = columns[varied_parameter]
+        medians = []
+        for mass, metallicity in (low_levels, high_levels):
+            mask = (
+                level_mask("Mstar", mass) &
+                level_mask("feh", metallicity)
+            )
+            values = catalog.loc[mask, varied_column].dropna().to_numpy()
+            if values.size == 0:
+                raise ValueError(
+                    f"no finite {varied_column} values for levels "
+                    f"{(mass, metallicity)} in {catalog_path}"
+                )
+            medians.append(float(np.median(values)))
+        if varied_parameter == "FeH":
+            medians = [10**value for value in medians]
+        lower, upper = sorted(medians)
+        if lower <= 0:
+            raise ValueError(
+                f"dynamic-range medians must be positive; got {medians} for "
+                f"{varied_parameter} at fixed level {fixed_level}"
+            )
+        dynamic_ranges[(varied_parameter, fixed_level)] = upper/lower
+    return dynamic_ranges
+
+
 def _three_parameter_occurrence_samples(result_dir):
     """Load the integrated piecewise-occurrence posterior for one subset."""
     chain_path = result_dir / "saved_chains" / "chains_piecewise.npz"
@@ -1197,6 +1361,79 @@ def _three_parameter_occurrence_samples(result_dir):
             "at least two finite values"
         )
     return integrated
+
+
+def _parametric_occurrence_samples(
+        result_dir, model_name, stack_bin=0):
+    """Load and integrate one parametric model's posterior draws."""
+    if model_name not in _MODEL_PARAMETER_MACROS:
+        raise ValueError(
+            f"model_name must be one of {tuple(_MODEL_PARAMETER_MACROS)}"
+        )
+    if not isinstance(stack_bin, (int, np.integer)) or stack_bin < 0:
+        raise ValueError("stack_bin must be a nonnegative integer")
+    result_dir = Path(result_dir)
+    chain_path = (
+        result_dir / "saved_chains" /
+        f"chains_{model_name}_bin{int(stack_bin)}.npz"
+    )
+    if not chain_path.is_file():
+        raise FileNotFoundError(f"parametric chain not found: {chain_path}")
+    with np.load(chain_path) as chain:
+        key = "flat_chains" if "flat_chains" in chain else "chains"
+        if key not in chain:
+            raise KeyError(
+                f"{chain_path} must contain 'flat_chains' or 'chains'"
+            )
+        if "model_bounds" not in chain or "stack_bounds" not in chain:
+            raise KeyError(
+                f"{chain_path} must contain 'model_bounds' and 'stack_bounds'"
+            )
+        samples = np.asarray(chain[key], dtype=float)
+        model_bounds = np.asarray(chain["model_bounds"], dtype=float)
+        stack_bounds = np.asarray(chain["stack_bounds"], dtype=float)
+    samples = samples.reshape(-1, samples.shape[-1])
+    expected_parameters = len(_MODEL_PARAMETER_MACROS[model_name][1])
+    if samples.shape[1] != expected_parameters:
+        raise ValueError(
+            f"parameter count in {chain_path} does not match {model_name}"
+        )
+    if samples.shape[0] < 2 or not np.isfinite(samples).all():
+        raise ValueError(
+            f"parameter samples in {chain_path} must contain at least two "
+            "finite draws"
+        )
+    samples = samples[::10]
+    if samples.shape[0] > 10000:
+        indices = np.linspace(
+            0, samples.shape[0] - 1, 10000, dtype=int
+        )
+        samples = samples[indices]
+    integrated = _integrated_occurrence_samples(
+        model_name, samples, model_bounds, stack_bounds
+    )
+    if integrated.size < 2 or not np.isfinite(integrated).all():
+        raise ValueError(
+            f"integrated occurrence samples in {chain_path} must contain "
+            "at least two finite values"
+        )
+    return integrated
+
+
+def _model_occurrence_samples(
+        result_dir, occurrence_model="piecewise", stack_bin=0):
+    """Load integrated-occurrence draws for the requested model."""
+    if occurrence_model == "piecewise":
+        return _three_parameter_occurrence_samples(Path(result_dir))
+    return _parametric_occurrence_samples(
+        result_dir, occurrence_model, stack_bin
+    )
+
+
+def _format_occurrence_samples(samples):
+    """Format an integrated-occurrence posterior for a LaTeX table."""
+    low, median, high = np.percentile(samples, [16, 50, 84])
+    return _format_parameter(median, low, high)
 
 
 def _posterior_difference_significance(low_samples, high_samples):
@@ -1312,7 +1549,8 @@ def make_three_parameter_tables(
         original_label="tab:three_param_OR",
         reordered_output_file=None, original_output_file=None,
         use_latex_variables=True, stellar_catalog_path=None,
-        three_parameter_cuts=None):
+        three_parameter_cuts=None, occurrence_model="piecewise",
+        occurrence_stack_dim="a", occurrence_stack_bin=0):
     """Create reordered and legacy-form tables for three stellar parameters.
 
     The eight subsets vary stellar mass, metallicity, and activity.  Following
@@ -1324,7 +1562,11 @@ def make_three_parameter_tables(
     ``variables.tex``.  Set ``use_latex_variables=False`` to read the saved
     results and write numerical values directly into both tables instead.
     ``stellar_catalog_path`` and ``three_parameter_cuts`` control the stellar
-    samples used for the dynamic-range column.
+    samples used for the dynamic-range column.  ``occurrence_model`` selects
+    which fitted function supplies both the integrated occurrence rates and
+    their comparison significances.  Parametric models use the chain selected
+    by ``occurrence_stack_bin``; ``occurrence_stack_dim`` determines the
+    corresponding LaTeX command suffix.
     """
     results_dir = Path(results_dir)
     if tier2_dirs is None:
@@ -1336,6 +1578,17 @@ def make_three_parameter_tables(
 
     if not isinstance(use_latex_variables, (bool, np.bool_)):
         raise TypeError("use_latex_variables must be a boolean")
+    if (occurrence_model != "piecewise" and
+            occurrence_model not in _MODEL_PARAMETER_MACROS):
+        raise ValueError(
+            "occurrence_model must be 'piecewise' or one of "
+            f"{tuple(_MODEL_PARAMETER_MACROS)}"
+        )
+    if occurrence_stack_dim not in {"a", "m"}:
+        raise ValueError("occurrence_stack_dim must be 'a' or 'm'")
+    if (not isinstance(occurrence_stack_bin, (int, np.integer)) or
+            occurrence_stack_bin < 0):
+        raise ValueError("occurrence_stack_bin must be a nonnegative integer")
 
     table_values = {}
     for tier2_dir in tier2_dirs:
@@ -1345,13 +1598,27 @@ def make_three_parameter_tables(
         if use_latex_variables:
             table_values[levels] = {
                 statistic: rf"\{_three_parameter_command_name(t1, t3, levels, statistic)}"
-                for statistic in ("Nstars", "Neff", "AvgCompl", "IntOcc")
+                for statistic in ("Nstars", "Neff", "AvgCompl")
             }
+            occurrence_name = _three_parameter_occurrence_command_name(
+                t1, t3, levels, occurrence_model,
+                occurrence_stack_dim, occurrence_stack_bin,
+            )
+            table_values[levels]["IntOcc"] = rf"\{occurrence_name}"
         else:
             result_dir = results_dir / t1 / tier2_dir / t3
             statistics = _three_parameter_statistics(result_dir)
             table_values[levels] = dict(statistics)
-            table_values[levels]["IntOcc"] = f"${statistics['IntOcc']}$"
+            if occurrence_model == "piecewise":
+                formatted_occurrence = statistics["IntOcc"]
+            else:
+                occurrence_samples = _model_occurrence_samples(
+                    result_dir, occurrence_model, occurrence_stack_bin
+                )
+                formatted_occurrence = _format_occurrence_samples(
+                    occurrence_samples
+                )
+            table_values[levels]["IntOcc"] = f"${formatted_occurrence}$"
     expected = {
         (mass, metallicity, age)
         for mass in ("high", "low")
@@ -1372,14 +1639,16 @@ def make_three_parameter_tables(
         )
         for tier2_dir in tier2_dirs:
             levels = _three_parameter_levels(tier2_dir)
-            posterior_samples[levels] = _three_parameter_occurrence_samples(
-                results_dir / t1 / tier2_dir / t3
+            posterior_samples[levels] = _model_occurrence_samples(
+                results_dir / t1 / tier2_dir / t3,
+                occurrence_model, occurrence_stack_bin,
             )
     for varied_parameter, fixed_levels, low_levels, high_levels in (
             _three_parameter_comparisons()):
         key = (varied_parameter, fixed_levels)
         command_name = _three_parameter_significance_command_name(
-            t1, t3, varied_parameter, fixed_levels
+            t1, t3, varied_parameter, fixed_levels,
+            occurrence_model, occurrence_stack_dim, occurrence_stack_bin,
         )
         if use_latex_variables:
             significance_values[key] = rf"\{command_name}"
@@ -1412,7 +1681,7 @@ def make_three_parameter_tables(
         r"\colhead{Fixed Parameter 2} &",
         r"\multicolumn{2}{c}{Occurrence Rate} &",
         r"\colhead{Significance} &",
-        r"\colhead{Dynamic Range}",
+        r"\colhead{High/Low}",
         r"}",
         r"\startdata",
     ]
@@ -1421,7 +1690,7 @@ def make_three_parameter_tables(
         lines.append(
             rf"\textbf{{{fixed_one}}} & \textbf{{{fixed_two}}} & "
             rf"\textbf{{{low_heading}}} & \textbf{{{high_heading}}} & "
-            r"\textbf{Significance} & \textbf{Dynamic Range} \\"
+            r" & \\"
         )
         lines.append(r"\hline")
         for (first, second, low_value, high_value, significance,
@@ -1517,6 +1786,208 @@ def make_three_parameter_tables(
         original_output_path = (
             results_dir / PAPER_ITEMS_DIRNAME /
             f"three_parameter_OR_{t1}_{t3}.tex"
+        )
+    else:
+        original_output_path = Path(original_output_file)
+    original_output_path.parent.mkdir(parents=True, exist_ok=True)
+    original_output_path.write_text(
+        "\n".join(original_lines) + "\n", encoding="utf-8"
+    )
+    return {
+        "reordered": reordered_output_path,
+        "original": original_output_path,
+    }
+
+
+def make_two_parameter_tables(
+        results_dir, t1="mtrue", t3="stellar2params", tier2_dirs=None,
+        reordered_caption=(
+            "Occurrence Rates with One Stellar Parameter Held Fixed"
+        ),
+        reordered_label="tab:two_param_OR_reordered",
+        original_caption="Occurrence Rates by Stellar Mass and Metallicity",
+        original_label="tab:two_param_OR",
+        reordered_output_file=None, original_output_file=None,
+        use_latex_variables=True, stellar_catalog_path=None,
+        two_parameter_cuts=None):
+    """Create reordered and original-form mass-metallicity tables.
+
+    The four subsets span low/high stellar mass and low/high metallicity.
+    Unlike the age-activity analysis, dynamic ranges use the complete stellar
+    catalog without restricting stellar mass to 0.82--1.21 solar masses.
+    Set ``use_latex_variables=False`` to embed values from the saved results;
+    otherwise both tables contain the command names that a future variables
+    generator can provide.
+    """
+    results_dir = Path(results_dir)
+    if tier2_dirs is None:
+        tier2_dirs = _TWO_PARAMETER_TIER2_DIRS
+    else:
+        tier2_dirs = tuple(tier2_dirs)
+    if len(tier2_dirs) != 4:
+        raise ValueError("tier2_dirs must contain the four stellar subsets")
+    if not isinstance(use_latex_variables, (bool, np.bool_)):
+        raise TypeError("use_latex_variables must be a boolean")
+
+    table_values = {}
+    for tier2_dir in tier2_dirs:
+        levels = _two_parameter_levels(tier2_dir)
+        if levels in table_values:
+            raise ValueError(f"duplicate two-parameter subset: {levels}")
+        if use_latex_variables:
+            table_values[levels] = {
+                statistic: rf"\{_two_parameter_command_name(t1, t3, levels, statistic)}"
+                for statistic in ("Nstars", "Neff", "AvgCompl", "IntOcc")
+            }
+        else:
+            result_dir = results_dir / t1 / tier2_dir / t3
+            statistics = _three_parameter_statistics(result_dir)
+            table_values[levels] = dict(statistics)
+            table_values[levels]["IntOcc"] = f"${statistics['IntOcc']}$"
+    expected = {
+        (mass, metallicity)
+        for mass in ("high", "low")
+        for metallicity in ("high", "low")
+    }
+    if set(table_values) != expected:
+        missing = sorted(expected - set(table_values))
+        raise ValueError(f"two-parameter subsets are incomplete; missing {missing}")
+
+    significance_values = {}
+    dynamic_range_values = {}
+    posterior_samples = {}
+    numerical_dynamic_ranges = None
+    if not use_latex_variables:
+        numerical_dynamic_ranges = _two_parameter_dynamic_ranges(
+            stellar_catalog_path, two_parameter_cuts
+        )
+        for tier2_dir in tier2_dirs:
+            levels = _two_parameter_levels(tier2_dir)
+            posterior_samples[levels] = _three_parameter_occurrence_samples(
+                results_dir / t1 / tier2_dir / t3
+            )
+    for varied_parameter, fixed_level, low_levels, high_levels in (
+            _two_parameter_comparisons()):
+        key = (varied_parameter, fixed_level)
+        significance_name = _two_parameter_comparison_command_name(
+            t1, t3, varied_parameter, fixed_level, "Significance"
+        )
+        dynamic_range_name = _two_parameter_comparison_command_name(
+            t1, t3, varied_parameter, fixed_level, "DynamicRange"
+        )
+        if use_latex_variables:
+            significance_values[key] = rf"\{significance_name}"
+            dynamic_range_values[key] = rf"\{dynamic_range_name}"
+        else:
+            probability, z_score, lower_bound = (
+                _posterior_difference_significance(
+                    posterior_samples[low_levels],
+                    posterior_samples[high_levels],
+                )
+            )
+            significance_values[key] = (
+                f"${_format_posterior_significance(z_score, lower_bound)}$"
+            )
+            dynamic_range_values[key] = (
+                f"{numerical_dynamic_ranges[key]:.1f}"
+            )
+
+    reordered_lines = [
+        r"\begin{deluxetable*}{ccccc}",
+        rf"\tablecaption{{{reordered_caption}}}",
+        rf"\label{{{reordered_label}}}",
+        r"\tablehead{",
+        r"\colhead{Fixed Parameter} &",
+        r"\multicolumn{2}{c}{Occurrence Rate} &",
+        r"\colhead{Significance} &",
+        r"\colhead{High/Low}",
+        r"}",
+        r"\startdata",
+    ]
+
+    def add_block(fixed_parameter, low_heading, high_heading, rows):
+        reordered_lines.append(
+            rf"\textbf{{{fixed_parameter}}} & "
+            rf"\textbf{{{low_heading}}} & \textbf{{{high_heading}}} & "
+            r" & \\"
+        )
+        reordered_lines.append(r"\hline")
+        for fixed_level, low_value, high_value, significance, ratio in rows:
+            reordered_lines.append(
+                rf"{fixed_level} & {low_value} & {high_value} & "
+                rf"{significance} & {ratio} \\"
+            )
+        reordered_lines.append(r"\hline")
+
+    add_block(
+        "[Fe/H]", "Low Mass", "High Mass",
+        [
+            (metallicity,
+             table_values[("low", metallicity)]["IntOcc"],
+             table_values[("high", metallicity)]["IntOcc"],
+             significance_values[("Mass", metallicity)],
+             dynamic_range_values[("Mass", metallicity)])
+            for metallicity in ("high", "low")
+        ],
+    )
+    add_block(
+        "Mass", "Low [Fe/H]", "High [Fe/H]",
+        [
+            (mass,
+             table_values[(mass, "low")]["IntOcc"],
+             table_values[(mass, "high")]["IntOcc"],
+             significance_values[("FeH", mass)],
+             dynamic_range_values[("FeH", mass)])
+            for mass in ("high", "low")
+        ],
+    )
+    reordered_lines.extend([
+        r"\enddata",
+        r"\end{deluxetable*}",
+    ])
+
+    if reordered_output_file is None:
+        reordered_output_path = (
+            results_dir / PAPER_ITEMS_DIRNAME /
+            f"two_parameter_OR_reordered_{t1}_{t3}.tex"
+        )
+    else:
+        reordered_output_path = Path(reordered_output_file)
+    reordered_output_path.parent.mkdir(parents=True, exist_ok=True)
+    reordered_output_path.write_text(
+        "\n".join(reordered_lines) + "\n", encoding="utf-8"
+    )
+
+    original_lines = [
+        r"\begin{deluxetable*}{lccccc}",
+        rf"\tablecaption{{{original_caption}}}",
+        rf"\label{{{original_label}}}",
+        r"\tablehead{",
+        r"\colhead{Mass} &",
+        r"\colhead{[Fe/H]} &",
+        r"\colhead{$N_{\star}$} &",
+        r"\colhead{$N_{\mathrm{eff}}$} &",
+        r"\colhead{Completeness} &",
+        r"\colhead{Occurrence Rate}",
+        r"}",
+        r"\startdata",
+    ]
+    for tier2_dir in tier2_dirs:
+        mass, metallicity = _two_parameter_levels(tier2_dir)
+        values = table_values[(mass, metallicity)]
+        original_lines.append(
+            f"{mass} & {metallicity} & "
+            f"{values['Nstars']} & {values['Neff']} & "
+            f"{values['AvgCompl']} & {values['IntOcc']} " + r"\\"
+        )
+    original_lines.extend([
+        r"\enddata",
+        r"\end{deluxetable*}",
+    ])
+    if original_output_file is None:
+        original_output_path = (
+            results_dir / PAPER_ITEMS_DIRNAME /
+            f"two_parameter_OR_{t1}_{t3}.tex"
         )
     else:
         original_output_path = Path(original_output_file)
@@ -1809,7 +2280,7 @@ def make_variables(
     if three_parameter_t3 is not None:
         for tier1_dir in tier1_dirs:
             tier1_name = Path(tier1_dir).name
-            occurrence_samples = {}
+            occurrence_samples_by_model = {("piecewise", None): {}}
             available_levels = set()
             for tier2_dir in _THREE_PARAMETER_TIER2_DIRS:
                 result_dir = (
@@ -1827,7 +2298,7 @@ def make_variables(
                 levels = _three_parameter_levels(tier2_dir)
                 available_levels.add(levels)
                 if chain_path.is_file():
-                    occurrence_samples[levels] = (
+                    occurrence_samples_by_model[("piecewise", None)][levels] = (
                         _three_parameter_occurrence_samples(result_dir)
                     )
                 statistics = _three_parameter_statistics(result_dir)
@@ -1843,6 +2314,47 @@ def make_variables(
                         raise ValueError(f"duplicate LaTeX command name: {name}")
                     command_names.add(name)
                     block.append(_command(name, value))
+
+                chain_dir = result_dir / "saved_chains"
+                has_parametric_chains = any(
+                    chain_dir.glob("chains_*_bin*.npz")
+                )
+                parametric_groups = []
+                if has_parametric_chains:
+                    with np.load(summary_path) as summary:
+                        bin_neff, _ = _stack_statistics(
+                            summary, stack_dim, summary_path
+                        )
+                    prefix = _three_parameter_command_name(
+                        tier1_name, three_parameter_t3, levels, statistic=""
+                    )
+                    parametric_groups = _parametric_values(
+                        chain_dir, prefix, stack_dim, len(bin_neff)
+                    )
+                for model_name, model_values in parametric_groups:
+                    integrated_values = [
+                        (name, value) for name, value in model_values
+                        if "IntOcc" in name
+                    ]
+                    if not integrated_values:
+                        continue
+                    block.extend([
+                        "", "%"*36,
+                        f"% Parametric integrated occurrence: {model_name}",
+                    ])
+                    for name, value in integrated_values:
+                        if name in command_names:
+                            raise ValueError(
+                                f"duplicate LaTeX command name: {name}"
+                            )
+                        command_names.add(name)
+                        block.append(_command(name, value))
+                    for bin_index in range(len(bin_neff)):
+                        occurrence_samples_by_model.setdefault(
+                            (model_name, bin_index), {}
+                        )[levels] = _parametric_occurrence_samples(
+                            result_dir, model_name, bin_index
+                        )
                 blocks.append("\n".join(block))
 
             comparison_block = [
@@ -1856,16 +2368,19 @@ def make_variables(
                     tier1_name, three_parameter_t3,
                     varied_parameter, fixed_levels,
                 )
-                if (low_levels not in occurrence_samples or
-                        high_levels not in occurrence_samples):
+                piecewise_samples = occurrence_samples_by_model[
+                    ("piecewise", None)
+                ]
+                if (low_levels not in piecewise_samples or
+                        high_levels not in piecewise_samples):
                     missing_three_parameter_comparisons.append(
                         significance_name
                     )
                 else:
                     probability, z_score, lower_bound = (
                         _posterior_difference_significance(
-                            occurrence_samples[low_levels],
-                            occurrence_samples[high_levels],
+                            piecewise_samples[low_levels],
+                            piecewise_samples[high_levels],
                         )
                     )
                     if significance_name in command_names:
@@ -1876,6 +2391,37 @@ def make_variables(
                     command_names.add(significance_name)
                     comparison_block.append(_command(
                         significance_name,
+                        _format_posterior_significance(z_score, lower_bound),
+                    ))
+
+                for (model_name, bin_index), model_samples in (
+                        occurrence_samples_by_model.items()):
+                    if model_name == "piecewise":
+                        continue
+                    if (low_levels not in model_samples or
+                            high_levels not in model_samples):
+                        continue
+                    model_significance_name = (
+                        _three_parameter_significance_command_name(
+                            tier1_name, three_parameter_t3,
+                            varied_parameter, fixed_levels,
+                            model_name, stack_dim, bin_index,
+                        )
+                    )
+                    probability, z_score, lower_bound = (
+                        _posterior_difference_significance(
+                            model_samples[low_levels],
+                            model_samples[high_levels],
+                        )
+                    )
+                    if model_significance_name in command_names:
+                        raise ValueError(
+                            "duplicate LaTeX command name: "
+                            f"{model_significance_name}"
+                        )
+                    command_names.add(model_significance_name)
+                    comparison_block.append(_command(
+                        model_significance_name,
                         _format_posterior_significance(z_score, lower_bound),
                     ))
 
@@ -1897,7 +2443,7 @@ def make_variables(
                         )
                     command_names.add(dynamic_name)
                     comparison_block.append(_command(
-                        dynamic_name, f"{dynamic_ranges[(varied_parameter, fixed_levels)]:.2f}"
+                        dynamic_name, f"{dynamic_ranges[(varied_parameter, fixed_levels)]:.1f}"
                     ))
             if len(comparison_block) > 2:
                 blocks.append("\n".join(comparison_block))
