@@ -15,6 +15,15 @@ def test_format_subsample_title_uses_geq_without_stray_math_delimiter():
     )
 
 
+def test_occurrence_function_title_follows_unstacked_coordinate():
+    assert run._occurrence_function_title("a", "All Stars") == (
+        "Mass Function (All Stars)"
+    )
+    assert run._occurrence_function_title("m", "All Stars") == (
+        "SMA Function (All Stars)"
+    )
+
+
 @pytest.mark.parametrize(
     "m_unit, solar_mass",
     [("jupiter", run.su.Ms2Mj), ("earth", run.su.Ms2Me)],

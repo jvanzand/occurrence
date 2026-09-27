@@ -21,6 +21,14 @@ def _format_subsample_title(title):
     return title.replace("$Age", "Age").replace(">=", r" $\geq$ ")
 
 
+def _occurrence_function_title(stack_dim, subsample_title=""):
+    """Return the title for the coordinate left unstacked in the plot."""
+    function_name = "SMA Function" if stack_dim == "m" else "Mass Function"
+    if subsample_title:
+        function_name += f" ({subsample_title})"
+    return function_name
+
+
     
 def _tier1_artifacts_exist(tier1_config, star_df, avg_map_only=False):
     """Return whether all map interpolators required from a Tier 1 run exist."""
@@ -508,9 +516,9 @@ def _run_configuration(configuration):
         "plots": {},
     }
     subsample_title = _format_subsample_title(configuration["title"]).strip()
-    title = "Mass Function"
-    if subsample_title:
-        title += f" ({subsample_title})"
+    title = _occurrence_function_title(
+        configuration["stack_dim"], subsample_title
+    )
     early_plot_paths = {}
     roi_occurrence_future = None
     plot_executor = None

@@ -606,8 +606,8 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
     if rate_type=='OR':
         plot_ylabel = 'Occurrence rate\n[Planets per star]'
     elif rate_type=='ORD':
-        #plot_ylabel = 'Occurrence rate density\n[Planets/star/$\Delta \log_{10}(a)$/$\Delta \log_{10}(M_c)$]'
-        plot_ylabel = 'Occurrence rate density\n[Planets/star/$\Delta \log_{10}(\omega)$]'
+        plot_ylabel = 'Occurrence rate density'
+        # plot_ylabel = 'Occurrence rate density\n[Planets/star/$\Delta \log_{10}(\omega)$]'
 
     n_a = int(summary_dict['n_abins'])
     n_m = int(summary_dict['n_mbins'])
@@ -941,7 +941,66 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         max_y_allstack = np.max([ax[i].get_ylim()[1] for i in range(len(ax))])
         for ax_i in ax:
             ax_i.set_ylim(min_y_allstack, max_y_allstack)
-        
+
+    # ------------------------------------------------------------------
+    # Temporary proposal-only ORD annotations.
+    #
+    # Flip this switch to True and edit the four dictionaries below.  For
+    # stacked plots, ``axis`` is the subplot index counted from the bottom
+    # (0 is the bottom panel).  It is ignored for a single-panel plot.
+    # Keeping this block local avoids adding a special-purpose public option.
+    # ------------------------------------------------------------------
+    PROPOSAL_ORD_ANNOTATIONS = False
+    PROPOSAL_ORD_LEGEND_LOC = "upper left"
+    PROPOSAL_ORD_LEGEND_FONTSIZE = 12
+    PROPOSAL_ORD_SEGMENTS = (
+        # Pair 1: shaded vertical bars spanning the complete y-axis.
+        dict(kind="span", axis=0, x=(1.14, 3.17), text="Low Mass\nCLS",
+             color="tab:red", alpha=0.25),
+        dict(kind="span", axis=0, x=(2.29, 4.29), text="High Mass\nCLS",
+             color="tab:blue", alpha=0.25),
+        # Pair 2: capped horizontal line segments.
+        dict(kind="line", axis=0, x=(1.21, 1.78), y=0.03,
+             text="Low Mass\nGaia",
+             capsize=6, linewidth=2.0, color="tab:red", linestyle="-"),
+        dict(kind="line", axis=0, x=(2.25, 2.68), y=0.03,
+             text="High Mass\nGaia",
+             capsize=6, linewidth=2.0, color="tab:blue", linestyle="-"),
+    )
+
+    if PROPOSAL_ORD_ANNOTATIONS and rate_type == 'ORD':
+        proposal_axes = [ax] if n_a == 1 or n_m == 1 else list(ax)
+        axes_with_proposal_items = set()
+        for segment in PROPOSAL_ORD_SEGMENTS:
+            target_ax = proposal_axes[segment["axis"]]
+            axes_with_proposal_items.add(target_ax)
+            x_left, x_right = segment["x"]
+            x_center = np.sqrt(x_left*x_right)
+            if segment["kind"] == "span":
+                target_ax.axvspan(
+                    x_left, x_right, ymin=0, ymax=1,
+                    color=segment["color"], alpha=segment["alpha"],
+                    label=segment["text"], zorder=0,
+                )
+                continue
+            horizontal_error = np.array(
+                [[x_center - x_left], [x_right - x_center]]
+            )
+            errorbar = target_ax.errorbar(
+                x_center, segment["y"], xerr=horizontal_error,
+                fmt="none", ecolor=segment["color"],
+                elinewidth=segment["linewidth"],
+                capsize=segment["capsize"], capthick=segment["linewidth"],
+                label=segment["text"], zorder=110,
+            )
+            for bar_collection in errorbar[2]:
+                bar_collection.set_linestyle(segment["linestyle"])
+        for target_ax in axes_with_proposal_items:
+            target_ax.legend(
+                loc=PROPOSAL_ORD_LEGEND_LOC,
+                fontsize=PROPOSAL_ORD_LEGEND_FONTSIZE,
+            )
+
     
     fig.tight_layout(rect=[0,0,1,0.95])
     
