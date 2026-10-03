@@ -618,7 +618,7 @@ def test_make_two_parameter_tables_create_both_forms(tmp_path):
     )
     assert r"\begin{deluxetable*}{lccccc}" in original
     assert r"\McHighMstarHighFeHNstars" in original
-    assert r"\McHighMstarHighFeHIntOcc" in original
+    assert r"\McHighMstarHighFeHPiecewiseIntOcc" in original
     assert not (tmp_path / "paper_items" / "variables.tex").exists()
 
 
@@ -772,7 +772,7 @@ def test_make_variables_adds_three_parameter_parametric_occurrence(tmp_path):
         tmp_path, ["mtrue"], ["allstars"], ["roi"]
     ).read_text()
 
-    assert r"\McHighMstarLowFeHYoungIntOcc" in text
+    assert r"\McHighMstarLowFeHYoungPiecewiseIntOcc" in text
     assert r"\McHighMstarLowFeHYoungLogGIntOccBinaZero" in text
     assert r"\McHighMstarLowFeHYoungLogGParamABinaZero" not in text
     assert "% Parametric integrated occurrence: logG" in text

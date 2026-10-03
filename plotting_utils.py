@@ -264,6 +264,11 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
         ylabel = r'M$_p\sin{i}$/M$_\star$'
     elif ycol == 'inj_qtrue':
         ylabel = r'M$_p$/M$_\star$'
+    else:
+        raise ValueError(
+            f"unsupported ycol {ycol!r}; expected one of "
+            "'inj_msini', 'inj_mtrue', 'inj_qsini', 'inj_qtrue'"
+        )
     #xlabel = '$P$ [days]'
     #ylabel = 'K (m/s)'
     if summary_dict is not None:
@@ -311,7 +316,8 @@ def plot_catalog(tier1_dir, tier2_dir,
                  m_unit='earth',
                  star_df=None, star_param=None,
                  fig_title='Average Completeness',
-                 fig_savepath='catalog_and_completeness.png'):
+                 fig_savepath='catalog_and_completeness.png',
+                 ycol=None):
     """
     Plot the planet catalog over the avg. completeness map
     
@@ -319,6 +325,8 @@ def plot_catalog(tier1_dir, tier2_dir,
         completeness_dir (str): Path to directory holding completeness
                                 completeness maps
         catalog_path (str): Path to file holding companion samples
+        ycol (str): Injection column for the y-axis, e.g. 'inj_mtrue'.
+                    Defaults to 'inj_' + the last component of tier1_dir.
     """
     
     ## Plot the completeness map first
@@ -342,7 +350,8 @@ def plot_catalog(tier1_dir, tier2_dir,
 
     ## Normally, you plot completeness using recoveries.csv, which has ycol in it
     ## Here, we are plotting from the x/y/z grids, so we have to provide ycol 'manually'
-    ycol = 'inj_'+tier1_dir
+    if ycol is None:
+        ycol = 'inj_'+os.path.basename(os.path.normpath(tier1_dir))
     comp_fig = completeness_plotter(xgrid, ygrid, zgrid, 
                             'avg_comp.png', fig_title,
                             save_plot=False,

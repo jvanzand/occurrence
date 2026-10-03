@@ -1,5 +1,7 @@
 """Tests for multi-configuration direct-fit orchestration."""
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -40,6 +42,37 @@ def test_mass_edges_are_unchanged_for_mass_tiers():
         run._y_edges_for_tier([1.0, 10.0], "m", "jupiter"),
         [1.0, 10.0],
     )
+
+
+def test_output_root_and_explicit_tier1_definition(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(run, "_tier1_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(
+        main, "prep_fit_materials",
+        lambda **kwargs: calls.append(kwargs) or "materials.npz",
+    )
+    monkeypatch.setattr(
+        run.mcmc, "fit_piecewise_file", lambda **kwargs: object(),
+    )
+
+    result = run.run_multiple(
+        tier1_list=["true_mass"], tier2_list=["allstars"],
+        tier3_list=["fit"], a_edges=[0.1, 10.0], m_edges=[1.0, 10.0],
+        star_df=pd.DataFrame({"star_name": ["a"], "Mstar": [1.0]}),
+        tier2_df_cuts_dict={
+            "allstars": [{"star_df_query": None}, "All Stars"]
+        },
+        output_dir=tmp_path / "results",
+        tier1_definitions={
+            "true_mass": {"m_or_q": "m", "true_or_sini": "true"}
+        },
+        plot_models_list=[], make_plots=False,
+    )
+
+    assert calls[0]["tier1_dir"] == str(tmp_path / "results" / "true_mass")
+    assert result[0]["tier1"] == "true_mass"
+    assert result[0]["fit_skipped"] is False
 
 
 def test_run_multiple_applies_tier2_cuts_and_plot_controls(
@@ -218,33 +251,84 @@ def test_missing_tier1_requires_recoveries_directory(tmp_path, monkeypatch):
         )
 
 
-def test_tier2_readiness_requires_catalog_and_average_map(tmp_path):
-    """A directory alone should not count as a complete Tier 2 product."""
+def test_tier2_readiness_uses_directory_existence(tmp_path):
+    """Tier 2 is reused whenever its output directory exists."""
     tier2 = tmp_path / "mtrue" / "allstars"
+    assert not run._tier2_artifacts_exist(tmp_path / "mtrue", "allstars")
     tier2.mkdir(parents=True)
-    assert not run._tier2_artifacts_exist(tmp_path / "mtrue", "allstars")
-    (tier2 / "sampled_post_prior_compl.npz").touch()
-    assert not run._tier2_artifacts_exist(tmp_path / "mtrue", "allstars")
-    (tier2 / "avg_map").mkdir()
-    (tier2 / "avg_map" / "interp_fn.pkl").touch()
     assert run._tier2_artifacts_exist(tmp_path / "mtrue", "allstars")
 
 
-def test_tier1_readiness_requires_every_map_interpolator(tmp_path):
-    """A partial Tier 1 directory must be rebuilt rather than silently skipped."""
+def test_tier1_readiness_uses_directory_existence(tmp_path):
+    """Tier 1 is reused whenever its output directory exists."""
     configuration = {
         "t1_dir": str(tmp_path / "mtrue"),
-        "m_or_q": "m",
-        "true_or_sini": "true",
     }
-    stars = pd.DataFrame({"star_name": ["a", "b"]})
-    map_dir = tmp_path / "mtrue" / "saved_maps_mtrue"
-    (map_dir / "a").mkdir(parents=True)
-    (map_dir / "a" / "interp_fn.pkl").touch()
-    assert not run._tier1_artifacts_exist(configuration, stars)
-    (map_dir / "b").mkdir()
-    (map_dir / "b" / "interp_fn.pkl").touch()
-    assert run._tier1_artifacts_exist(configuration, stars)
+    assert not run._tier1_artifacts_exist(configuration)
+    (tmp_path / "mtrue").mkdir()
+    assert run._tier1_artifacts_exist(configuration)
+
+
+def test_existing_tier3_is_refit_when_run_fits_is_true(tmp_path, monkeypatch):
+    tier3 = tmp_path / "mtrue" / "allstars" / "fit"
+    tier3.mkdir(parents=True)
+    fit_calls = []
+    plot_calls = []
+    monkeypatch.setattr(
+        main, "prep_fit_materials",
+        lambda **kwargs: fit_calls.append(kwargs) or "materials.npz",
+    )
+    monkeypatch.setattr(
+        main, "plot_models",
+        lambda **kwargs: plot_calls.append(kwargs) or {},
+    )
+    monkeypatch.setattr(
+        run.mcmc, "fit_piecewise_file", lambda **kwargs: None,
+    )
+
+    results = run.run_multiple(
+        tier1_list=["mtrue"], tier2_list=["allstars"], tier3_list=["fit"],
+        a_edges=[0.1, 10.0], m_edges=[0.4, 50.0],
+        star_df=pd.DataFrame({"star_name": ["a"]}),
+        tier2_df_cuts_dict={
+            "allstars": [{"star_df_query": None}, "All Stars"]
+        },
+        output_dir=tmp_path,
+    )
+
+    assert len(fit_calls) == 1
+    assert len(plot_calls) == 1
+    assert results[0]["fit_skipped"] is False
+
+
+def test_existing_tier3_is_reused_when_run_fits_is_false(
+        tmp_path, monkeypatch):
+    tier3 = tmp_path / "mtrue" / "allstars" / "fit"
+    tier3.mkdir(parents=True)
+    fit_calls = []
+    plot_calls = []
+    monkeypatch.setattr(
+        main, "prep_fit_materials",
+        lambda **kwargs: fit_calls.append(kwargs) or "materials.npz",
+    )
+    monkeypatch.setattr(
+        main, "plot_models",
+        lambda **kwargs: plot_calls.append(kwargs) or {},
+    )
+
+    results = run.run_multiple(
+        tier1_list=["mtrue"], tier2_list=["allstars"], tier3_list=["fit"],
+        a_edges=[0.1, 10.0], m_edges=[0.4, 50.0],
+        star_df=pd.DataFrame({"star_name": ["a"]}),
+        tier2_df_cuts_dict={
+            "allstars": [{"star_df_query": None}, "All Stars"]
+        },
+        output_dir=tmp_path, run_fits=False,
+    )
+
+    assert fit_calls == []
+    assert len(plot_calls) == 1
+    assert results[0]["fit_skipped"] is True
 
 
 def test_parallel_progress_paths_support_tier1_and_tier2_configurations():
@@ -302,10 +386,11 @@ def test_make_tier2_uses_filtered_stars_for_average_map(monkeypatch):
         main, "make_average_map",
         lambda **kwargs: calls.setdefault("map_stars", kwargs["star_df"].copy()),
     )
-    monkeypatch.setattr(
-        main, "prep_post_draws",
-        lambda **kwargs: calls.setdefault("post_stars", kwargs["star_df"].copy()),
-    )
+    def fake_prep_post_draws(**kwargs):
+        calls["post_stars"] = kwargs["star_df"].copy()
+        calls["saved_maps_dir"] = kwargs["saved_maps_dir"]
+
+    monkeypatch.setattr(main, "prep_post_draws", fake_prep_post_draws)
     monkeypatch.setattr(run.pu, "plot_catalog", lambda **kwargs: None)
     stars = pd.DataFrame({
         "star_name": ["low", "high"],
@@ -323,6 +408,9 @@ def test_make_tier2_uses_filtered_stars_for_average_map(monkeypatch):
     run.make_tier2(configuration, stars, "posteriors", lambda *args: {})
     assert calls["map_stars"]["star_name"].tolist() == ["high"]
     assert calls["post_stars"]["star_name"].tolist() == ["high"]
+    assert calls["saved_maps_dir"] == os.path.join(
+        "mtrue", "saved_maps_mtrue"
+    )
 
 
 def test_run_multiple_rejects_unknown_model():

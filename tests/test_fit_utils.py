@@ -322,7 +322,7 @@ def test_completeness_attachment_preserves_all_posterior_draws(tmp_path, monkeyp
     result = include_post_completeness(
         sampled_post_dict=sampled_post_dict,
         star_df=stars,
-        tier1_dir="mtrue",
+        tier1_dir=str(tmp_path / "mtrue"),
         tier2_dir="allstars",
     )["star1_0"]
 

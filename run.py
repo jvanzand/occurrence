@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from types import SimpleNamespace
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
 
 from occurrence import plotting_utils as pu
 from occurrence import main
@@ -14,6 +15,47 @@ from occurrence import sampling_utils as su
 
 # Use plot template
 plt.style.use(os.path.join(os.path.dirname(__file__), 'matplotlibrc'))
+
+
+DEFAULT_TIER1_DEFINITIONS = {
+    "mtrue": {"m_or_q": "m", "true_or_sini": "true"},
+    "msini": {"m_or_q": "m", "true_or_sini": "sini"},
+    "qtrue": {"m_or_q": "q", "true_or_sini": "true"},
+    "qsini": {"m_or_q": "q", "true_or_sini": "sini"},
+}
+def _tier1_definition(label, definitions):
+    try:
+        definition = dict(definitions[label])
+    except KeyError:
+        raise ValueError(
+            f"no Tier 1 definition for {label!r}; define m_or_q and "
+            "true_or_sini explicitly"
+        )
+    if definition.get("m_or_q") not in {"m", "q"}:
+        raise ValueError(f"Tier 1 {label!r} must define m_or_q as 'm' or 'q'")
+    if definition.get("true_or_sini") not in {"true", "sini"}:
+        raise ValueError(
+            f"Tier 1 {label!r} must define true_or_sini as 'true' or 'sini'"
+        )
+    return definition
+
+
+def _output_label(label):
+    path = Path(label)
+    if path.is_absolute() or len(path.parts) != 1 or label in {"", ".", ".."}:
+        raise ValueError(f"tier names must be simple directory names: {label!r}")
+    return label
+
+
+def _average_star_frame(star_df):
+    """Build the synthetic star used by average-map-only calculations."""
+    row = {column: np.nan for column in star_df.columns}
+    row.update({"star_name": "average", "Mstar": star_df.Mstar.mean()})
+    if "comp_list" in row:
+        row["comp_list"] = []
+    if "comp_num" in row:
+        row["comp_num"] = 0
+    return pd.DataFrame([row], columns=star_df.columns)
   
 
 def _format_subsample_title(title):
@@ -30,16 +72,10 @@ def _occurrence_function_title(stack_dim, subsample_title=""):
 
 
     
-def _tier1_artifacts_exist(tier1_config, star_df, avg_map_only=False):
-    """Return whether all map interpolators required from a Tier 1 run exist."""
+def _tier1_artifacts_exist(tier1_config, star_df=None, avg_map_only=False):
+    """Return whether the Tier 1 output directory already exists."""
     t1 = SimpleNamespace(**tier1_config)
-    y_param = f"{t1.m_or_q}{t1.true_or_sini}"
-    maps_dir = os.path.join(t1.t1_dir, f"saved_maps_{y_param}")
-    star_names = ["average"] if avg_map_only else list(star_df.star_name)
-    return bool(star_names) and all(
-        os.path.isfile(os.path.join(maps_dir, name, "interp_fn.pkl"))
-        for name in star_names
-    )
+    return os.path.isdir(t1.t1_dir)
 
 
 def make_tier1(tier1_config, star_df_full, recoveries_dir, 
@@ -60,23 +96,22 @@ def make_tier1(tier1_config, star_df_full, recoveries_dir,
     
     ## Optionally use only one recoveries file to represent completeness for the whole sample
     if avg_map_only:
-        Mstar = star_df_full.Mstar.mean()
-        cols = star_df_full.columns
-        avg_df = pd.DataFrame([['average', Mstar, [], 0]], columns=cols)
-        star_df_full = avg_df
+        star_df_full = _average_star_frame(star_df_full)
     
     main.prep_recoveries_files(tier1_dir=t1.t1_dir,
                                star_df=star_df_full,
                                master_rec_dir=recoveries_dir,
                                recoveries_mtype=recoveries_mtype,
                                m_dir_to_make_q=m_dir_to_make_q,
+                               tier1_kind=y_param,
                                )
     main.prep_maps(tier1_dir=t1.t1_dir,
                    star_df=star_df_full,
                    path_to_recoveries=path_to_recoveries,
                    m_unit=t1.mass_unit,
                    avg_map_only=avg_map_only,
-                   save_single_plots=save_single_plots)
+                   save_single_plots=save_single_plots,
+                   tier1_kind=y_param)
     return
 
 
@@ -97,10 +132,7 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
     
     # Make star_df_map either with all recoveries files or just with avg
     if avg_map_only:
-        Mstar = star_df_full.Mstar.mean()
-        cols = star_df_full.columns
-        avg_df = pd.DataFrame([['average', Mstar, [], 0]], columns=cols)
-        star_df_compl = avg_df
+        star_df_compl = _average_star_frame(star_df_full)
     else:
         star_df_compl = star_df
     
@@ -120,7 +152,8 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
                               tier2_dir=t2.t2_dir,
                               star_df=star_df_compl,
                               ycol=ycol,
-                              m_unit=t2.t1_mass_unit)
+                              m_unit=t2.t1_mass_unit,
+                              tier1_kind=y_param)
 
         main.prep_post_draws(tier1_dir=t2.t1_dir,
                              tier2_dir=t2.t2_dir,
@@ -128,7 +161,8 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
                              sampling_func=sampling_func,
                              saved_maps_dir=saved_maps_dir, m_unit=t2.t1_mass_unit,
                              avg_map_only=avg_map_only,
-                             fill_single_nan_with_average=fill_single_nan_with_average)
+                             fill_single_nan_with_average=fill_single_nan_with_average,
+                             tier1_kind=y_param)
                              
         ## Plot companion catalog
         catalog_path = os.path.join(t2.t1_dir, t2.t2_dir, 'sampled_post_prior_compl.npz')
@@ -137,20 +171,16 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
                         tier2_dir=t2.t2_dir,
                         catalog_path=catalog_path,
                         m_unit=t2.t1_mass_unit, fig_title=f'Average Completeness for {nstars} Stars',
-                        fig_savepath=plot_save_path)
+                        fig_savepath=plot_save_path,
+                        ycol=ycol)
         ##########################
     
     return
 
 
 def _tier2_artifacts_exist(tier1_dir, tier2_dir):
-    """Return whether the Tier 2 products required by direct fitting exist."""
-    tier2_path = os.path.join(tier1_dir, tier2_dir)
-    required_paths = (
-        os.path.join(tier2_path, "sampled_post_prior_compl.npz"),
-        os.path.join(tier2_path, "avg_map", "interp_fn.pkl"),
-    )
-    return all(os.path.isfile(path) for path in required_paths)
+    """Return whether the Tier 2 output directory already exists."""
+    return os.path.isdir(os.path.join(tier1_dir, tier2_dir))
 
 
 def _y_edges_for_tier(m_edges, m_or_q, m_unit):
@@ -180,6 +210,8 @@ def run_multiple(
         m_edges,
         star_df,
         tier2_df_cuts_dict,
+        output_dir=".",
+        tier1_definitions=None,
         recoveries_dir=None,
         recoveries_mtype="mtrue",
         comp_post_dir=None,
@@ -250,8 +282,32 @@ def run_multiple(
     Missing Tier 1 products
     are generated from ``recoveries_dir`` when ``prepare_missing`` is true.
     Set ``run_fits=False`` to regenerate plots from saved chains. Fit-level and
-    MCMC-level parallelism are controlled separately.
+    MCMC-level parallelism are controlled separately. Existing Tier 1 and
+    Tier 2 directories are treated as complete and reused; delete one of those
+    directories to regenerate that stage. Tier 3 fits always run when
+    ``run_fits=True`` and overwrite products at their configured paths.
     """
+    output_dir = os.fspath(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    tier1_definitions = {
+        **DEFAULT_TIER1_DEFINITIONS,
+        **({} if tier1_definitions is None else tier1_definitions),
+    }
+    required_star_columns = {"star_name"}
+    missing_star_columns = required_star_columns - set(star_df.columns)
+    if missing_star_columns:
+        raise ValueError(
+            f"star_df is missing required columns: {sorted(missing_star_columns)}"
+        )
+    if star_df.empty:
+        raise ValueError("star_df must contain at least one star")
+    if star_df["star_name"].duplicated().any():
+        duplicates = sorted(
+            star_df.loc[
+                star_df["star_name"].duplicated(), "star_name"
+            ].astype(str)
+        )
+        raise ValueError(f"star_df contains duplicate star names: {duplicates}")
     supported_models = {
         "piecewise", "logG", "escarpment", "sigmoid", "bpl", "loglinear"
     }
@@ -285,20 +341,25 @@ def run_multiple(
                 f"coordinates: {sorted(unknown_coordinates)}"
             )
 
+    tier1_labels = [_output_label(label) for label in tier1_list]
+    tier2_labels = [_output_label(label) for label in tier2_list]
+    tier3_labels = [_output_label(label) for label in tier3_list]
     tier1_configurations = []
-    for tier1_dir in tier1_list:
-        mass_unit = m_unit if tier1_dir in {"mtrue", "msini"} else None
-        true_or_sini = "true" if "true" in tier1_dir else "sini"
-        m_or_q = "m" if "m" in tier1_dir else "q" if "q" in tier1_dir else None
-        if m_or_q is None:
-            raise ValueError(
-                f"cannot determine mass or mass-ratio coordinate from {tier1_dir!r}"
-            )
+    for tier1_label in tier1_labels:
+        definition = _tier1_definition(tier1_label, tier1_definitions)
+        true_or_sini = definition["true_or_sini"]
+        m_or_q = definition["m_or_q"]
+        mass_unit = m_unit if m_or_q == "m" else None
+        tier1_dir = (
+            tier1_label if output_dir in {"", "."} else
+            os.path.join(output_dir, tier1_label)
+        )
         tier1_configurations.append({
             "mass_unit": mass_unit,
             "m_or_q": m_or_q,
             "true_or_sini": true_or_sini,
             "t1_dir": tier1_dir,
+            "t1_label": tier1_label,
         })
 
     missing_tier1 = [
@@ -329,17 +390,33 @@ def run_multiple(
 
     configurations = []
     tier2_configurations = []
-    for tier1_dir in tier1_list:
-        mass_unit = m_unit if tier1_dir in {"mtrue", "msini"} else None
-        true_or_sini = "true" if "true" in tier1_dir else "sini"
-        m_or_q = "m" if "m" in tier1_dir else "q" if "q" in tier1_dir else None
-        for tier2_dir in tier2_list:
+    for tier1_label in tier1_labels:
+        definition = _tier1_definition(tier1_label, tier1_definitions)
+        true_or_sini = definition["true_or_sini"]
+        m_or_q = definition["m_or_q"]
+        mass_unit = m_unit if m_or_q == "m" else None
+        tier1_dir = (
+            tier1_label if output_dir in {"", "."} else
+            os.path.join(output_dir, tier1_label)
+        )
+        for tier2_dir in tier2_labels:
             try:
                 cut_config, title = tier2_df_cuts_dict[tier2_dir]
             except KeyError:
                 raise ValueError(f"no Tier 2 configuration for {tier2_dir!r}")
             query = cut_config.get("star_df_query")
-            selected_stars = star_df.query(query).copy() if query else star_df.copy()
+            try:
+                selected_stars = (
+                    star_df.query(query).copy() if query else star_df.copy()
+                )
+            except Exception as error:
+                raise ValueError(
+                    f"invalid star_df query for {tier2_dir!r}: {query!r}"
+                ) from error
+            if selected_stars.empty:
+                raise ValueError(
+                    f"Tier 2 query for {tier2_dir!r} selected no stars"
+                )
             y_edges = _y_edges_for_tier(m_edges, m_or_q, m_unit)
             tier_model_fit_bounds = {}
             for model_name, bounds_by_coordinate in model_fit_bounds.items():
@@ -357,11 +434,17 @@ def run_multiple(
                 "t1_true_or_sini": true_or_sini,
                 "t1_m_or_q": m_or_q,
             })
-            for tier3_dir in tier3_list:
+            for tier3_dir in tier3_labels:
+                tier3_path = os.path.join(
+                    tier1_dir, tier2_dir, tier3_dir
+                )
                 configurations.append({
                     "tier1_dir": tier1_dir,
+                    "tier1_label": tier1_label,
+                    "tier1_kind": f"{m_or_q}{true_or_sini}",
                     "tier2_dir": tier2_dir,
                     "tier3_dir": tier3_dir,
+                    "tier3_exists": os.path.isdir(tier3_path),
                     "a_edges": np.asarray(a_edges, dtype=float),
                     "m_edges": y_edges,
                     "star_df": selected_stars,
@@ -431,7 +514,7 @@ def run_multiple(
     missing_tier2 = [
         configuration for configuration in tier2_configurations
         if not _tier2_artifacts_exist(
-            configuration["t1_dir"], configuration["t2_dir"]
+            configuration["t1_dir"], configuration["t2_dir"],
         )
     ]
     if missing_tier2 and not prepare_missing:
@@ -458,6 +541,21 @@ def run_multiple(
         else:
             for configuration in missing_tier2:
                 make_tier2(configuration, *preparation_arguments)
+
+    missing_tier3 = [
+        configuration for configuration in configurations
+        if not configuration["tier3_exists"]
+    ]
+    if missing_tier3 and not run_fits and make_plots:
+        missing_paths = [
+            os.path.join(
+                item["tier1_dir"], item["tier2_dir"], item["tier3_dir"]
+            )
+            for item in missing_tier3
+        ]
+        raise FileNotFoundError(
+            f"required Tier 3 directories are missing: {missing_paths}"
+        )
 
     if parallel_fits and len(configurations) > 1:
         with ProcessPoolExecutor() as executor:
@@ -508,7 +606,7 @@ def _run_futures_in_parallel(function, configurations, shared_args, label):
 def _run_configuration(configuration):
     """Execute one configuration produced by :func:`run_multiple`."""
     result = {
-        "tier1": configuration["tier1_dir"],
+        "tier1": configuration.get("tier1_label", configuration["tier1_dir"]),
         "tier2": configuration["tier2_dir"],
         "tier3": configuration["tier3_dir"],
         "nstars": len(configuration["star_df"]),
@@ -523,12 +621,14 @@ def _run_configuration(configuration):
     roi_occurrence_future = None
     plot_executor = None
     run_models = configuration["run_models"]
+    run_fits = configuration["run_fits"]
+    result["fit_skipped"] = not run_fits
     can_overlap_supplementary_plots = (
-        configuration["run_fits"] and configuration["make_plots"] and
+        run_fits and configuration["make_plots"] and
         "piecewise" in configuration["plot_models"] and
         len(run_models) > 1
     )
-    if configuration["run_fits"]:
+    if run_fits:
         material_path = main.prep_fit_materials(
             tier1_dir=configuration["tier1_dir"],
             tier2_dir=configuration["tier2_dir"],
@@ -539,6 +639,7 @@ def _run_configuration(configuration):
             completeness_type=configuration["completeness_type"],
             integration_resolution=configuration["integration_resolution"],
             use_average_completeness=configuration["use_average_completeness"],
+            tier1_kind=configuration["tier1_kind"],
         )
         result["materials"] = material_path
         if (can_overlap_supplementary_plots and

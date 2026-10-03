@@ -151,7 +151,8 @@ def interim_prior(post_sample_dict, prior_type='loguniform'):
 def include_post_completeness(sampled_post_dict, star_df,
                               tier1_dir, tier2_dir,
                               avg_map_only=False,
-                              fill_single_nan_with_average=True):
+                              fill_single_nan_with_average=True,
+                              saved_maps_dir=None):
     """
     Given a dictionary with companion posterior
     samples, calculate the completeness at each
@@ -165,7 +166,12 @@ def include_post_completeness(sampled_post_dict, star_df,
     ## Load average interpolation function
     avg_compl_interp_str = os.path.join(tier1_dir, tier2_dir, 'avg_map/interp_fn.pkl')
     avg_compl_interp = pickle.load(open(avg_compl_interp_str, 'rb'))
-    saved_maps_dir = os.path.join(tier1_dir, f"saved_maps_{tier1_dir}")
+    if saved_maps_dir is None:
+        tier1_label = os.path.basename(os.path.normpath(tier1_dir))
+        saved_maps_dir = os.path.join(
+            tier1_dir, f"saved_maps_{tier1_label}"
+        )
+    saved_maps_dir = os.fspath(saved_maps_dir)
     for star_name in star_df.star_name:
         if avg_map_only==False:
             ## Load single-system interpolation function

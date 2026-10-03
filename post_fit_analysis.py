@@ -42,10 +42,10 @@ _MODEL_PARAMETER_LABELS = {
         r"$\log_{10}(x_{t,2})$",
     ),
     "sigmoid": (
-        r"$C_1$", r"$C_2$", r"$\log_{10}(x_t)$", r"$W$"
+        r"$B_1$", r"$B_2$", r"$\log_{10}(x_t)$", r"$W$"
     ),
     "bpl": (r"$C$", r"$\log_{10}(x_0)$", r"$\beta$", r"$\gamma$"),
-    "loglinear": (r"$C_{\rm low}$", r"$C_{\rm high}$"),
+    "loglinear": (r"$D_1$", r"$D_2$"),
 }
 
 _APPENDIX_MODEL_ORDER = (
@@ -1014,11 +1014,17 @@ def _three_parameter_levels(tier2_dir):
 
 
 def _three_parameter_command_name(t1, t3, levels, statistic="IntOcc"):
-    """Return a shared variable-command name for a stellar subset."""
+    """Return a shared variable-command name for a stellar subset.
+
+    Piecewise integrated occurrence is named explicitly so it cannot be
+    confused with an integrated occurrence from a parametric model.
+    """
     mass, metallicity, age = levels
     prefix = _tier1_prefix(t1)
     if str(t3) != "stellar3params":
         prefix += _latex_token(Path(t3).name)
+    if statistic == "IntOcc":
+        statistic = "PiecewiseIntOcc"
     return (
         prefix + mass.capitalize() + "Mstar" +
         metallicity.capitalize() + "FeH" + age.capitalize() + statistic
@@ -1227,6 +1233,8 @@ def _two_parameter_command_name(t1, t3, levels, statistic="IntOcc"):
     prefix = _tier1_prefix(t1)
     if str(t3) != "stellar2params":
         prefix += _latex_token(Path(t3).name)
+    if statistic == "IntOcc":
+        statistic = "PiecewiseIntOcc"
     return (
         prefix + mass.capitalize() + "Mstar" +
         metallicity.capitalize() + "FeH" + statistic

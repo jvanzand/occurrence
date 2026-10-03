@@ -22,7 +22,8 @@ def prep_recoveries_files(tier1_dir,
                           star_df,
                           master_rec_dir,
                           recoveries_mtype,
-                          m_dir_to_make_q=None
+                          m_dir_to_make_q=None,
+                          tier1_kind=None,
                           ):
     """
     Prepare recoveries.csv files for occurrence
@@ -44,9 +45,10 @@ def prep_recoveries_files(tier1_dir,
     """
 
     
+    tier1_label = tier1_kind or os.path.basename(os.path.normpath(tier1_dir))
     if recoveries_mtype=='msini':
 
-        if 'true' in tier1_dir: # If tier1_dir is mtrue or qtrue, then convert msini to mtrue
+        if 'true' in tier1_label: # If tier1 is mtrue or qtrue, convert msini to mtrue
             for starname in star_df.star_name:
                 recoveries_file = os.path.join(master_rec_dir, starname+'_recoveries.csv')
                 mtrue_recoveries_save_file = os.path.join(tier1_dir, 'mtrue_recoveries/', starname+'_recoveries.csv')
@@ -65,13 +67,13 @@ def prep_recoveries_files(tier1_dir,
                 rec_file = pd.read_csv(recoveries_file)[keep_cols]
                 rec_file.to_csv(msini_recoveries_save_file, index=False)
     
-        if 'q' in tier1_dir: # If tier1_dir is qsini or qtrue, then convert m to q
+        if 'q' in tier1_label: # If tier1 is qsini or qtrue, convert m to q
             for i in range(len(star_df)):
                 row = star_df.iloc[i]
                 starname = row.star_name
                 mstar = row.Mstar
             
-                dirname = tier1_dir+'_recoveries'
+                dirname = tier1_label+'_recoveries'
             
                 q_recoveries_save_file = os.path.join(tier1_dir, dirname, starname+'_recoveries.csv')
                 recoveries_file = os.path.join(m_dir_to_make_q, starname+'_recoveries.csv')
@@ -82,7 +84,7 @@ def prep_recoveries_files(tier1_dir,
         os.makedirs(
             os.path.join(tier1_dir, 'mtrue_recoveries'), exist_ok=True
         )
-        if 'sini' in tier1_dir:
+        if 'sini' in tier1_label:
             raise Exception("main.prep_recoveries_files: Cannot calculate Msini completeness from Mtrue recoveries files")
 
         for starname in star_df.star_name:
@@ -92,13 +94,13 @@ def prep_recoveries_files(tier1_dir,
             rec_file = pd.read_csv(recoveries_file)
             rec_file.to_csv(mtrue_recoveries_save_file, index=False)
     
-        if 'q' in tier1_dir: # If tier1_dir is qtrue, then convert m to q
+        if 'q' in tier1_label: # If tier1 is qtrue, convert m to q
             for i in range(len(star_df)):
                 row = star_df.iloc[i]
                 starname = row.star_name
                 mstar = row.Mstar
             
-                dirname = tier1_dir+'_recoveries'
+                dirname = tier1_label+'_recoveries'
             
                 q_recoveries_save_file = os.path.join(tier1_dir, dirname, starname+'_recoveries.csv')
                 recoveries_file = os.path.join(m_dir_to_make_q, starname+'_recoveries.csv')
@@ -113,7 +115,8 @@ def prep_maps(tier1_dir,
               path_to_recoveries,
               m_unit='earth',
               avg_map_only=False,
-              save_single_plots=False):
+              save_single_plots=False,
+              tier1_kind=None):
     """
     Prepare both single-system and average completeness 
     maps and calculate corresponding interpolation
@@ -139,9 +142,10 @@ def prep_maps(tier1_dir,
                    
     """
 
-    maps_save_label = 'saved_maps_'+tier1_dir
+    tier1_label = tier1_kind or os.path.basename(os.path.normpath(tier1_dir))
+    maps_save_label = 'saved_maps_'+tier1_label
     maps_save_path = os.path.join(tier1_dir, maps_save_label)
-    maps_ycol = f"inj_{tier1_dir}"
+    maps_ycol = f"inj_{tier1_label}"
     
     if mp.cpu_count()>100:
         ncores=30
@@ -167,13 +171,15 @@ def prep_maps(tier1_dir,
 def make_average_map(tier1_dir, tier2_dir,
                      star_df,
                      ycol,
-                     m_unit='earth'):
+                     m_unit='earth',
+                     tier1_kind=None):
     """
     Calculate average map from a subset of
     pre-computed completeness maps
     """
     
-    path_to_maps = os.path.join(tier1_dir, f"saved_maps_{tier1_dir}")
+    tier1_label = tier1_kind or os.path.basename(os.path.normpath(tier1_dir))
+    path_to_maps = os.path.join(tier1_dir, f"saved_maps_{tier1_label}")
     avg_map_dir = os.path.join(tier1_dir, tier2_dir, 'avg_map/')
     
     cu.average_map(path_to_maps, avg_map_dir, star_df.star_name.to_list(), ycol=ycol, m_unit=m_unit)
@@ -186,7 +192,8 @@ def prep_post_draws(tier1_dir, tier2_dir,
                     saved_maps_dir=None, m_unit='earth',
                     fig_title='Catalog Posteriors',
                     avg_map_only=False,
-                    fill_single_nan_with_average=True):
+                    fill_single_nan_with_average=True,
+                    tier1_kind=None):
 
     """
     Sample from companion posteriors according to user-specified
@@ -222,7 +229,12 @@ def prep_post_draws(tier1_dir, tier2_dir,
     #from copy import deepcopy; pp_test = deepcopy(post_sample_dict)
     ## If using mass ratio, convert masses to q
     #if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
-    if 'q' in tier1_dir:
+    tier1_label = tier1_kind or os.path.basename(os.path.normpath(tier1_dir))
+    if saved_maps_dir is None:
+        saved_maps_dir = os.path.join(
+            tier1_dir, f"saved_maps_{tier1_label}"
+        )
+    if 'q' in tier1_label:
 
         for comp_name in post_sample_dict.keys():
             row = star_df[star_df['comp_list'].apply(lambda name_list: comp_name in name_list)]
@@ -238,6 +250,7 @@ def prep_post_draws(tier1_dir, tier2_dir,
     sampled_post_with_compls = su.include_post_completeness(post_prior_sample_dict,
                                                             star_df,
                                                             tier1_dir, tier2_dir,
+                                                            saved_maps_dir=saved_maps_dir,
                                                             avg_map_only=avg_map_only,
                                                             fill_single_nan_with_average=fill_single_nan_with_average)
     #rr_test = deepcopy(sampled_post_with_compls)                                                  
@@ -264,7 +277,8 @@ def prep_fit_materials(
         completeness_type='single',
         integration_resolution=(100, 100),
         use_average_completeness=True,
-        interim_prior_fn=None):
+        interim_prior_fn=None,
+        tier1_kind=None):
     """Prepare unbinned samples and survey exposure for a direct fit.
 
     This Stage 2 entry point supports the current ``(a, mass)`` catalog order
@@ -298,7 +312,7 @@ def prep_fit_materials(
             nstars=len(star_df),
         )
     else:
-        tier1_label = os.path.basename(os.path.normpath(tier1_dir))
+        tier1_label = tier1_kind or os.path.basename(os.path.normpath(tier1_dir))
         maps_dir = os.path.join(tier1_dir, f'saved_maps_{tier1_label}')
         interpolators = []
         for star_name in star_df.star_name:
