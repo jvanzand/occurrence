@@ -517,7 +517,7 @@ def test_make_three_parameter_tables_can_embed_numerical_values(
         "high & high & young & 47 & 4.0 & 0.64 & "
         + formatted_occurrence
     ) in original
-    assert r"\McHighMstarHighFeHYoungIntOcc" not in reordered
+    assert r"\McStellarThreeParamsHighMstarHighFeHYoungIntOcc" not in reordered
     assert reordered.count(r"$0.0\,\sigma$") == 12
     assert reordered.count(" & 1.5 ") == 4
     assert reordered.count(" & 3.2 ") == 4
@@ -546,7 +546,7 @@ def test_make_three_parameter_tables_can_select_occurrence_model(
     assert rf"\{occurrence_name}" in reordered
     assert rf"\{occurrence_name}" in original
     assert rf"\{significance_name}" in reordered
-    assert r"\McHighMstarHighFeHYoungIntOcc" not in reordered
+    assert r"\McStellarThreeParamsHighMstarHighFeHYoungIntOcc" not in reordered
 
     monkeypatch.setattr(
         post_fit_analysis, "_three_parameter_statistics",
@@ -618,8 +618,8 @@ def test_make_two_parameter_tables_create_both_forms(tmp_path):
         rf"\{significance} & \{ratio} \\" in reordered
     )
     assert r"\begin{deluxetable*}{lccccc}" in original
-    assert r"\McHighMstarHighFeHNstars" in original
-    assert r"\McHighMstarHighFeHPiecewiseIntOcc" in original
+    assert r"\McStellarTwoParamsHighMstarHighFeHNstars" in original
+    assert r"\McStellarTwoParamsHighMstarHighFeHPiecewiseIntOcc" in original
     assert not (tmp_path / "paper_items" / "variables.tex").exists()
 
 
@@ -658,7 +658,7 @@ def test_make_two_parameter_tables_can_embed_values_without_mass_range(
 
     assert reordered.count(" & 2.5 ") == 2
     assert reordered.count(" & 3.2 ") == 2
-    assert r"\McHighMstarHighFeHIntOcc" not in reordered
+    assert r"\McStellarTwoParamsHighMstarHighFeHIntOcc" not in reordered
     assert r"$0.10^{+0.02}_{-0.02}$" in reordered
     assert "high & high & 50 & 5.0 & 0.70" in original
 
@@ -773,9 +773,9 @@ def test_make_variables_adds_three_parameter_parametric_occurrence(tmp_path):
         tmp_path, ["mtrue"], ["allstars"], ["roi"]
     ).read_text()
 
-    assert r"\McHighMstarLowFeHYoungPiecewiseIntOcc" in text
-    assert r"\McHighMstarLowFeHYoungLogGIntOccBinaZero" in text
-    assert r"\McHighMstarLowFeHYoungLogGParamABinaZero" not in text
+    assert r"\McStellarThreeParamsHighMstarLowFeHYoungPiecewiseIntOcc" in text
+    assert r"\McStellarThreeParamsHighMstarLowFeHYoungLogGIntOccBinaZero" in text
+    assert r"\McStellarThreeParamsHighMstarLowFeHYoungLogGParamABinaZero" not in text
     assert "% Parametric integrated occurrence: logG" in text
 
 
@@ -1011,7 +1011,7 @@ def test_make_variables_accepts_several_three_parameter_runs(
         three_parameter_t3=["stellar3params", "stellar_3params_Miyazaki"],
     ).read_text()
 
-    assert r"\newcommand{\McHighMstarHighFeHYoungNstars}" in text
+    assert r"\newcommand{\McStellarThreeParamsHighMstarHighFeHYoungNstars}" in text
     assert (
         r"\newcommand{\McStellarThreeParamsMiyazakiHighMstarHighFeHYoungNstars}"
         in text

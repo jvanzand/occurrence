@@ -1037,8 +1037,7 @@ def _three_parameter_command_name(t1, t3, levels, statistic="IntOcc"):
     """
     mass, metallicity, age = levels
     prefix = _tier1_prefix(t1)
-    if str(t3) != "stellar3params":
-        prefix += _latex_token(Path(t3).name)
+    prefix += _latex_token(Path(t3).name)
     if statistic == "IntOcc":
         statistic = "PiecewiseIntOcc"
     return (
@@ -1102,8 +1101,7 @@ def _three_parameter_significance_command_name(
         occurrence_model="piecewise", stack_dim="a", stack_bin=0):
     """Return the variable-command name for one posterior comparison."""
     prefix = _tier1_prefix(t1)
-    if str(t3) != "stellar3params":
-        prefix += _latex_token(Path(t3).name)
+    prefix += _latex_token(Path(t3).name)
     first, second = fixed_levels
     if varied_parameter == "Mass":
         fixed_token = first.capitalize() + "FeH" + second.capitalize()
@@ -1247,8 +1245,7 @@ def _two_parameter_command_name(t1, t3, levels, statistic="IntOcc"):
     """Return a variable-command name for a mass-metallicity subset."""
     mass, metallicity = levels
     prefix = _tier1_prefix(t1)
-    if str(t3) != "stellar2params":
-        prefix += _latex_token(Path(t3).name)
+    prefix += _latex_token(Path(t3).name)
     if statistic == "IntOcc":
         statistic = "PiecewiseIntOcc"
     return (
@@ -1277,8 +1274,7 @@ def _two_parameter_comparison_command_name(
         t1, t3, varied_parameter, fixed_level, statistic):
     """Return a command name for a two-parameter comparison statistic."""
     prefix = _tier1_prefix(t1)
-    if str(t3) != "stellar2params":
-        prefix += _latex_token(Path(t3).name)
+    prefix += _latex_token(Path(t3).name)
     if varied_parameter == "Mass":
         fixed_token = fixed_level.capitalize() + "FeH"
     elif varied_parameter == "FeH":
@@ -2147,10 +2143,11 @@ def make_variables(
     Tier 3 directories are supplied, their names are included to keep commands
     unique.  Available three-parameter subset results beneath
     ``three_parameter_t3`` are also included.  It may name one Tier 3
-    directory, several (a list), or none (``None``); every directory other
-    than ``stellar3params`` contributes its name to its command names, so
-    several three-parameter experiments can share one variables file.  When both required piecewise
-    chains are available, the file also includes the posterior significance
+    directory, several (a list), or none (``None``).  Each directory's name
+    is spelled into its command names, so ``stellar3params`` gives
+    ``\\McStellarThreeParamsLowMstarLowFeHYoungNstars`` and several
+    three-parameter experiments can share one variables file.  When both
+    required piecewise chains are available, the file also includes the posterior significance
     of every comparison in the reordered three-parameter table.  Dynamic
     ranges use ``stellar_catalog_path`` and ``three_parameter_cuts``; their
     defaults are the repository CLS stellar catalog, the inclusive stellar
