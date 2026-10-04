@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 from types import SimpleNamespace
 import json
+import re
 
 from occurrence import post_fit_analysis
 
@@ -978,3 +979,51 @@ def test_plot_companions_by_age_handles_missing_age_and_mass_cut(
     np.testing.assert_allclose(calls[2]["x"], [2.0])
     assert calls[2]["color"] == "black"
     assert calls[2]["marker"] == "x"
+
+
+def test_latex_token_spells_out_digits():
+    assert post_fit_analysis._latex_token("stellar_3params_Miyazaki") == (
+        "StellarThreeParamsMiyazaki"
+    )
+    assert post_fit_analysis._latex_token("bin10") == "BinOneZero"
+    assert post_fit_analysis._latex_token("highMstar") == "HighMstar"
+
+
+def test_make_variables_accepts_several_three_parameter_runs(
+        tmp_path, monkeypatch):
+    tier1 = tmp_path / "mtrue"
+    _write_summary(tier1, "allstars", "roi")
+    subset = "highMstarhighFeHhighAct"
+    for t3 in ("stellar3params", "stellar_3params_Miyazaki"):
+        summary_dir = tier1 / subset / t3 / "saved_dicts"
+        summary_dir.mkdir(parents=True)
+        (summary_dir / post_fit_analysis.SUMMARY_FILENAME).touch()
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_statistics",
+        lambda path: {
+            "Nstars": "47", "Neff": "4.0", "AvgCompl": "0.64",
+            "IntOcc": r"0.12^{+0.08}_{-0.05}",
+        },
+    )
+
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["allstars"], ["roi"],
+        three_parameter_t3=["stellar3params", "stellar_3params_Miyazaki"],
+    ).read_text()
+
+    assert r"\newcommand{\McHighMstarHighFeHYoungNstars}" in text
+    assert (
+        r"\newcommand{\McStellarThreeParamsMiyazakiHighMstarHighFeHYoungNstars}"
+        in text
+    )
+    command_names = re.findall(r"\\newcommand\{\\([^}]*)\}", text)
+    assert all(re.fullmatch(r"[A-Za-z]+", name) for name in command_names)
+
+
+def test_make_variables_can_skip_three_parameter_results(tmp_path, capsys):
+    _write_summary(tmp_path / "mtrue", "allstars", "roi")
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["allstars"], ["roi"], three_parameter_t3=None,
+    ).read_text()
+    assert "HighFeHYoung" not in text
+    assert "three-parameter" not in capsys.readouterr().out

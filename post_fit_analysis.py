@@ -1,6 +1,7 @@
 """Collect publication-ready quantities from completed occurrence fits."""
 
 import json
+import os
 from pathlib import Path
 import re
 
@@ -73,10 +74,25 @@ _THREE_PARAMETER_DEFAULT_CUTS = {
 }
 
 
+_DIGIT_WORDS = (
+    "Zero", "One", "Two", "Three", "Four",
+    "Five", "Six", "Seven", "Eight", "Nine",
+)
+
+
 def _latex_token(value):
-    """Turn a directory/type name into a legal, readable command token."""
-    parts = re.findall(r"[A-Za-z]+|\d+", str(value))
-    return "".join(part[:1].upper() + part[1:] for part in parts)
+    """Turn a directory/type name into a legal, readable command token.
+
+    LaTeX command names may contain only letters, so each digit is spelled
+    out: ``stellar_3params_Miyazaki`` becomes ``StellarThreeParamsMiyazaki``
+    and ``10`` becomes ``OneZero``.
+    """
+    parts = re.findall(r"[A-Za-z]+|\d", str(value))
+    return "".join(
+        _DIGIT_WORDS[int(part)] if part.isdigit()
+        else part[:1].upper() + part[1:]
+        for part in parts
+    )
 
 
 def _tier1_prefix(tier1_dir):
@@ -2130,7 +2146,10 @@ def make_variables(
     for example ``\\McallstarsNeff`` and ``\\McHighMassNeff``.  When several
     Tier 3 directories are supplied, their names are included to keep commands
     unique.  Available three-parameter subset results beneath
-    ``three_parameter_t3`` are also included.  When both required piecewise
+    ``three_parameter_t3`` are also included.  It may name one Tier 3
+    directory, several (a list), or none (``None``); every directory other
+    than ``stellar3params`` contributes its name to its command names, so
+    several three-parameter experiments can share one variables file.  When both required piecewise
     chains are available, the file also includes the posterior significance
     of every comparison in the reordered three-parameter table.  Dynamic
     ranges use ``stellar_catalog_path`` and ``three_parameter_cuts``; their
@@ -2152,6 +2171,15 @@ def make_variables(
         raise ValueError("tier1_dirs, tier2_types, and tier3_dirs cannot be empty")
     if stack_dim not in {"a", "m"}:
         raise ValueError("stack_dim must be 'a' or 'm'")
+
+    if three_parameter_t3 is None:
+        three_parameter_t3s = []
+    elif isinstance(three_parameter_t3, (str, os.PathLike)):
+        three_parameter_t3s = [three_parameter_t3]
+    else:
+        three_parameter_t3s = list(three_parameter_t3)
+    if len(set(map(str, three_parameter_t3s))) != len(three_parameter_t3s):
+        raise ValueError("three_parameter_t3 contains duplicate directories")
 
     include_tier3 = len(tier3_dirs) > 1
     all_delta_bics = calculate_all_delta_bics(
@@ -2285,7 +2313,7 @@ def make_variables(
 
     missing_three_parameter_results = []
     missing_three_parameter_comparisons = []
-    if three_parameter_t3 is not None:
+    for three_parameter_t3 in three_parameter_t3s:
         for tier1_dir in tier1_dirs:
             tier1_name = Path(tier1_dir).name
             occurrence_samples_by_model = {("piecewise", None): {}}
