@@ -17,7 +17,7 @@ from occurrence import mcmc_powerlaw
 
 SUMMARY_FILENAME = "summary_dict_piecewise.npz"
 DELTA_BIC_FILENAME = "delta_bics.json"
-PAPER_ITEMS_DIRNAME = "paper_items"
+PAPER_TABLES_DIRNAME = "paper_tables"
 
 _TIER1_LATEX_PREFIXES = {
     "mtrue": "Mc",
@@ -780,13 +780,13 @@ def make_parameter_table(
     """Create a two-column LaTeX parameter table for one experiment.
 
     Every value is a command reference into
-    ``results_dir/paper_items/variables.tex``.
+    ``results_dir/paper_tables/variables.tex``.
     ``stack_bin`` is zero-based and defaults to the first fitted stack bin.
-    By default, the generated table is saved in ``results_dir/paper_items/``.
+    By default, the generated table is saved in ``results_dir/paper_tables/``.
     ``output_file`` overrides that location.
     """
     results_dir = Path(results_dir)
-    variables_path = results_dir / PAPER_ITEMS_DIRNAME / "variables.tex"
+    variables_path = results_dir / PAPER_TABLES_DIRNAME / "variables.tex"
     if not variables_path.is_file():
         raise FileNotFoundError(f"variables file not found: {variables_path}")
     if not isinstance(stack_bin, (int, np.integer)) or stack_bin < 0:
@@ -872,7 +872,7 @@ def make_parameter_table(
 
     if output_file is None:
         filename = f"model_params_{t1}_{t2}_{t3}.tex"
-        output_path = results_dir / PAPER_ITEMS_DIRNAME / filename
+        output_path = results_dir / PAPER_TABLES_DIRNAME / filename
     else:
         output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1005,7 +1005,7 @@ def make_appendix_parameter_table(
 
     if output_file is None:
         output_path = (
-            results_dir / PAPER_ITEMS_DIRNAME /
+            results_dir / PAPER_TABLES_DIRNAME /
             f"model_params_appendix_{t3}.tex"
         )
     else:
@@ -1764,7 +1764,7 @@ def make_three_parameter_tables(
 
     if reordered_output_file is None:
         reordered_output_path = (
-            results_dir / PAPER_ITEMS_DIRNAME /
+            results_dir / PAPER_TABLES_DIRNAME /
             f"three_parameter_OR_reordered_{t1}_{t3}.tex"
         )
     else:
@@ -1804,7 +1804,7 @@ def make_three_parameter_tables(
     ])
     if original_output_file is None:
         original_output_path = (
-            results_dir / PAPER_ITEMS_DIRNAME /
+            results_dir / PAPER_TABLES_DIRNAME /
             f"three_parameter_OR_{t1}_{t3}.tex"
         )
     else:
@@ -1968,7 +1968,7 @@ def make_two_parameter_tables(
 
     if reordered_output_file is None:
         reordered_output_path = (
-            results_dir / PAPER_ITEMS_DIRNAME /
+            results_dir / PAPER_TABLES_DIRNAME /
             f"two_parameter_OR_reordered_{t1}_{t3}.tex"
         )
     else:
@@ -2006,7 +2006,7 @@ def make_two_parameter_tables(
     ])
     if original_output_file is None:
         original_output_path = (
-            results_dir / PAPER_ITEMS_DIRNAME /
+            results_dir / PAPER_TABLES_DIRNAME /
             f"two_parameter_OR_{t1}_{t3}.tex"
         )
     else:
@@ -2027,7 +2027,7 @@ def calculate_all_delta_bics(
 
     The arguments and Tier 2 expansion rules match :func:`make_variables`.
     Results are returned as a dictionary keyed by relative results paths and
-    are also saved to ``results_dir/paper_items/delta_bics.json``.  Folders
+    are also saved to ``results_dir/paper_tables/delta_bics.json``.  Folders
     containing no recognized parametric chains are represented by an empty
     dictionary.
     """
@@ -2067,14 +2067,14 @@ def calculate_all_delta_bics(
                         for model_name, values in comparisons.items()
                     }
 
-    paper_items_dir = results_dir / PAPER_ITEMS_DIRNAME
-    paper_items_dir.mkdir(parents=True, exist_ok=True)
+    paper_tables_dir = results_dir / PAPER_TABLES_DIRNAME
+    paper_tables_dir.mkdir(parents=True, exist_ok=True)
     output = {
         "stack_dim": stack_dim,
         "delta_bic_convention": "BIC_flat - BIC_model",
         "results": all_delta_bics,
     }
-    (paper_items_dir / DELTA_BIC_FILENAME).write_text(
+    (paper_tables_dir / DELTA_BIC_FILENAME).write_text(
         json.dumps(output, indent=2) + "\n", encoding="utf-8"
     )
     return all_delta_bics
@@ -2125,7 +2125,7 @@ def make_variables(
     """Write non-model fit statistics to a LaTeX variables file.
 
     ``results_dir`` is the parent of all Tier 1 directories.  The output is
-    written to ``results_dir/paper_items/variables.tex``.  ``tier2_types``
+    written to ``results_dir/paper_tables/variables.tex``.  ``tier2_types``
     contains unsplit names such as ``"Mass"`` and ``"FeH"``;
     each is expanded to its ``high`` and ``low`` directories.  ``"allstars"``
     is treated as a single directory.  A completed fit is expected at::
@@ -2493,9 +2493,9 @@ def make_variables(
             + ", ".join(missing_three_parameter_comparisons)
         )
 
-    paper_items_dir = results_dir / PAPER_ITEMS_DIRNAME
-    output_path = paper_items_dir / "variables.tex"
-    paper_items_dir.mkdir(parents=True, exist_ok=True)
+    paper_tables_dir = results_dir / PAPER_TABLES_DIRNAME
+    output_path = paper_tables_dir / "variables.tex"
+    paper_tables_dir.mkdir(parents=True, exist_ok=True)
     contents = "% Auto-generated by post_fit_analysis.make_variables\n\n"
     contents += "\n\n".join(blocks) + "\n"
     output_path.write_text(contents, encoding="utf-8")

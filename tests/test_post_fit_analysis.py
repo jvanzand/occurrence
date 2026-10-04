@@ -35,7 +35,7 @@ def test_make_variables_writes_allstars_statistics(tmp_path):
         tmp_path, ["mtrue"], ["allstars"], ["paper_bounds"],
     )
 
-    assert output == tmp_path / "paper_items" / "variables.tex"
+    assert output == tmp_path / "paper_tables" / "variables.tex"
     assert output.read_text().splitlines()[4:] == [
         r"\newcommand{\McallstarsNstars}{\ensuremath{123}}",
         r"\newcommand{\McallstarsNeff}{\ensuremath{98.7}}",
@@ -261,7 +261,7 @@ def test_calculate_all_delta_bics_saves_results_for_every_folder(
     }
     assert len(calls) == 2
     saved = json.loads(
-        (tmp_path / "paper_items" /
+        (tmp_path / "paper_tables" /
          post_fit_analysis.DELTA_BIC_FILENAME).read_text()
     )
     assert saved["stack_dim"] == "a"
@@ -288,9 +288,9 @@ def test_make_parameter_table_references_variables_commands(
         "McHighMstarSigmoidParamWidthBinaZero",
         "McHighMstarSigmoidIntOccBinaZero",
     ]
-    paper_items = tmp_path / "paper_items"
-    paper_items.mkdir()
-    (paper_items / "variables.tex").write_text("\n".join(
+    paper_tables = tmp_path / "paper_tables"
+    paper_tables.mkdir()
+    (paper_tables / "variables.tex").write_text("\n".join(
         rf"\newcommand{{\{name}}}{{\ensuremath{{1.0}}}}" for name in commands
     ))
 
@@ -305,7 +305,7 @@ def test_make_parameter_table_references_variables_commands(
     assert "Width &" not in text
 
     assert output == (
-        tmp_path / "paper_items" /
+        tmp_path / "paper_tables" /
         "model_params_mtrue_highMstar_paper_bounds.tex"
     )
     assert r"\caption{Custom Fit Caption}" in text
@@ -336,7 +336,7 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
     text = output.read_text()
 
     assert output == (
-        tmp_path / "paper_items" /
+        tmp_path / "paper_tables" /
         "model_params_appendix_paper_bounds.tex"
     )
     assert r"\begin{deluxetable*}{cccccccccccc}" in text
@@ -386,11 +386,11 @@ def test_make_three_parameter_tables_create_both_forms(tmp_path):
     text = outputs["reordered"].read_text()
 
     assert outputs["reordered"] == (
-        tmp_path / "paper_items" /
+        tmp_path / "paper_tables" /
         "three_parameter_OR_reordered_mtrue_stellar3params.tex"
     )
     assert outputs["original"] == (
-        tmp_path / "paper_items" /
+        tmp_path / "paper_tables" /
         "three_parameter_OR_mtrue_stellar3params.tex"
     )
     assert (
@@ -590,11 +590,11 @@ def test_make_two_parameter_tables_create_both_forms(tmp_path):
     original = outputs["original"].read_text()
 
     assert outputs["reordered"] == (
-        tmp_path / "paper_items" /
+        tmp_path / "paper_tables" /
         "two_parameter_OR_reordered_mtrue_stellar2params.tex"
     )
     assert outputs["original"] == (
-        tmp_path / "paper_items" /
+        tmp_path / "paper_tables" /
         "two_parameter_OR_mtrue_stellar2params.tex"
     )
     assert r"\begin{deluxetable*}{ccccc}" in reordered
@@ -620,7 +620,7 @@ def test_make_two_parameter_tables_create_both_forms(tmp_path):
     assert r"\begin{deluxetable*}{lccccc}" in original
     assert r"\McStellarTwoParamsHighMstarHighFeHNstars" in original
     assert r"\McStellarTwoParamsHighMstarHighFeHPiecewiseIntOcc" in original
-    assert not (tmp_path / "paper_items" / "variables.tex").exists()
+    assert not (tmp_path / "paper_tables" / "variables.tex").exists()
 
 
 def test_make_two_parameter_tables_can_embed_values_without_mass_range(
