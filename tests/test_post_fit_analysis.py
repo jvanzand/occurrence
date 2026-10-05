@@ -1094,10 +1094,12 @@ def test_model_cdf_samples_thin_long_chains(tmp_path):
     assert len(cdfs) == 7
 
 
-def _write_cdf_chains(root, models=("sigmoid", "logG")):
+def _write_cdf_chains(root, tier2s=("highMstar", "lowMstar", "highFeH",
+                                      "lowFeH"),
+                      models=("sigmoid", "logG")):
     parameters = {"sigmoid": [[0.1, 0.01, 0.5, 0.2], [0.12, 0.02, 0.6, 0.25]],
                   "logG": [[0.1, 0.3, 0.4], [0.12, 0.35, 0.45]]}
-    for tier2 in ("highMstar", "lowMstar"):
+    for tier2 in tier2s:
         for model in models:
             _write_model_chain(
                 root / "mtrue" / tier2 / "paper_bounds" / "saved_chains" /
@@ -1105,10 +1107,12 @@ def _write_cdf_chains(root, models=("sigmoid", "logG")):
             )
 
 
-_CDF_CURVES = [
-    {"label": "high", "t1": "mtrue", "t2": "highMstar", "t3": "paper_bounds"},
-    {"label": "low", "t1": "mtrue", "t2": "lowMstar", "t3": "paper_bounds"},
-]
+def _cdf_row(*tier2s):
+    return [{"label": tier2, "t1": "mtrue", "t2": tier2, "t3": "paper_bounds"}
+            for tier2 in tier2s]
+
+
+_CDF_ROWS = [_cdf_row("highMstar", "lowMstar"), _cdf_row("highFeH", "lowFeH")]
 
 
 def _capture_cdf_figure(monkeypatch):
@@ -1122,68 +1126,74 @@ def _capture_cdf_figure(monkeypatch):
     return figures
 
 
-@pytest.mark.parametrize("orientation, shape", [
-    ("horizontal", (1, 2)), ("vertical", (2, 1)),
-])
-def test_plot_model_cdf_comparison_draws_one_panel_per_model(
-        tmp_path, monkeypatch, orientation, shape):
+def test_plot_model_cdf_comparison_draws_models_by_sample_pairs(
+        tmp_path, monkeypatch):
     _write_cdf_chains(tmp_path)
     figures = _capture_cdf_figure(monkeypatch)
 
     output = post_fit_analysis.plot_model_cdf_comparison(
-        tmp_path, _CDF_CURVES, ["sigmoid", "logG"], "cdf_Mstar",
-        orientation=orientation, credible=0.95,
+        tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "cdf_comparison",
+        credible=0.95,
     )
 
-    assert output == tmp_path / "cdf_comparisons" / "cdf_Mstar.png"
+    assert output == tmp_path / "cdf_comparisons" / "cdf_comparison.png"
     assert output.is_file()
     axes = figures[0].axes
+    assert len(axes) == 4
+    assert axes[0].get_subplotspec().get_gridspec().get_geometry() == (2, 2)
     assert [axis.get_title() for axis in axes] == [
-        "Sigmoid CDF", "Log-Gaussian CDF",
+        "Sigmoid CDF", "Log-Gaussian CDF", "", "",
     ]
-    rows, columns = shape
-    assert axes[0].get_subplotspec().get_gridspec().get_geometry() == shape
     assert all(len(axis.get_lines()) == 2 for axis in axes)
-    assert axes[0].get_legend() is not None and axes[1].get_legend() is None
-    labelled_x = [bool(axis.get_xlabel()) for axis in axes]
-    labelled_y = [bool(axis.get_ylabel()) for axis in axes]
-    if orientation == "horizontal":
-        assert labelled_x == [True, True] and labelled_y == [True, False]
-    else:
-        assert labelled_x == [False, True] and labelled_y == [True, True]
+    assert [axis.get_legend() is not None for axis in axes] == [
+        True, False, True, False,
+    ]
+    assert [line.get_label() for line in axes[2].get_lines()] == [
+        "highFeH", "lowFeH",
+    ]
+    assert [bool(axis.get_xlabel()) for axis in axes] == [
+        False, False, True, True,
+    ]
+    assert [bool(axis.get_ylabel()) for axis in axes] == [
+        True, False, True, False,
+    ]
 
 
-def test_plot_model_cdf_comparison_applies_one_title_to_all_panels(
+def test_plot_model_cdf_comparison_custom_title_heads_each_column(
         tmp_path, monkeypatch):
     _write_cdf_chains(tmp_path)
     figures = _capture_cdf_figure(monkeypatch)
     post_fit_analysis.plot_model_cdf_comparison(
-        tmp_path, _CDF_CURVES, ["sigmoid", "logG"], "fixed",
-        title="Stellar mass",
+        tmp_path, _CDF_ROWS[:1], ["sigmoid", "logG"], "fixed",
+        title="Fit: {model}",
     )
     post_fit_analysis.plot_model_cdf_comparison(
-        tmp_path, _CDF_CURVES, "logG", "untitled", title=None,
+        tmp_path, _CDF_ROWS[:1], "logG", "untitled", title=None,
     )
     assert [axis.get_title() for axis in figures[0].axes] == [
-        "Stellar mass", "Stellar mass",
+        "Fit: Sigmoid", "Fit: Log-Gaussian",
     ]
     assert [axis.get_title() for axis in figures[1].axes] == [""]
 
 
-def test_plot_model_cdf_comparison_lists_every_missing_chain(tmp_path):
-    _write_cdf_chains(tmp_path, models=("sigmoid",))
-    with pytest.raises(FileNotFoundError) as error:
+def test_plot_model_cdf_comparison_needs_every_model_for_every_sample(
+        tmp_path):
+    _write_cdf_chains(tmp_path, tier2s=("highMstar", "lowMstar"))
+    _write_cdf_chains(tmp_path, tier2s=("highFeH", "lowFeH"),
+                      models=("sigmoid",))
+    with pytest.raises(FileNotFoundError, match="every model") as error:
         post_fit_analysis.plot_model_cdf_comparison(
-            tmp_path, _CDF_CURVES, ["sigmoid", "logG"], "missing",
+            tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "missing",
         )
     message = str(error.value)
-    assert message.count("chains_logG_bin0") == 2
-    assert "chains_sigmoid" not in message
+    assert "highFeH/paper_bounds/saved_chains/chains_logG_bin0" in message
+    assert "lowFeH/paper_bounds/saved_chains/chains_logG_bin0" in message
+    assert message.count("chains_") == 2
     assert not (tmp_path / "cdf_comparisons").exists()
 
 
-def test_plot_model_cdf_comparison_rejects_unknown_orientation(tmp_path):
-    with pytest.raises(ValueError, match="orientation"):
+def test_plot_model_cdf_comparison_rejects_empty_rows(tmp_path):
+    with pytest.raises(ValueError, match="rows"):
         post_fit_analysis.plot_model_cdf_comparison(
-            tmp_path, _CDF_CURVES, ["sigmoid"], "x", orientation="diagonal",
+            tmp_path, [_cdf_row("highMstar"), []], ["sigmoid"], "x",
         )
