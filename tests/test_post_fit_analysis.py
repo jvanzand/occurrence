@@ -1014,7 +1014,7 @@ def test_plot_companions_by_age_handles_missing_age_and_mass_cut(
 
 
 def test_latex_token_spells_out_digits():
-    assert post_fit_analysis._latex_token("stellar_3params_Miyazaki") == (
+    assert post_fit_analysis._latex_token("stellar3params_Miyazaki") == (
         "StellarThreeParamsMiyazaki"
     )
     assert post_fit_analysis._latex_token("bin10") == "BinOneZero"
@@ -1026,7 +1026,7 @@ def test_make_variables_accepts_several_three_parameter_runs(
     tier1 = tmp_path / "mtrue"
     _write_summary(tier1, "allstars", "roi")
     subset = "highMstarhighFeHhighAct"
-    for t3 in ("stellar3params", "stellar_3params_Miyazaki"):
+    for t3 in ("stellar3params", "stellar3params_Miyazaki"):
         summary_dir = tier1 / subset / t3 / "saved_dicts"
         summary_dir.mkdir(parents=True)
         (summary_dir / post_fit_analysis.SUMMARY_FILENAME).touch()
@@ -1040,7 +1040,7 @@ def test_make_variables_accepts_several_three_parameter_runs(
 
     text = post_fit_analysis.make_variables(
         tmp_path, ["mtrue"], ["allstars"], ["roi"],
-        three_parameter_t3=["stellar3params", "stellar_3params_Miyazaki"],
+        three_parameter_t3=["stellar3params", "stellar3params_Miyazaki"],
     ).read_text()
 
     assert r"\newcommand{\McStellarThreeParamsHighMstarHighFeHYoungNstars}" in text

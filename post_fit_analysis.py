@@ -84,7 +84,7 @@ def _latex_token(value):
     """Turn a directory/type name into a legal, readable command token.
 
     LaTeX command names may contain only letters, so each digit is spelled
-    out: ``stellar_3params_Miyazaki`` becomes ``StellarThreeParamsMiyazaki``
+    out: ``stellar3params_Miyazaki`` becomes ``StellarThreeParamsMiyazaki``
     and ``10`` becomes ``OneZero``.
     """
     parts = re.findall(r"[A-Za-z]+|\d", str(value))
