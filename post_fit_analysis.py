@@ -503,25 +503,29 @@ def model_cdf_samples(chain_path, model_name, n_grid=500, max_samples=2000):
 
 
 def plot_model_cdf_comparison(
-        results_dir, curves, name, title=None, credible=0.68, stack_bin=0,
-        n_grid=500, max_samples=2000, xlabel=None,
-        ylabel="Cumulative fraction", legend_loc="lower right",
-        figsize=(6, 4), colors=None, band_alpha=0.25, dpi=300,
-        output_file=None):
-    """Overlay the normalized cumulative distributions of fitted models.
+        results_dir, curves, models, name, title="{model} CDF",
+        orientation="horizontal", credible=0.68, stack_bin=0, n_grid=500,
+        max_samples=2000, xlabel=None, ylabel="Cumulative fraction",
+        legend_loc="lower right", panel_size=(6, 4), colors=None,
+        band_alpha=0.25, dpi=300, output_file=None):
+    """Compare the normalized cumulative distributions of fitted samples.
 
-    ``curves`` lists the fits to compare.  Each is a mapping with ``label``
-    (legend text), ``t1``, ``t2``, and ``t3`` (the experiment folders), and
-    ``model`` (a parametric model such as ``"sigmoid"`` or ``"logG"``), plus
-    an optional ``stack_bin`` that overrides the shared ``stack_bin``.  Each
-    curve is the posterior median of :func:`model_cdf_samples`, with the
-    central ``credible`` interval shaded.
+    Each entry of ``models`` (e.g. ``["sigmoid", "logG"]``) gets its own
+    panel, and every panel overlays the same ``curves``.  A curve is a
+    mapping with ``label`` (legend text) and ``t1``, ``t2``, and ``t3`` (the
+    experiment folders), plus an optional ``stack_bin`` that overrides the
+    shared ``stack_bin``.  Each curve is the posterior median of
+    :func:`model_cdf_samples`, with the central ``credible`` interval shaded.
 
-    ``title`` defaults to the model name when every curve uses the same
-    model; otherwise legend entries name their models and there is no title.
-    ``xlabel`` defaults to companion mass or mass ratio, following the Tier 1
-    folders.  ``colors`` optionally gives one color per curve.  The figure is
-    saved to ``results_dir/cdf_comparisons/<name>.png`` unless
+    ``title`` is applied to every panel, with ``{model}`` replaced by that
+    panel's model name, so the default gives "Sigmoid CDF" and
+    "Log-Gaussian CDF"; ``None`` or ``""`` leaves the panels untitled.
+    ``orientation`` places the panels side by side (``"horizontal"``, sharing
+    the y-axis) or stacked (``"vertical"``, sharing the x-axis label).  The
+    legend appears in the first panel.  ``xlabel`` defaults to companion mass
+    or mass ratio, following the Tier 1 folders; ``colors`` optionally gives
+    one color per curve; ``panel_size`` is the size of each panel in inches.
+    The figure is saved to ``results_dir/cdf_comparisons/<name>.png`` unless
     ``output_file`` is given.
 
     Returns
@@ -533,48 +537,38 @@ def plot_model_cdf_comparison(
 
     results_dir = Path(results_dir)
     curves = [dict(curve) for curve in curves]
+    models = [models] if isinstance(models, str) else list(models)
     if not curves:
         raise ValueError("curves cannot be empty")
-    required = {"label", "t1", "t2", "t3", "model"}
+    if not models or len(set(models)) != len(models):
+        raise ValueError("models must list at least one distinct model")
     for curve in curves:
-        missing = sorted(required - set(curve))
+        missing = sorted({"label", "t1", "t2", "t3"} - set(curve))
         if missing:
             raise ValueError(f"CDF curve {curve} is missing {missing}")
+    if orientation not in {"horizontal", "vertical"}:
+        raise ValueError("orientation must be 'horizontal' or 'vertical'")
     if not 0 < credible < 1:
         raise ValueError("credible must be between 0 and 1")
     if colors is not None and len(colors) != len(curves):
         raise ValueError("colors must give one color per curve")
-    models = {curve["model"] for curve in curves}
 
-    chain_paths = []
-    for curve in curves:
-        chain_path = (
-            results_dir / curve["t1"] / curve["t2"] / curve["t3"] /
-            "saved_chains" /
-            f"chains_{curve['model']}_bin{curve.get('stack_bin', stack_bin)}.npz"
+    chain_paths = {}
+    missing_chains = []
+    for model in models:
+        for index, curve in enumerate(curves):
+            path = (
+                results_dir / curve["t1"] / curve["t2"] / curve["t3"] /
+                "saved_chains" /
+                f"chains_{model}_bin{curve.get('stack_bin', stack_bin)}.npz"
+            )
+            chain_paths[model, index] = path
+            if not path.is_file():
+                missing_chains.append(str(path))
+    if missing_chains:
+        raise FileNotFoundError(
+            "no saved chains at: " + ", ".join(missing_chains)
         )
-        if not chain_path.is_file():
-            raise FileNotFoundError(f"no saved chain at {chain_path}")
-        chain_paths.append(chain_path)
-
-    figure, axis = plt.subplots(figsize=figsize)
-    tail = 50*(1 - credible)
-    grid_limits = []
-    for index, (curve, chain_path) in enumerate(zip(curves, chain_paths)):
-        grid, cdfs = model_cdf_samples(
-            chain_path, curve["model"], n_grid=n_grid, max_samples=max_samples
-        )
-        low, median, high = np.percentile(
-            cdfs, [tail, 50, 100 - tail], axis=0
-        )
-        color = colors[index] if colors is not None else f"C{index}"
-        label = curve["label"]
-        if len(models) > 1:
-            label += f" ({MODEL_TITLES.get(curve['model'], curve['model'])})"
-        axis.fill_between(grid, low, high, color=color, alpha=band_alpha,
-                          lw=0)
-        axis.plot(grid, median, color=color, lw=2, label=label)
-        grid_limits.extend([grid[0], grid[-1]])
 
     if xlabel is None:
         tier1_names = {Path(curve["t1"]).name for curve in curves}
@@ -583,18 +577,44 @@ def plot_model_cdf_comparison(
             if tier1_names <= {"qtrue", "qsini"}
             else r"Companion mass [$M_{Jup}$]"
         )
-    if title is None and len(models) == 1:
-        (model,) = models
-        title = f"{MODEL_TITLES.get(model, model)} CDF"
-    axis.set_xscale("log")
-    axis.set_xlim(min(grid_limits), max(grid_limits))
-    axis.set_ylim(0, 1)
-    axis.set_yticks(np.linspace(0, 1, 6))
-    axis.set_xlabel(xlabel)
-    axis.set_ylabel(ylabel)
-    if title:
-        axis.set_title(title)
-    axis.legend(loc=legend_loc)
+    horizontal = orientation == "horizontal"
+    n_rows, n_columns = (1, len(models)) if horizontal else (len(models), 1)
+    figure, axes = plt.subplots(
+        n_rows, n_columns, squeeze=False,
+        sharey=horizontal, sharex=not horizontal,
+        figsize=(panel_size[0]*n_columns, panel_size[1]*n_rows),
+    )
+    axes = axes.ravel()
+    tail = 50*(1 - credible)
+    for panel, (axis, model) in enumerate(zip(axes, models)):
+        grid_limits = []
+        for index, curve in enumerate(curves):
+            grid, cdfs = model_cdf_samples(
+                chain_paths[model, index], model,
+                n_grid=n_grid, max_samples=max_samples,
+            )
+            low, median, high = np.percentile(
+                cdfs, [tail, 50, 100 - tail], axis=0
+            )
+            color = colors[index] if colors is not None else f"C{index}"
+            axis.fill_between(grid, low, high, color=color,
+                              alpha=band_alpha, lw=0)
+            axis.plot(grid, median, color=color, lw=2, label=curve["label"])
+            grid_limits.extend([grid[0], grid[-1]])
+        axis.set_xscale("log")
+        axis.set_xlim(min(grid_limits), max(grid_limits))
+        axis.set_ylim(0, 1)
+        axis.set_yticks(np.linspace(0, 1, 6))
+        if horizontal or panel == len(models) - 1:
+            axis.set_xlabel(xlabel)
+        if not horizontal or panel == 0:
+            axis.set_ylabel(ylabel)
+        if title:
+            axis.set_title(title.format(
+                model=MODEL_TITLES.get(model, model)
+            ))
+        if panel == 0:
+            axis.legend(loc=legend_loc)
     figure.tight_layout()
 
     output_path = (
