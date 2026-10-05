@@ -37,13 +37,13 @@ def test_make_variables_writes_allstars_statistics(tmp_path):
 
     assert output == tmp_path / "paper_tables" / "variables.tex"
     assert output.read_text().splitlines()[4:] == [
-        r"\newcommand{\McallstarsNstars}{\ensuremath{123}}",
-        r"\newcommand{\McallstarsNeff}{\ensuremath{98.7}}",
-        r"\newcommand{\McallstarsAvgCompl}{\ensuremath{0.46}}",
-        r"\newcommand{\McallstarsNeffBinAZero}{\ensuremath{40.1}}",
-        r"\newcommand{\McallstarsAvgComplBinAZero}{\ensuremath{0.40}}",
-        r"\newcommand{\McallstarsNeffBinAOne}{\ensuremath{58.6}}",
-        r"\newcommand{\McallstarsAvgComplBinAOne}{\ensuremath{0.50}}",
+        r"\newcommand{\McAllstarsPaperBoundsNstars}{\ensuremath{123}}",
+        r"\newcommand{\McAllstarsPaperBoundsNeff}{\ensuremath{98.7}}",
+        r"\newcommand{\McAllstarsPaperBoundsAvgCompl}{\ensuremath{0.46}}",
+        r"\newcommand{\McAllstarsPaperBoundsNeffBinAZero}{\ensuremath{40.1}}",
+        r"\newcommand{\McAllstarsPaperBoundsAvgComplBinAZero}{\ensuremath{0.40}}",
+        r"\newcommand{\McAllstarsPaperBoundsNeffBinAOne}{\ensuremath{58.6}}",
+        r"\newcommand{\McAllstarsPaperBoundsAvgComplBinAOne}{\ensuremath{0.50}}",
     ]
 
 
@@ -60,9 +60,9 @@ def test_make_variables_expands_high_and_low_tier2_directories(tmp_path):
     )
     text = output.read_text()
 
-    assert r"\QHighFeHNstars" in text
-    assert r"\QHighFeHNeff" in text
-    assert r"\QLowFeHAvgCompl}{\ensuremath{0.80}}" in text
+    assert r"\QHighFeHRoiNstars" in text
+    assert r"\QHighFeHRoiNeff" in text
+    assert r"\QLowFeHRoiAvgCompl}{\ensuremath{0.80}}" in text
     assert text.count("%"*72) == 2
     assert "\n\n" + "%"*72 in text
 
@@ -86,17 +86,49 @@ def test_make_variables_aggregates_nonstack_dimension_by_area(tmp_path):
         tmp_path, ["mtrue"], ["allstars"], ["roi"], stack_dim="a"
     ).read_text()
 
-    assert r"\McallstarsNeffBinAZero}{\ensuremath{4.0}}" in text
-    assert r"\McallstarsNeffBinAOne}{\ensuremath{6.0}}" in text
-    assert r"\McallstarsAvgComplBinAZero}{\ensuremath{0.60}}" in text
-    assert r"\McallstarsAvgComplBinAOne}{\ensuremath{0.80}}" in text
+    assert r"\McAllstarsRoiNeffBinAZero}{\ensuremath{4.0}}" in text
+    assert r"\McAllstarsRoiNeffBinAOne}{\ensuremath{6.0}}" in text
+    assert r"\McAllstarsRoiAvgComplBinAZero}{\ensuremath{0.60}}" in text
+    assert r"\McAllstarsRoiAvgComplBinAOne}{\ensuremath{0.80}}" in text
 
 
 def test_make_variables_reports_missing_summary(tmp_path):
+    (tmp_path / "mtrue" / "allstars" / "roi").mkdir(parents=True)
     with pytest.raises(FileNotFoundError, match="summary_dict_piecewise"):
         post_fit_analysis.make_variables(
             tmp_path, ["mtrue"], ["allstars"], ["roi"],
         )
+
+
+def test_make_variables_rejects_tier3_without_any_results(tmp_path):
+    _write_summary(tmp_path / "mtrue", "allstars", "roi")
+    with pytest.raises(FileNotFoundError, match="missing_run"):
+        post_fit_analysis.make_variables(
+            tmp_path, ["mtrue"], ["allstars"], ["roi", "missing_run"],
+        )
+
+
+def test_make_variables_combines_tier3_runs_covering_different_samples(
+        tmp_path, capsys):
+    for tier1 in ("mtrue", "qtrue"):
+        for tier2 in ("allstars", "highMstar", "lowMstar"):
+            _write_summary(tmp_path / tier1, tier2, "paper_bounds")
+        _write_summary(tmp_path / tier1, "allstars", "paper_bounds_noGP")
+
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue", "qtrue"], ["allstars", "Mstar"],
+        ["paper_bounds", "paper_bounds_noGP"], three_parameter_t3=None,
+    ).read_text()
+
+    for name in ("McAllstarsPaperBoundsNstars", "QLowMstarPaperBoundsNstars",
+                 "McAllstarsPaperBoundsNoGPNstars",
+                 "QAllstarsPaperBoundsNoGPNstars"):
+        assert rf"\newcommand{{\{name}}}" in text
+    assert "HighMstarPaperBoundsNoGP" not in text
+    output = capsys.readouterr().out
+    assert "skipped experiments without result folders" in output
+    assert "mtrue/highMstar/paper_bounds_noGP" in output
+    assert "qtrue/lowMstar/paper_bounds_noGP" in output
 
 
 def test_parameter_precision_uses_tighter_error():
@@ -122,8 +154,8 @@ def test_make_variables_collects_piecewise_integrated_occurrence(tmp_path):
         tmp_path, ["mtrue"], ["allstars"], ["roi"]
     ).read_text()
 
-    assert r"\McallstarsPiecewiseIntOccBinaZero" in text
-    assert r"\McallstarsPiecewiseIntOccBinaOne" in text
+    assert r"\McAllstarsRoiPiecewiseIntOccBinaZero" in text
+    assert r"\McAllstarsRoiPiecewiseIntOccBinaOne" in text
     assert "% Integrated piecewise occurrence" in text
 
 
@@ -156,12 +188,12 @@ def test_make_variables_collects_parametric_fit_chains(tmp_path, monkeypatch):
         tmp_path, ["mtrue"], ["allstars"], ["roi"]
     ).read_text()
 
-    assert r"\McallstarsEscarpmentParamBPTwoBinaZero" in text
-    assert r"\McallstarsEscarpmentParamSlopeBinaZero" in text
+    assert r"\McAllstarsRoiEscarpmentParamBPTwoBinaZero" in text
+    assert r"\McAllstarsRoiEscarpmentParamSlopeBinaZero" in text
     assert r"\ensuremath{1.30^{+0.07}_{-0.07}}" in text
-    assert r"\McallstarsEscarpmentIntOccBinaZero" in text
+    assert r"\McAllstarsRoiEscarpmentIntOccBinaZero" in text
     assert "% Parametric model: escarpment" in text
-    assert r"\McallstarsEscarpmentDbicBinaZero}{\ensuremath{4.2}}" in text
+    assert r"\McAllstarsRoiEscarpmentDbicBinaZero}{\ensuremath{4.2}}" in text
 
 
 def test_make_variables_derives_loglinear_slope_from_fit_bounds(
@@ -190,10 +222,10 @@ def test_make_variables_derives_loglinear_slope_from_fit_bounds(
         tmp_path, ["mtrue"], ["allstars"], ["roi"]
     ).read_text()
 
-    assert r"\McallstarsLogLinearParamSlopeBinaZero" in text
+    assert r"\McAllstarsRoiLogLinearParamSlopeBinaZero" in text
     # The median slope is (3 - 1) / log10(100 / 1) = 1.
     assert (
-        r"\McallstarsLogLinearParamSlopeBinaZero}"
+        r"\McAllstarsRoiLogLinearParamSlopeBinaZero}"
         r"{\ensuremath{1.00^{+0.03}_{-0.03}}}"
     ) in text
 
@@ -273,20 +305,20 @@ def test_make_parameter_table_references_variables_commands(
         tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     commands = [
-        "McHighMstarLogGParamABinaZero",
-        "McHighMstarLogGParamMuBinaZero",
-        "McHighMstarLogGParamSigmaBinaZero",
-        "McHighMstarLogGIntOccBinaZero",
-        "McHighMstarEscarpmentParamCOneBinaZero",
-        "McHighMstarEscarpmentParamCTwoBinaZero",
-        "McHighMstarEscarpmentParamBPOneBinaZero",
-        "McHighMstarEscarpmentParamBPTwoBinaZero",
-        "McHighMstarEscarpmentIntOccBinaZero",
-        "McHighMstarSigmoidParamCOneBinaZero",
-        "McHighMstarSigmoidParamCTwoBinaZero",
-        "McHighMstarSigmoidParamCenterBinaZero",
-        "McHighMstarSigmoidParamWidthBinaZero",
-        "McHighMstarSigmoidIntOccBinaZero",
+        "McHighMstarPaperBoundsLogGParamABinaZero",
+        "McHighMstarPaperBoundsLogGParamMuBinaZero",
+        "McHighMstarPaperBoundsLogGParamSigmaBinaZero",
+        "McHighMstarPaperBoundsLogGIntOccBinaZero",
+        "McHighMstarPaperBoundsEscarpmentParamCOneBinaZero",
+        "McHighMstarPaperBoundsEscarpmentParamCTwoBinaZero",
+        "McHighMstarPaperBoundsEscarpmentParamBPOneBinaZero",
+        "McHighMstarPaperBoundsEscarpmentParamBPTwoBinaZero",
+        "McHighMstarPaperBoundsEscarpmentIntOccBinaZero",
+        "McHighMstarPaperBoundsSigmoidParamCOneBinaZero",
+        "McHighMstarPaperBoundsSigmoidParamCTwoBinaZero",
+        "McHighMstarPaperBoundsSigmoidParamCenterBinaZero",
+        "McHighMstarPaperBoundsSigmoidParamWidthBinaZero",
+        "McHighMstarPaperBoundsSigmoidIntOccBinaZero",
     ]
     paper_tables = tmp_path / "paper_tables"
     paper_tables.mkdir()
@@ -310,9 +342,9 @@ def test_make_parameter_table_references_variables_commands(
     )
     assert r"\caption{Custom Fit Caption}" in text
     assert r"\label{tab:model_params}" in text
-    assert r"$\mu$ & \McHighMstarLogGParamMuBinaZero \\" in text
+    assert r"$\mu$ & \McHighMstarPaperBoundsLogGParamMuBinaZero \\" in text
     assert (
-        r"Occurrence & \McHighMstarEscarpmentIntOccBinaZero \\" in text
+        r"Occurrence & \McHighMstarPaperBoundsEscarpmentIntOccBinaZero \\" in text
     )
     assert "1.0" not in text
 
@@ -352,10 +384,10 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
         ["qtrue", "highMstar"],
         ["qtrue", "lowMstar"],
     ]
-    assert r"\McallstarsNstars" in rows[0]
-    assert r"\McallstarsNeffBinAZero" in rows[0]
-    assert r"\McallstarsAvgComplBinAZero" in rows[0]
-    assert r"\McHighMstarNeffBinAZero" in rows[1]
+    assert r"\McAllstarsPaperBoundsNstars" in rows[0]
+    assert r"\McAllstarsPaperBoundsNeffBinAZero" in rows[0]
+    assert r"\McAllstarsPaperBoundsAvgComplBinAZero" in rows[0]
+    assert r"\McHighMstarPaperBoundsNeffBinAZero" in rows[1]
     data = text.split(r"\startdata", 1)[1].split(r"\enddata", 1)[0]
     all_data_rows = [
         line for line in data.splitlines()
@@ -369,15 +401,15 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
     ]
     assert [row.split(" & ")[5] for row in first_block] == expected_models
     model_rows = dict(zip(post_fit_analysis._APPENDIX_MODEL_ORDER, first_block))
-    assert r"\McallstarsLogGIntOccBinaZero" in model_rows["logG"]
-    assert r"\McallstarsLogGParamABinaZero" in model_rows["logG"]
-    assert r"\McallstarsSigmoidParamCenterBinaZero" in model_rows["sigmoid"]
-    assert r"\McallstarsEscarpmentParamBPOneBinaZero" in model_rows["escarpment"]
-    assert r"\McallstarsLogLinearParamCHighBinaZero" in model_rows["loglinear"]
+    assert r"\McAllstarsPaperBoundsLogGIntOccBinaZero" in model_rows["logG"]
+    assert r"\McAllstarsPaperBoundsLogGParamABinaZero" in model_rows["logG"]
+    assert r"\McAllstarsPaperBoundsSigmoidParamCenterBinaZero" in model_rows["sigmoid"]
+    assert r"\McAllstarsPaperBoundsEscarpmentParamBPOneBinaZero" in model_rows["escarpment"]
+    assert r"\McAllstarsPaperBoundsLogLinearParamCHighBinaZero" in model_rows["loglinear"]
     assert r"\nodata" in model_rows["logG"]
-    assert r"\McLowMstarLogLinearDbicBinaZero" in all_data_rows[11]
-    assert r"\QallstarsLogLinearIntOccBinaZero" in text
-    assert r"\QLowMstarLogLinearIntOccBinaZero" not in text
+    assert r"\McLowMstarPaperBoundsLogLinearDbicBinaZero" in all_data_rows[11]
+    assert r"\QAllstarsPaperBoundsLogLinearIntOccBinaZero" in text
+    assert r"\QLowMstarPaperBoundsLogLinearIntOccBinaZero" not in text
     assert "tablecomments" not in text
 
 
