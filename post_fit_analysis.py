@@ -502,12 +502,37 @@ def model_cdf_samples(chain_path, model_name, n_grid=500, max_samples=2000):
     return grid, cumulative/totals
 
 
+def _cdf_tick_values(curve, coordinate):
+    """Return the bin edges of a curve's piecewise fit along ``coordinate``.
+
+    These are the ticks the occurrence plots use.  ``None`` is returned when
+    the experiment has no piecewise chain.
+    """
+    path = (Path(curve["results_dir"]) / curve["t1"] / curve["t2"] /
+            curve["t3"] / "saved_chains" / "chains_piecewise.npz")
+    if not path.is_file():
+        return None
+    key = "x_edges" if coordinate == "sma" else "y_edges"
+    with np.load(path) as data:
+        return np.asarray(data[key], dtype=float) if key in data else None
+
+
+def _cdf_tick_formatter(tick_values, coordinate, tier1_names):
+    from occurrence import plotting_utils as pu
+
+    if coordinate == "sma":
+        return pu.sma_tick_formatter(tick_values)
+    if tier1_names <= {"qtrue", "qsini"}:
+        return pu.mass_ratio_tick_formatter(tick_values)
+    return pu.mass_tick_formatter(tick_values)
+
+
 def plot_model_cdf_comparison(
         results_dir, rows, models, name, title="{model} CDF", credible=0.68,
-        stack_bin=0, n_grid=500, max_samples=2000, xlabel=None,
+        stack_bin=0, n_grid=500, max_samples=2000, xticks=None, xlabel=None,
         ylabel="Cumulative fraction", legend_loc="lower right",
-        panel_size=(5, 3.5), colors=None, band_alpha=0.25, dpi=300,
-        output_file=None):
+        legend_fontsize=None, panel_size=(5, 3.5), colors=None,
+        band_alpha=0.25, dpi=300, output_file=None):
     """Draw a grid comparing the normalized CDFs of fitted samples.
 
     The grid has one column per entry of ``models`` (e.g. ``["sigmoid",
@@ -523,9 +548,12 @@ def plot_model_cdf_comparison(
     ``title`` heads each column, with ``{model}`` replaced by the column's
     model name, so the default gives "Sigmoid CDF" and "Log-Gaussian CDF";
     ``None`` or ``""`` leaves the columns untitled.  Each row's legend appears
-    in its first column.  Panels share the y-axis and, within a column, the
-    x-axis; ``xlabel`` defaults to companion mass or mass ratio, following
-    the Tier 1 folders.  ``colors`` optionally gives one color per position
+    in its first column, with ``legend_fontsize`` defaulting to the size the
+    occurrence plots use.  Panels share the y-axis and, within a column, the
+    x-axis.  ``xticks`` lists the x-axis tick values; by default they are the
+    bin edges of the first curve's piecewise fit, as on the occurrence plots,
+    and matplotlib's ticks are used if that fit is missing.  ``xlabel``
+    defaults to companion mass or mass ratio, following the Tier 1 folders.  ``colors`` optionally gives one color per position
     within a row; ``panel_size`` is the size of each panel in inches.  The
     figure is saved to ``results_dir/cdf_comparisons/<name>.png`` unless
     ``output_file`` is given.
@@ -536,6 +564,7 @@ def plot_model_cdf_comparison(
         Path to the saved figure.
     """
     from matplotlib import pyplot as plt
+    from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
 
     results_dir = Path(results_dir)
     rows = [[dict(curve) for curve in row] for row in rows]
@@ -573,10 +602,22 @@ def plot_model_cdf_comparison(
             ", ".join(missing_chains)
         )
 
+    tier1_names = {Path(curve["t1"]).name for row in rows for curve in row}
+    with np.load(chain_paths[0, 0, models[0]]) as data:
+        coordinate = (
+            str(data["model_coordinate"]) if "model_coordinate" in data
+            else "mass"
+        )
+    if xticks is None:
+        xticks = _cdf_tick_values(
+            dict(rows[0][0], results_dir=results_dir), coordinate
+        )
+    if xticks is not None:
+        xticks = np.asarray(xticks, dtype=float)
+        tick_formatter = _cdf_tick_formatter(xticks, coordinate, tier1_names)
+    if legend_fontsize is None:
+        legend_fontsize = 1.6*plt.rcParams["font.size"]
     if xlabel is None:
-        tier1_names = {
-            Path(curve["t1"]).name for row in rows for curve in row
-        }
         xlabel = (
             r"Mass Ratio [$M_c/M_{\star}$]"
             if tier1_names <= {"qtrue", "qsini"}
@@ -611,13 +652,19 @@ def plot_model_cdf_comparison(
                 grid_limits.extend([grid[0], grid[-1]])
             axis.set_xscale("log")
             axis.set_xlim(min(grid_limits), max(grid_limits))
+            if xticks is not None:
+                axis.xaxis.set_major_locator(FixedLocator(xticks))
+                axis.xaxis.set_major_formatter(FuncFormatter(tick_formatter))
+                axis.xaxis.set_minor_locator(NullLocator())
             axis.set_ylim(0, 1)
             axis.set_yticks(np.linspace(0, 1, 6))
             if row_index == n_rows - 1:
                 axis.set_xlabel(xlabel)
+                if xticks is not None and tick_formatter.rotate_labels:
+                    plt.setp(axis.get_xticklabels(), rotation=45, ha="right")
             if column == 0:
                 axis.set_ylabel(ylabel)
-                axis.legend(loc=legend_loc)
+                axis.legend(loc=legend_loc, fontsize=legend_fontsize)
             if row_index == 0 and title:
                 axis.set_title(title.format(
                     model=MODEL_TITLES.get(model, model)

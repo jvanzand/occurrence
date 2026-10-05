@@ -1197,3 +1197,53 @@ def test_plot_model_cdf_comparison_rejects_empty_rows(tmp_path):
         post_fit_analysis.plot_model_cdf_comparison(
             tmp_path, [_cdf_row("highMstar"), []], ["sigmoid"], "x",
         )
+
+
+def _write_piecewise_edges(root, tier2, y_edges):
+    path = (root / "mtrue" / tier2 / "paper_bounds" / "saved_chains" /
+            "chains_piecewise.npz")
+    np.savez(path, x_edges=np.array([0.1, 10.0]), y_edges=np.array(y_edges))
+
+
+def test_plot_model_cdf_comparison_ticks_match_the_piecewise_bins(
+        tmp_path, monkeypatch):
+    _write_cdf_chains(tmp_path)
+    edges = [0.4, 0.8, 1.6, 3.2, 6.4, 13.0, 26.0, 50.0]
+    _write_piecewise_edges(tmp_path, "highMstar", edges)
+    figures = _capture_cdf_figure(monkeypatch)
+
+    post_fit_analysis.plot_model_cdf_comparison(
+        tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "ticks",
+    )
+
+    for axis in figures[0].axes:
+        assert list(axis.get_xticks()) == pytest.approx(edges)
+    labels = [label.get_text() for label in figures[0].axes[2].get_xticklabels()]
+    assert labels == ["0.4", "0.8", "1.6", "3.2", "6.4", "13", "26", "50"]
+
+
+def test_plot_model_cdf_comparison_accepts_custom_ticks(tmp_path,
+                                                        monkeypatch):
+    _write_cdf_chains(tmp_path)
+    _write_piecewise_edges(tmp_path, "highMstar", [0.4, 50.0])
+    figures = _capture_cdf_figure(monkeypatch)
+
+    post_fit_analysis.plot_model_cdf_comparison(
+        tmp_path, _CDF_ROWS[:1], "sigmoid", "custom", xticks=[1, 10],
+        legend_fontsize=21,
+    )
+
+    axis = figures[0].axes[0]
+    assert list(axis.get_xticks()) == [1, 10]
+    assert all(text.get_fontsize() == 21
+               for text in axis.get_legend().get_texts())
+
+
+def test_plot_model_cdf_comparison_keeps_default_ticks_without_bins(
+        tmp_path, monkeypatch):
+    _write_cdf_chains(tmp_path)
+    figures = _capture_cdf_figure(monkeypatch)
+    post_fit_analysis.plot_model_cdf_comparison(
+        tmp_path, _CDF_ROWS[:1], "sigmoid", "fallback",
+    )
+    assert len(figures[0].axes[0].get_xticks()) > 0
