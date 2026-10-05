@@ -452,6 +452,161 @@ def plot_companions_by_stellar_parameter(
     return outputs
 
 
+CDF_COMPARISONS_DIRNAME = "cdf_comparisons"
+MODEL_TITLES = {
+    "piecewise": "Piecewise", "logG": "Log-Gaussian", "sigmoid": "Sigmoid",
+    "escarpment": "Escarpment", "bpl": "Broken Power Law",
+    "loglinear": "Log-Linear",
+}
+
+
+def model_cdf_samples(chain_path, model_name, n_grid=500, max_samples=2000):
+    """Return ``(grid, cdfs)`` for a fitted model normalized over its bounds.
+
+    Each row of ``cdfs`` is one posterior sample's cumulative distribution:
+    the occurrence-rate density integrated in ``log10`` of the model
+    coordinate from the lower model bound, divided by its integral over the
+    full bounds, so every row rises from 0 to exactly 1.  Normalizing removes
+    the total occurrence rate, so the spread between rows reflects only the
+    uncertainty in the model's shape.  At most ``max_samples`` posterior
+    samples, evenly spaced through the chain, are used.
+    """
+    chain_path = Path(chain_path)
+    if n_grid < 2:
+        raise ValueError("n_grid must be at least 2")
+    if max_samples < 1:
+        raise ValueError("max_samples must be positive")
+    with np.load(chain_path) as data:
+        samples = np.asarray(data["flat_chains"], dtype=float)
+        model_bounds = tuple(float(bound) for bound in data["model_bounds"])
+    if len(samples) > max_samples:
+        samples = samples[
+            np.linspace(0, len(samples) - 1, max_samples, dtype=int)
+        ]
+    grid = np.logspace(*np.log10(model_bounds), n_grid)
+    densities = np.array([
+        mcmc_powerlaw.evaluate_density(model_name, theta, grid, model_bounds)
+        for theta in samples
+    ])
+    steps = (
+        0.5*(densities[:, 1:] + densities[:, :-1])*np.diff(np.log10(grid))
+    )
+    cumulative = np.concatenate(
+        (np.zeros((len(samples), 1)), np.cumsum(steps, axis=1)), axis=1
+    )
+    totals = cumulative[:, -1:]
+    if np.any(totals <= 0):
+        raise ValueError(
+            f"{chain_path} has posterior samples with no positive density"
+        )
+    return grid, cumulative/totals
+
+
+def plot_model_cdf_comparison(
+        results_dir, curves, name, title=None, credible=0.68, stack_bin=0,
+        n_grid=500, max_samples=2000, xlabel=None,
+        ylabel="Cumulative fraction", legend_loc="lower right",
+        figsize=(6, 4), colors=None, band_alpha=0.25, dpi=300,
+        output_file=None):
+    """Overlay the normalized cumulative distributions of fitted models.
+
+    ``curves`` lists the fits to compare.  Each is a mapping with ``label``
+    (legend text), ``t1``, ``t2``, and ``t3`` (the experiment folders), and
+    ``model`` (a parametric model such as ``"sigmoid"`` or ``"logG"``), plus
+    an optional ``stack_bin`` that overrides the shared ``stack_bin``.  Each
+    curve is the posterior median of :func:`model_cdf_samples`, with the
+    central ``credible`` interval shaded.
+
+    ``title`` defaults to the model name when every curve uses the same
+    model; otherwise legend entries name their models and there is no title.
+    ``xlabel`` defaults to companion mass or mass ratio, following the Tier 1
+    folders.  ``colors`` optionally gives one color per curve.  The figure is
+    saved to ``results_dir/cdf_comparisons/<name>.png`` unless
+    ``output_file`` is given.
+
+    Returns
+    -------
+    pathlib.Path
+        Path to the saved figure.
+    """
+    from matplotlib import pyplot as plt
+
+    results_dir = Path(results_dir)
+    curves = [dict(curve) for curve in curves]
+    if not curves:
+        raise ValueError("curves cannot be empty")
+    required = {"label", "t1", "t2", "t3", "model"}
+    for curve in curves:
+        missing = sorted(required - set(curve))
+        if missing:
+            raise ValueError(f"CDF curve {curve} is missing {missing}")
+    if not 0 < credible < 1:
+        raise ValueError("credible must be between 0 and 1")
+    if colors is not None and len(colors) != len(curves):
+        raise ValueError("colors must give one color per curve")
+    models = {curve["model"] for curve in curves}
+
+    chain_paths = []
+    for curve in curves:
+        chain_path = (
+            results_dir / curve["t1"] / curve["t2"] / curve["t3"] /
+            "saved_chains" /
+            f"chains_{curve['model']}_bin{curve.get('stack_bin', stack_bin)}.npz"
+        )
+        if not chain_path.is_file():
+            raise FileNotFoundError(f"no saved chain at {chain_path}")
+        chain_paths.append(chain_path)
+
+    figure, axis = plt.subplots(figsize=figsize)
+    tail = 50*(1 - credible)
+    grid_limits = []
+    for index, (curve, chain_path) in enumerate(zip(curves, chain_paths)):
+        grid, cdfs = model_cdf_samples(
+            chain_path, curve["model"], n_grid=n_grid, max_samples=max_samples
+        )
+        low, median, high = np.percentile(
+            cdfs, [tail, 50, 100 - tail], axis=0
+        )
+        color = colors[index] if colors is not None else f"C{index}"
+        label = curve["label"]
+        if len(models) > 1:
+            label += f" ({MODEL_TITLES.get(curve['model'], curve['model'])})"
+        axis.fill_between(grid, low, high, color=color, alpha=band_alpha,
+                          lw=0)
+        axis.plot(grid, median, color=color, lw=2, label=label)
+        grid_limits.extend([grid[0], grid[-1]])
+
+    if xlabel is None:
+        tier1_names = {Path(curve["t1"]).name for curve in curves}
+        xlabel = (
+            r"Mass Ratio [$M_c/M_{\star}$]"
+            if tier1_names <= {"qtrue", "qsini"}
+            else r"Companion mass [$M_{Jup}$]"
+        )
+    if title is None and len(models) == 1:
+        (model,) = models
+        title = f"{MODEL_TITLES.get(model, model)} CDF"
+    axis.set_xscale("log")
+    axis.set_xlim(min(grid_limits), max(grid_limits))
+    axis.set_ylim(0, 1)
+    axis.set_yticks(np.linspace(0, 1, 6))
+    axis.set_xlabel(xlabel)
+    axis.set_ylabel(ylabel)
+    if title:
+        axis.set_title(title)
+    axis.legend(loc=legend_loc)
+    figure.tight_layout()
+
+    output_path = (
+        results_dir / CDF_COMPARISONS_DIRNAME / f"{name}.png"
+        if output_file is None else Path(output_file)
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=dpi)
+    plt.close(figure)
+    return output_path
+
+
 def _number_word(number):
     """Return a letter-only, zero-based bin label for a LaTeX command."""
     words = (

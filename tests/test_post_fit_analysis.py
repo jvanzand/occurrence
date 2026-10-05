@@ -1059,3 +1059,78 @@ def test_make_variables_can_skip_three_parameter_results(tmp_path, capsys):
     ).read_text()
     assert "HighFeHYoung" not in text
     assert "three-parameter" not in capsys.readouterr().out
+
+
+def _write_model_chain(path, model, samples, bounds=(0.4, 50.0)):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(path, flat_chains=np.asarray(samples, dtype=float),
+             model_bounds=np.array(bounds))
+
+
+def test_model_cdf_samples_normalize_each_posterior_sample(tmp_path):
+    chain = tmp_path / "chains_sigmoid_bin0.npz"
+    _write_model_chain(chain, "sigmoid", [
+        [0.1, 0.01, 0.5, 0.2], [0.2, 0.001, 1.0, 0.1], [0.05, 0.05, 0.0, 0.3],
+    ])
+
+    grid, cdfs = post_fit_analysis.model_cdf_samples(chain, "sigmoid",
+                                                     n_grid=200)
+
+    assert grid[0] == pytest.approx(0.4) and grid[-1] == pytest.approx(50.0)
+    assert cdfs.shape == (3, 200)
+    assert np.allclose(cdfs[:, 0], 0) and np.allclose(cdfs[:, -1], 1)
+    assert np.all(np.diff(cdfs, axis=1) >= 0)
+    # Equal plateaus make a flat density, whose CDF is linear in log mass.
+    assert np.allclose(
+        cdfs[2], np.log10(grid/0.4)/np.log10(50/0.4), atol=1e-6
+    )
+
+
+def test_model_cdf_samples_thin_long_chains(tmp_path):
+    chain = tmp_path / "chains_logG_bin0.npz"
+    _write_model_chain(chain, "logG", [[0.1, 0.3, 0.4]]*50)
+    _, cdfs = post_fit_analysis.model_cdf_samples(chain, "logG",
+                                                  max_samples=7)
+    assert len(cdfs) == 7
+
+
+def test_plot_model_cdf_comparison_saves_titled_figure(
+        tmp_path, monkeypatch):
+    for tier2 in ("highMstar", "lowMstar"):
+        _write_model_chain(
+            tmp_path / "mtrue" / tier2 / "paper_bounds" / "saved_chains" /
+            "chains_sigmoid_bin0.npz",
+            "sigmoid", [[0.1, 0.01, 0.5, 0.2], [0.12, 0.02, 0.6, 0.25]],
+        )
+    titles = []
+    from matplotlib.axes import Axes
+    original = Axes.set_title
+    monkeypatch.setattr(
+        Axes, "set_title",
+        lambda self, text, *a, **k: titles.append(text) or
+        original(self, text, *a, **k),
+    )
+    curves = [
+        {"label": "high", "t1": "mtrue", "t2": "highMstar",
+         "t3": "paper_bounds", "model": "sigmoid"},
+        {"label": "low", "t1": "mtrue", "t2": "lowMstar",
+         "t3": "paper_bounds", "model": "sigmoid"},
+    ]
+
+    output = post_fit_analysis.plot_model_cdf_comparison(
+        tmp_path, curves, "sigmoid_Mstar", credible=0.95
+    )
+
+    assert output == tmp_path / "cdf_comparisons" / "sigmoid_Mstar.png"
+    assert output.is_file()
+    assert titles == ["Sigmoid CDF"]
+
+
+def test_plot_model_cdf_comparison_reports_missing_chains(tmp_path):
+    with pytest.raises(FileNotFoundError, match="chains_logG_bin0"):
+        post_fit_analysis.plot_model_cdf_comparison(
+            tmp_path,
+            [{"label": "x", "t1": "mtrue", "t2": "allstars",
+              "t3": "paper_bounds", "model": "logG"}],
+            "missing",
+        )
