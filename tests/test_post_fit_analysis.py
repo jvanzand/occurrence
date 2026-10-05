@@ -1151,12 +1151,10 @@ def test_plot_model_cdf_comparison_draws_models_by_sample_pairs(
     assert [line.get_label() for line in axes[2].get_lines()] == [
         "highFeH", "lowFeH",
     ]
-    assert [bool(axis.get_xlabel()) for axis in axes] == [
-        False, False, True, True,
-    ]
-    assert [bool(axis.get_ylabel()) for axis in axes] == [
-        True, False, True, False,
-    ]
+    assert not any(axis.get_xlabel() or axis.get_ylabel() for axis in axes)
+    texts = [text.get_text() for text in figures[0].texts]
+    assert texts.count(r"Companion mass [$M_{Jup}$]") == 1
+    assert texts.count("Cumulative fraction") == 1
 
 
 def test_plot_model_cdf_comparison_custom_title_heads_each_column(

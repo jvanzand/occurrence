@@ -527,6 +527,34 @@ def _cdf_tick_formatter(tick_values, coordinate, tier1_names):
     return pu.mass_tick_formatter(tick_values)
 
 
+def _set_figure_axis_labels(figure, xlabel, ylabel):
+    """Label a panel grid once along its bottom and left edges.
+
+    The labels use the axis-label font size and are placed in margins kept
+    free by the layout, so they never overlap tick labels.
+    """
+    from matplotlib import pyplot as plt
+    from matplotlib.font_manager import FontProperties
+
+    size = FontProperties(
+        size=plt.rcParams["axes.labelsize"]
+    ).get_size_in_points()
+    width, height = figure.get_size_inches()
+    # Margins (as figure fractions) just tall enough for one line of label
+    # text; tight_layout adds its own padding for the tick labels.
+    margin_x = 1.3*size/72/width
+    margin_y = 1.3*size/72/height
+    figure.tight_layout(rect=(margin_x, margin_y, 1, 1))
+    if hasattr(figure, "supxlabel"):
+        figure.supxlabel(xlabel, fontsize=size, y=0.01, va="bottom")
+        figure.supylabel(ylabel, fontsize=size, x=0.01, ha="left")
+    else:  # matplotlib < 3.4
+        figure.text(0.5 + margin_x/2, 0.01, xlabel, fontsize=size,
+                    ha="center", va="bottom")
+        figure.text(0.01, 0.5 + margin_y/2, ylabel, fontsize=size,
+                    ha="left", va="center", rotation="vertical")
+
+
 def plot_model_cdf_comparison(
         results_dir, rows, models, name, title="{model} CDF", credible=0.68,
         stack_bin=0, n_grid=500, max_samples=2000, xticks=None, xlabel=None,
@@ -549,8 +577,9 @@ def plot_model_cdf_comparison(
     model name, so the default gives "Sigmoid CDF" and "Log-Gaussian CDF";
     ``None`` or ``""`` leaves the columns untitled.  Each row's legend appears
     in its first column, with ``legend_fontsize`` defaulting to the size the
-    occurrence plots use.  Panels share the y-axis and, within a column, the
-    x-axis.  ``xticks`` lists the x-axis tick values; by default they are the
+    occurrence plots use.  Panels share both axes, so the figure carries a
+    single x-axis label along the bottom and a single y-axis label along the
+    left edge.  ``xticks`` lists the x-axis tick values; by default they are the
     bin edges of the first curve's piecewise fit, as on the occurrence plots,
     and matplotlib's ticks are used if that fit is missing.  ``xlabel``
     defaults to companion mass or mass ratio, following the Tier 1 folders.  ``colors`` optionally gives one color per position
@@ -658,18 +687,16 @@ def plot_model_cdf_comparison(
                 axis.xaxis.set_minor_locator(NullLocator())
             axis.set_ylim(0, 1)
             axis.set_yticks(np.linspace(0, 1, 6))
-            if row_index == n_rows - 1:
-                axis.set_xlabel(xlabel)
-                if xticks is not None and tick_formatter.rotate_labels:
-                    plt.setp(axis.get_xticklabels(), rotation=45, ha="right")
+            if (row_index == n_rows - 1 and xticks is not None and
+                    tick_formatter.rotate_labels):
+                plt.setp(axis.get_xticklabels(), rotation=45, ha="right")
             if column == 0:
-                axis.set_ylabel(ylabel)
                 axis.legend(loc=legend_loc, fontsize=legend_fontsize)
             if row_index == 0 and title:
                 axis.set_title(title.format(
                     model=MODEL_TITLES.get(model, model)
                 ))
-    figure.tight_layout()
+    _set_figure_axis_labels(figure, xlabel, ylabel)
 
     output_path = (
         results_dir / CDF_COMPARISONS_DIRNAME / f"{name}.png"
