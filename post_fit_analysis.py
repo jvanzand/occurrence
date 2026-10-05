@@ -452,7 +452,6 @@ def plot_companions_by_stellar_parameter(
     return outputs
 
 
-CDF_COMPARISONS_DIRNAME = "cdf_comparisons"
 MODEL_TITLES = {
     "piecewise": "Piecewise", "logG": "Log-Gaussian", "sigmoid": "Sigmoid",
     "escarpment": "Escarpment", "bpl": "Broken Power Law",
@@ -584,7 +583,10 @@ def plot_model_cdf_comparison(
     and matplotlib's ticks are used if that fit is missing.  ``xlabel``
     defaults to companion mass or mass ratio, following the Tier 1 folders.  ``colors`` optionally gives one color per position
     within a row; ``panel_size`` is the size of each panel in inches.  The
-    figure is saved to ``results_dir/cdf_comparisons/<name>.png`` unless
+    figure is saved with the catalog plots of
+    :func:`plot_companions_by_stellar_parameter`, in the ``plots`` folder of
+    the first curve's full-sample experiment
+    (``results_dir/<t1>/allstars/<t3>/plots/<name>.png``), unless
     ``output_file`` is given.
 
     Returns
@@ -698,10 +700,14 @@ def plot_model_cdf_comparison(
                 ))
     _set_figure_axis_labels(figure, xlabel, ylabel)
 
-    output_path = (
-        results_dir / CDF_COMPARISONS_DIRNAME / f"{name}.png"
-        if output_file is None else Path(output_file)
-    )
+    if output_file is None:
+        first = rows[0][0]
+        output_path = (
+            results_dir / first["t1"] / "allstars" / first["t3"] / "plots" /
+            f"{name}.png"
+        )
+    else:
+        output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=dpi)
     plt.close(figure)

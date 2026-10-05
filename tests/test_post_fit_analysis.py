@@ -1136,7 +1136,8 @@ def test_plot_model_cdf_comparison_draws_models_by_sample_pairs(
         credible=0.95,
     )
 
-    assert output == tmp_path / "cdf_comparisons" / "cdf_comparison.png"
+    assert output == (tmp_path / "mtrue" / "allstars" / "paper_bounds" /
+                      "plots" / "cdf_comparison.png")
     assert output.is_file()
     axes = figures[0].axes
     assert len(axes) == 4
@@ -1187,7 +1188,7 @@ def test_plot_model_cdf_comparison_needs_every_model_for_every_sample(
     assert "highFeH/paper_bounds/saved_chains/chains_logG_bin0" in message
     assert "lowFeH/paper_bounds/saved_chains/chains_logG_bin0" in message
     assert message.count("chains_") == 2
-    assert not (tmp_path / "cdf_comparisons").exists()
+    assert not (tmp_path / "mtrue" / "allstars").exists()
 
 
 def test_plot_model_cdf_comparison_rejects_empty_rows(tmp_path):
