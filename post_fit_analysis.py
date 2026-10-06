@@ -808,11 +808,12 @@ def _integrated_occurrence_samples(model_name, samples, model_bounds,
     ])
 
 
-def _piecewise_integrated_values(chain_dir, prefix, stack_dim, n_stack_bins):
-    """Collect per-stack integrated occurrence from the piecewise posterior."""
-    path = chain_dir / "chains_piecewise.npz"
-    if not path.is_file():
-        return []
+def _piecewise_stack_occurrence_samples(path, stack_dim):
+    """Return piecewise integrated-occurrence draws per stack bin.
+
+    The result has one column per bin along ``stack_dim``; every tenth
+    posterior draw is used.
+    """
     with np.load(path) as chain:
         if "flat_chains" not in chain or "x_edges" not in chain:
             raise KeyError(f"{path} must contain 'flat_chains' and 'x_edges'")
@@ -826,14 +827,20 @@ def _piecewise_integrated_values(chain_dir, prefix, stack_dim, n_stack_bins):
     n_m = len(m_edges) - 1
     if samples.ndim != 2 or samples.shape[1] != n_a*n_m:
         raise ValueError(f"piecewise chain dimensions do not match edges in {path}")
-    expected_stack_bins = n_a if stack_dim == "a" else n_m
-    if expected_stack_bins != n_stack_bins:
-        raise ValueError(f"piecewise stack-bin count does not match summary in {path}")
-
     areas = np.outer(np.diff(np.log10(m_edges)), np.diff(np.log10(a_edges)))
     occurrence = samples.reshape(-1, n_m, n_a)*areas[None, :, :]
     sum_axis = 1 if stack_dim == "a" else 2
-    integrated = occurrence.sum(axis=sum_axis)
+    return occurrence.sum(axis=sum_axis)
+
+
+def _piecewise_integrated_values(chain_dir, prefix, stack_dim, n_stack_bins):
+    """Collect per-stack integrated occurrence from the piecewise posterior."""
+    path = chain_dir / "chains_piecewise.npz"
+    if not path.is_file():
+        return []
+    integrated = _piecewise_stack_occurrence_samples(path, stack_dim)
+    if integrated.shape[1] != n_stack_bins:
+        raise ValueError(f"piecewise stack-bin count does not match summary in {path}")
     values = []
     for bin_index in range(n_stack_bins):
         low, median, high = np.percentile(
@@ -2398,10 +2405,216 @@ def _stack_statistics(summary, stack_dim, summary_path):
     return neff, avg_compl
 
 
+# How each model parameter is compared between samples: rates by their ratio,
+# log10 locations by their difference in dex and the corresponding factor,
+# and everything else (widths, slopes) by its difference alone.
+_RATE_PARAMETERS = {"COne", "CTwo", "A", "C", "CLow", "CHigh"}
+_LOCATION_PARAMETERS = {"Center", "Mu", "BPOne", "BPTwo", "LogBreak"}
+
+
+def _format_two_figures(value):
+    """Format a positive ratio or factor to two significant figures."""
+    return f"{float(f'{value:.2g}'):g}"
+
+
+def _comparison_significance(first, second):
+    """Return the formatted significance of ``median(first) - median(second)``.
+
+    The posterior probability of the difference's sign is used when the
+    draws can resolve it: with ``n`` draws in the smaller posterior, tail
+    probabilities below ``1/n`` rest on a handful of chance overlaps, so
+    significances beyond ``norm.isf(1/n)`` (about 3.4 sigma for 2500 draws)
+    are not trusted.  Those, and posteriors that never overlap, fall back to
+    the difference of medians divided by the 16th/84th-percentile errors that
+    face each other, added in quadrature.
+    """
+    _, z_score, lower_bound = _posterior_difference_significance(
+        second, first
+    )
+    resolvable_z = norm.isf(1.0/min(np.size(first), np.size(second)))
+    if not lower_bound and z_score <= resolvable_z:
+        return _format_posterior_significance(z_score), "posterior"
+    first_low, first_median, first_high = np.percentile(first, [16, 50, 84])
+    second_low, second_median, second_high = np.percentile(
+        second, [16, 50, 84]
+    )
+    difference = first_median - second_median
+    if difference >= 0:
+        error = np.hypot(first_median - first_low, second_high - second_median)
+    else:
+        error = np.hypot(first_high - first_median, second_median - second_low)
+    return (
+        _format_posterior_significance(abs(difference)/error), "quadrature"
+    )
+
+
+def _comparison_values(name, suffix, first, second, kind):
+    """Return ``(command, value, method)`` rows comparing two posteriors.
+
+    Commands are ``name + <statistic> + suffix``.  ``kind`` is ``"rate"``
+    (Ratio), ``"location"`` (Diff in dex and Factor ``10**Diff``), or
+    ``"difference"`` (Diff alone); every kind also gets a Significance,
+    whose ``method`` is ``"posterior"`` or ``"quadrature"`` (``None`` for
+    the other rows).
+    """
+    first = np.asarray(first, dtype=float).reshape(-1)
+    second = np.asarray(second, dtype=float).reshape(-1)
+    first_median, second_median = np.median(first), np.median(second)
+    rows = []
+    if kind == "rate":
+        if second_median <= 0:
+            raise ValueError(f"cannot form the ratio {name}: zero denominator")
+        rows.append((name + "Ratio" + suffix,
+                     _format_two_figures(first_median/second_median), None))
+    else:
+        difference = first_median - second_median
+        rows.append((name + "Diff" + suffix, f"{difference:.2f}", None))
+        if kind == "location":
+            rows.append((name + "Factor" + suffix,
+                         _format_two_figures(10**difference), None))
+    significance, method = _comparison_significance(first, second)
+    rows.append((name + "Significance" + suffix, significance, method))
+    return rows
+
+
+def _parameter_samples(chain_path):
+    with np.load(chain_path) as chain:
+        key = "flat_chains" if "flat_chains" in chain else "chains"
+        samples = np.asarray(chain[key], dtype=float)
+    return samples.reshape(-1, samples.shape[-1])
+
+
+def _sample_comparison_blocks(
+        results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim,
+        low_first_types, command_names):
+    """Build variables comparing every high/low sample pair.
+
+    A pair is the ``high<type>`` and ``low<type>`` folders of one Tier 1
+    and Tier 3 experiment; pairs missing either folder are skipped.  Each
+    pair compares the piecewise integrated occurrence and every smooth
+    model's parameters and integrated occurrence fitted in both samples.
+    Comparisons run high relative to low, or low relative to high for the
+    types in ``low_first_types``.
+    """
+    dim = stack_dim.lower()
+    blocks = []
+    for tier1_dir in tier1_dirs:
+        tier1_name = Path(tier1_dir).name
+        for tier2_type in tier2_types:
+            if str(tier2_type).lower() == "allstars":
+                continue
+            pair = [f"high{tier2_type}", f"low{tier2_type}"]
+            if tier2_type in low_first_types:
+                pair.reverse()
+            for tier3_dir in tier3_dirs:
+                dirs = [results_dir / tier1_dir / tier2_dir / tier3_dir
+                        for tier2_dir in pair]
+                if not all(directory.is_dir() for directory in dirs):
+                    continue
+                chains = [directory / "saved_chains" for directory in dirs]
+                prefix = (
+                    _tier1_prefix(tier1_name) + _latex_token(tier2_type) +
+                    _latex_token(Path(tier3_dir).name)
+                )
+                rows = []
+                piecewise = [chain_dir / "chains_piecewise.npz"
+                             for chain_dir in chains]
+                if all(path.is_file() for path in piecewise):
+                    first, second = (
+                        _piecewise_stack_occurrence_samples(path, stack_dim)
+                        for path in piecewise
+                    )
+                    for bin_index in range(min(first.shape[1],
+                                               second.shape[1])):
+                        rows.extend(_comparison_values(
+                            prefix + "PiecewiseIntOcc",
+                            f"Bin{dim}{_number_word(bin_index)}",
+                            first[:, bin_index], second[:, bin_index], "rate",
+                        ))
+                for model_name, (model_macro, parameter_macros) in (
+                        _MODEL_PARAMETER_MACROS.items()):
+                    bin_index = 0
+                    while all((chain_dir /
+                               f"chains_{model_name}_bin{bin_index}.npz"
+                               ).is_file() for chain_dir in chains):
+                        paths = [chain_dir /
+                                 f"chains_{model_name}_bin{bin_index}.npz"
+                                 for chain_dir in chains]
+                        first, second = (_parameter_samples(path)
+                                         for path in paths)
+                        suffix = f"Bin{dim}{_number_word(bin_index)}"
+                        for index, parameter in enumerate(parameter_macros):
+                            kind = (
+                                "rate" if parameter in _RATE_PARAMETERS else
+                                "location"
+                                if parameter in _LOCATION_PARAMETERS else
+                                "difference"
+                            )
+                            rows.extend(_comparison_values(
+                                prefix + model_macro + "Param" + parameter,
+                                suffix, first[:, index], second[:, index],
+                                kind,
+                            ))
+                        rows.extend(_comparison_values(
+                            prefix + model_macro + "IntOcc", suffix,
+                            _parametric_occurrence_samples(
+                                dirs[0], model_name, bin_index
+                            ),
+                            _parametric_occurrence_samples(
+                                dirs[1], model_name, bin_index
+                            ),
+                            "rate",
+                        ))
+                        bin_index += 1
+                if not rows:
+                    continue
+                block = [
+                    "%"*72,
+                    f"% High/low sample comparison: {tier1_name} / "
+                    f"{tier2_type} / {Path(tier3_dir).name}",
+                    f"% Ratio = {pair[0]}/{pair[1]}; Diff = {pair[0]} - "
+                    f"{pair[1]} (dex); Factor = 10^Diff",
+                ]
+                quadrature = []
+                for command, value, method in rows:
+                    if command in command_names:
+                        raise ValueError(
+                            f"duplicate LaTeX command name: {command}"
+                        )
+                    command_names.add(command)
+                    block.append(_command(command, value))
+                    if method == "quadrature":
+                        quadrature.append(command)
+                if quadrature:
+                    block.append(
+                        "% Quadrature significances (beyond what the "
+                        "posterior draws resolve): " + ", ".join(quadrature)
+                    )
+                blocks.append("\n".join(block))
+    if blocks:
+        blocks.insert(0, "\n".join([
+            "%"*72,
+            "%"*72,
+            "% HIGH/LOW SAMPLE COMPARISONS",
+            "% Each block compares one pair of stellar samples (e.g. highMstar",
+            "% vs lowMstar) within one Tier 1 / Tier 3 experiment, using",
+            "% posterior medians. Rates get a Ratio; log10 locations (sigmoid",
+            "% center, logG mu, breakpoints) get a Diff in dex and its Factor",
+            "% (10^Diff); widths and slopes get a Diff. Every quantity gets a",
+            "% Significance from the posterior probability of the difference's",
+            "% sign or, when that exceeds what the draws resolve, from the",
+            "% difference divided by the facing 16th/84th-percentile errors",
+            "% in quadrature (listed at the end of each block).",
+            "%"*72,
+            "%"*72,
+        ]))
+    return blocks
+
+
 def make_variables(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim="a",
         three_parameter_t3="stellar3params", stellar_catalog_path=None,
-        three_parameter_cuts=None):
+        three_parameter_cuts=None, low_first_comparisons=()):
     """Write non-model fit statistics to a LaTeX variables file.
 
     ``results_dir`` is the parent of all Tier 1 directories.  The output is
@@ -2438,6 +2651,16 @@ def make_variables(
     and 5 Gyr.  Missing subsets or comparison chains are reported and omitted
     without interrupting generation of the other commands.
 
+    Every high/low pair of a Tier 2 type (e.g. ``highMstar`` and
+    ``lowMstar``) within one Tier 1 and Tier 3 experiment is also compared,
+    in a separately labeled section: rates get a Ratio, log10 locations a
+    Diff and Factor, other parameters a Diff, and every quantity a
+    Significance (see :func:`_sample_comparison_blocks`).  Command names use
+    the Tier 2 type in place of the folder, e.g.
+    ``\\McMstarPaperBoundsSigmoidParamCenterFactorBinaZero``.  Pairs compare
+    high relative to low, except for types listed in
+    ``low_first_comparisons`` (e.g. ``["Act"]`` for old relative to young).
+
     Returns
     -------
     pathlib.Path
@@ -2451,6 +2674,12 @@ def make_variables(
         raise ValueError("tier1_dirs, tier2_types, and tier3_dirs cannot be empty")
     if stack_dim not in {"a", "m"}:
         raise ValueError("stack_dim must be 'a' or 'm'")
+    low_first_comparisons = set(low_first_comparisons)
+    unknown_types = sorted(low_first_comparisons - set(tier2_types))
+    if unknown_types:
+        raise ValueError(
+            f"low_first_comparisons names unrequested types {unknown_types}"
+        )
 
     if three_parameter_t3 is None:
         three_parameter_t3s = []
@@ -2609,6 +2838,11 @@ def make_variables(
             "post_fit_analysis.make_variables: skipped experiments without "
             "result folders: " + ", ".join(skipped_experiments)
         )
+
+    blocks.extend(_sample_comparison_blocks(
+        results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim,
+        low_first_comparisons, command_names,
+    ))
 
     missing_three_parameter_results = []
     missing_three_parameter_comparisons = []

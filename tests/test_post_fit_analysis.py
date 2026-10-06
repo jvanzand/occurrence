@@ -4,6 +4,7 @@ import pytest
 from types import SimpleNamespace
 import json
 import re
+from collections import defaultdict
 
 from occurrence import post_fit_analysis
 
@@ -1283,3 +1284,129 @@ def test_plot_model_cdf_comparison_rejects_unknown_band_styles(tmp_path):
             tmp_path, _CDF_ROWS[:1], ["sigmoid"], "x",
             band_styles=["hatched"],
         )
+
+
+def _write_comparison_sample(root, tier2, occurrence_scale, center, seed):
+    """Write a summary plus piecewise and sigmoid chains for one sample."""
+    rng = np.random.RandomState(seed)
+    _write_summary(root / "mtrue", tier2, "paper_bounds")
+    chain_dir = root / "mtrue" / tier2 / "paper_bounds" / "saved_chains"
+    chain_dir.mkdir()
+    density = occurrence_scale*(1 + 0.05*rng.standard_normal((4000, 2)))
+    np.savez(chain_dir / "chains_piecewise.npz", flat_chains=density,
+             x_edges=np.array([1.0, 10.0, 100.0]), y_edges=np.array([1.0, 10.0]))
+    sigmoid = np.column_stack([
+        0.1*(1 + 0.05*rng.standard_normal(4000)),
+        0.01*(1 + 0.05*rng.standard_normal(4000)),
+        center + 0.2*rng.standard_normal(4000),
+        0.2 + 0.02*rng.standard_normal(4000),
+    ])
+    for stack_bin in (0, 1):
+        np.savez(chain_dir / f"chains_sigmoid_bin{stack_bin}.npz",
+                 flat_chains=sigmoid, model_bounds=np.array([1.0, 100.0]),
+                 stack_bounds=np.array([1.0, 10.0]))
+
+
+def _comparison_section(text):
+    return text[text.index("% HIGH/LOW SAMPLE COMPARISONS"):]
+
+
+def _variables(text):
+    return dict(re.findall(
+        r"\\newcommand\{\\([A-Za-z]+)\}\{\\ensuremath\{(.*)\}\}\s*$", text, re.M
+    ))
+
+
+def test_make_variables_compares_high_and_low_samples(tmp_path, monkeypatch):
+    monkeypatch.setattr(post_fit_analysis, "calculate_all_delta_bics",
+                        lambda *args: defaultdict(dict))
+    _write_comparison_sample(tmp_path, "allstars", 0.1, 1.0, 0)
+    _write_comparison_sample(tmp_path, "highMstar", 0.3, 1.0, 1)
+    _write_comparison_sample(tmp_path, "lowMstar", 0.1, 0.5, 2)
+
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["allstars", "Mstar"], ["paper_bounds"],
+        three_parameter_t3=None,
+    ).read_text()
+
+    section = _comparison_section(text)
+    assert "% High/low sample comparison: mtrue / Mstar / paper_bounds" in section
+    assert "% Ratio = highMstar/lowMstar; Diff = highMstar - lowMstar" in section
+    values = _variables(section)
+    prefix = "McMstarPaperBounds"
+    # Rates get a ratio; locations a difference and factor; widths a difference.
+    assert values[prefix + "PiecewiseIntOccRatioBinaZero"] == "3"
+    assert prefix + "PiecewiseIntOccRatioBinaOne" in values
+    assert prefix + "SigmoidParamCOneRatioBinaZero" in values
+    assert values[prefix + "SigmoidParamCenterDiffBinaZero"] == "0.50"
+    assert values[prefix + "SigmoidParamCenterFactorBinaZero"] == "3.2"
+    assert prefix + "SigmoidParamWidthDiffBinaZero" in values
+    assert prefix + "SigmoidParamWidthFactorBinaZero" not in values
+    assert prefix + "SigmoidParamCenterRatioBinaZero" not in values
+    assert prefix + "SigmoidIntOccRatioBinaZero" in values
+    for name, value in values.items():
+        if name.endswith(("SignificanceBinaZero", "SignificanceBinaOne")):
+            assert value.endswith(r"\,\sigma")
+    # Centers 0.5 dex apart with 0.2 dex errors: about 1.8 sigma, resolvable.
+    center = float(values[prefix + "SigmoidParamCenterSignificanceBinaZero"]
+                   .split("\\")[0])
+    assert 1.4 < center < 2.2
+    # The occurrence posteriors never overlap, so they use quadrature.
+    assert ("% Quadrature significances (beyond what the posterior draws "
+            "resolve): McMstarPaperBoundsPiecewiseIntOccSignificanceBinaZero"
+            in section)
+    assert "Allstars" not in section
+
+
+def test_make_variables_can_compare_low_relative_to_high(tmp_path,
+                                                         monkeypatch):
+    monkeypatch.setattr(post_fit_analysis, "calculate_all_delta_bics",
+                        lambda *args: defaultdict(dict))
+    _write_comparison_sample(tmp_path, "highAct", 0.1, 0.5, 1)
+    _write_comparison_sample(tmp_path, "lowAct", 0.25, 1.0, 2)
+
+    section = _comparison_section(post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["Act"], ["paper_bounds"],
+        three_parameter_t3=None, low_first_comparisons=["Act"],
+    ).read_text())
+
+    assert "% Ratio = lowAct/highAct; Diff = lowAct - highAct" in section
+    values = _variables(section)
+    assert values["McActPaperBoundsPiecewiseIntOccRatioBinaZero"] == "2.5"
+    assert values["McActPaperBoundsSigmoidParamCenterDiffBinaZero"] == "0.50"
+
+
+def test_make_variables_skips_incomplete_pairs(tmp_path, monkeypatch):
+    monkeypatch.setattr(post_fit_analysis, "calculate_all_delta_bics",
+                        lambda *args: defaultdict(dict))
+    _write_comparison_sample(tmp_path, "highMstar", 0.3, 1.0, 1)
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["Mstar"], ["paper_bounds"],
+        three_parameter_t3=None,
+    ).read_text()
+    assert "HIGH/LOW SAMPLE COMPARISONS" not in text
+
+
+def test_make_variables_rejects_unknown_low_first_types(tmp_path):
+    with pytest.raises(ValueError, match="low_first_comparisons"):
+        post_fit_analysis.make_variables(
+            tmp_path, ["mtrue"], ["Mstar"], ["paper_bounds"],
+            low_first_comparisons=["Act"],
+        )
+
+
+def test_comparison_significance_falls_back_beyond_resolution():
+    rng = np.random.RandomState(0)
+    # Overlapping posteriors are compared directly.
+    close = post_fit_analysis._comparison_significance(
+        1.0 + rng.standard_normal(2000), rng.standard_normal(2000)
+    )
+    assert close[1] == "posterior"
+    assert 0.4 < float(close[0].split("\\")[0]) < 1.0
+    # Far-separated posteriors exceed what 2000 draws resolve.
+    far = post_fit_analysis._comparison_significance(
+        5.0 + 0.5*rng.standard_normal(2000), 0.5*rng.standard_normal(2000)
+    )
+    # 5 / hypot(0.5, 0.5) = 7.1 sigma, up to sampling noise in the medians.
+    assert far[1] == "quadrature"
+    assert 6.5 < float(far[0].split("\\")[0]) < 7.7
