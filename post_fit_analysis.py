@@ -716,8 +716,12 @@ def plot_model_cdf_comparison(
                 axis.xaxis.set_minor_locator(NullLocator())
             axis.set_ylim(0, 1)
             axis.set_yticks(np.linspace(0, 1, 6))
+            # The mass and separation formatters decide on rotation
+            # themselves. Mass-ratio labels (e.g. "3.8e-4") are long, so they
+            # are rotated whenever there are more than four of them.
             if (row_index == n_rows - 1 and xticks is not None and
-                    tick_formatter.rotate_labels):
+                    getattr(tick_formatter, "rotate_labels",
+                            len(xticks) > 4)):
                 plt.setp(axis.get_xticklabels(), rotation=45, ha="right")
             if column == 0:
                 handles = [

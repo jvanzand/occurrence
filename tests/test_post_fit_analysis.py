@@ -1410,3 +1410,45 @@ def test_comparison_significance_falls_back_beyond_resolution():
     # 5 / hypot(0.5, 0.5) = 7.1 sigma, up to sampling noise in the medians.
     assert far[1] == "quadrature"
     assert 6.5 < float(far[0].split("\\")[0]) < 7.7
+
+
+def test_plot_model_cdf_comparison_formats_mass_ratio_ticks(tmp_path,
+                                                            monkeypatch):
+    q_per_jupiter = 9.546e-4
+    rows = []
+    for tier2 in ("highMstar", "lowMstar"):
+        chain_dir = tmp_path / "qtrue" / tier2 / "paper_bounds" / "saved_chains"
+        _write_model_chain(
+            chain_dir / "chains_sigmoid_bin0.npz", "sigmoid",
+            [[0.1, 0.01, -2.1, 0.2], [0.12, 0.02, -2.2, 0.25]],
+            bounds=(0.4*q_per_jupiter, 50*q_per_jupiter),
+        )
+        np.savez(chain_dir / "chains_piecewise.npz",
+                 x_edges=np.array([0.1, 10.0]),
+                 y_edges=np.array([0.4, 3.2, 13.0, 50.0])*q_per_jupiter)
+        rows.append({"label": tier2, "t1": "qtrue", "t2": tier2,
+                     "t3": "paper_bounds"})
+    figures = _capture_cdf_figure(monkeypatch)
+
+    post_fit_analysis.plot_model_cdf_comparison(
+        tmp_path, [rows], ["sigmoid"], "q_cdf",
+    )
+
+    axis = figures[0].axes[0]
+    labels = [label.get_text() for label in axis.get_xticklabels()]
+    assert labels == ["3.8e-4", "3.1e-3", "0.012", "0.048"]
+    # Four mass-ratio labels fit; more than four are rotated.
+    assert all(label.get_rotation() == 0 for label in axis.get_xticklabels())
+    for row in rows:
+        np.savez(tmp_path / "qtrue" / row["t2"] / "paper_bounds" /
+                 "saved_chains" / "chains_piecewise.npz",
+                 x_edges=np.array([0.1, 10.0]),
+                 y_edges=np.array([0.4, 0.8, 1.6, 3.2, 6.4, 13.0, 26.0, 50.0])
+                 * q_per_jupiter)
+    post_fit_analysis.plot_model_cdf_comparison(
+        tmp_path, [rows], ["sigmoid"], "q_cdf_dense",
+    )
+    dense = figures[1].axes[0].get_xticklabels()
+    assert len(dense) == 8 and all(label.get_rotation() == 45
+                                   for label in dense)
+    assert "Mass Ratio" in [text.get_text() for text in figures[0].texts][0]
