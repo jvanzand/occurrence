@@ -1145,13 +1145,25 @@ def test_plot_model_cdf_comparison_draws_models_by_sample_pairs(
     assert [axis.get_title() for axis in axes] == [
         "Sigmoid CDF", "Log-Gaussian CDF", "", "",
     ]
-    assert all(len(axis.get_lines()) == 2 for axis in axes)
+    from matplotlib.colors import to_rgba
+    from occurrence import mcmc_powerlaw
+    for axis, model in zip(axes, ["sigmoid", "logG"]*2):
+        color = to_rgba(mcmc_powerlaw.get_model_spec(model).color)
+        lines = axis.get_lines()
+        # Solid median, two dotted band edges, then the dashed median.
+        assert [line.get_linestyle() for line in lines] == ["-", ":", ":", "--"]
+        assert all(to_rgba(line.get_color()) == color for line in lines)
+        assert len(axis.collections) == 1  # only the first band is filled
     assert [axis.get_legend() is not None for axis in axes] == [
         True, False, True, False,
     ]
-    assert [line.get_label() for line in axes[2].get_lines()] == [
+    legend = axes[2].get_legend()
+    assert [text.get_text() for text in legend.get_texts()] == [
         "highFeH", "lowFeH",
     ]
+    assert [line.get_linestyle() for line in legend.get_lines()] == ["-", "--"]
+    assert all(to_rgba(line.get_color()) == to_rgba("black")
+               for line in legend.get_lines())
     assert not any(axis.get_xlabel() or axis.get_ylabel() for axis in axes)
     texts = [text.get_text() for text in figures[0].texts]
     assert texts.count(r"Companion mass [$M_{Jup}$]") == 1
@@ -1246,3 +1258,28 @@ def test_plot_model_cdf_comparison_keeps_default_ticks_without_bins(
         tmp_path, _CDF_ROWS[:1], "sigmoid", "fallback",
     )
     assert len(figures[0].axes[0].get_xticks()) > 0
+
+
+def test_plot_model_cdf_comparison_accepts_style_overrides(tmp_path,
+                                                           monkeypatch):
+    _write_cdf_chains(tmp_path)
+    figures = _capture_cdf_figure(monkeypatch)
+    post_fit_analysis.plot_model_cdf_comparison(
+        tmp_path, _CDF_ROWS[:1], ["sigmoid"], "styled",
+        model_colors={"sigmoid": "navy"}, linestyles=["-."],
+        band_styles=["outline"],
+    )
+    from matplotlib.colors import to_rgba
+    axis = figures[0].axes[0]
+    assert len(axis.collections) == 0
+    assert all(to_rgba(line.get_color()) == to_rgba("navy")
+               for line in axis.get_lines())
+    assert [line.get_linestyle() for line in axis.get_lines()].count("-.") == 2
+
+
+def test_plot_model_cdf_comparison_rejects_unknown_band_styles(tmp_path):
+    with pytest.raises(ValueError, match="band_styles"):
+        post_fit_analysis.plot_model_cdf_comparison(
+            tmp_path, _CDF_ROWS[:1], ["sigmoid"], "x",
+            band_styles=["hatched"],
+        )

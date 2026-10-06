@@ -558,8 +558,10 @@ def plot_model_cdf_comparison(
         results_dir, rows, models, name, title="{model} CDF", credible=0.68,
         stack_bin=0, n_grid=500, max_samples=2000, xticks=None, xlabel=None,
         ylabel="Cumulative fraction", legend_loc="lower right",
-        legend_fontsize=None, panel_size=(5, 3.5), colors=None,
-        band_alpha=0.25, dpi=300, output_file=None):
+        legend_fontsize=None, panel_size=(5, 3.5), model_colors=None,
+        linestyles=("-", "--"), band_styles=("fill", "outline"),
+        band_alpha=0.3, outline_style=":", outline_width=1.2, dpi=300,
+        output_file=None):
     """Draw a grid comparing the normalized CDFs of fitted samples.
 
     The grid has one column per entry of ``models`` (e.g. ``["sigmoid",
@@ -581,8 +583,19 @@ def plot_model_cdf_comparison(
     left edge.  ``xticks`` lists the x-axis tick values; by default they are the
     bin edges of the first curve's piecewise fit, as on the occurrence plots,
     and matplotlib's ticks are used if that fit is missing.  ``xlabel``
-    defaults to companion mass or mass ratio, following the Tier 1 folders.  ``colors`` optionally gives one color per position
-    within a row; ``panel_size`` is the size of each panel in inches.  The
+    defaults to companion mass or mass ratio, following the Tier 1 folders.
+
+    Each panel is drawn in its model's color from the occurrence plots
+    (``mcmc_powerlaw.MODEL_REGISTRY``), which ``model_colors`` may override
+    per model.  Curves within a row are told apart by position: the i-th
+    curve uses ``linestyles[i]`` for its median and ``band_styles[i]`` for
+    its credible interval, either ``"fill"`` (shaded with ``band_alpha``) or
+    ``"outline"`` (edges drawn with ``outline_style`` and
+    ``outline_width``), so by default the first curve is solid with a filled
+    band and the second is dashed with an outlined band.  Both sequences
+    repeat for longer rows.  Legend lines are black, since they identify
+    curves by style in every column.  ``panel_size`` is the size of each
+    panel in inches.  The
     figure is saved with the catalog plots of
     :func:`plot_companions_by_stellar_parameter`, in the ``plots`` folder of
     the first curve's full-sample experiment
@@ -595,6 +608,7 @@ def plot_model_cdf_comparison(
         Path to the saved figure.
     """
     from matplotlib import pyplot as plt
+    from matplotlib.lines import Line2D
     from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
 
     results_dir = Path(results_dir)
@@ -611,8 +625,19 @@ def plot_model_cdf_comparison(
                 raise ValueError(f"CDF curve {curve} is missing {missing}")
     if not 0 < credible < 1:
         raise ValueError("credible must be between 0 and 1")
-    if colors is not None and len(colors) < max(len(row) for row in rows):
-        raise ValueError("colors must give a color for every curve in a row")
+    linestyles = list(linestyles)
+    band_styles = list(band_styles)
+    if not linestyles or not band_styles:
+        raise ValueError("linestyles and band_styles cannot be empty")
+    unknown_bands = sorted(set(band_styles) - {"fill", "outline"})
+    if unknown_bands:
+        raise ValueError(
+            f"band_styles must be 'fill' or 'outline', not {unknown_bands}"
+        )
+    colors = {
+        model: mcmc_powerlaw.get_model_spec(model).color for model in models
+    }
+    colors.update(model_colors or {})
 
     chain_paths = {}
     missing_chains = []
@@ -672,14 +697,16 @@ def plot_model_cdf_comparison(
                 low, median, high = np.percentile(
                     cdfs, [tail, 50, 100 - tail], axis=0
                 )
-                color = (
-                    colors[curve_index] if colors is not None
-                    else f"C{curve_index}"
-                )
-                axis.fill_between(grid, low, high, color=color,
-                                  alpha=band_alpha, lw=0)
-                axis.plot(grid, median, color=color, lw=2,
-                          label=curve["label"])
+                color = colors[model]
+                linestyle = linestyles[curve_index % len(linestyles)]
+                if band_styles[curve_index % len(band_styles)] == "fill":
+                    axis.fill_between(grid, low, high, color=color,
+                                      alpha=band_alpha, lw=0)
+                else:
+                    for edge in (low, high):
+                        axis.plot(grid, edge, color=color, lw=outline_width,
+                                  ls=outline_style)
+                axis.plot(grid, median, color=color, lw=2, ls=linestyle)
                 grid_limits.extend([grid[0], grid[-1]])
             axis.set_xscale("log")
             axis.set_xlim(min(grid_limits), max(grid_limits))
@@ -693,7 +720,13 @@ def plot_model_cdf_comparison(
                     tick_formatter.rotate_labels):
                 plt.setp(axis.get_xticklabels(), rotation=45, ha="right")
             if column == 0:
-                axis.legend(loc=legend_loc, fontsize=legend_fontsize)
+                handles = [
+                    Line2D([], [], color="black", lw=2,
+                           ls=linestyles[index % len(linestyles)])
+                    for index in range(len(row))
+                ]
+                axis.legend(handles, [curve["label"] for curve in row],
+                            loc=legend_loc, fontsize=legend_fontsize)
             if row_index == 0 and title:
                 axis.set_title(title.format(
                     model=MODEL_TITLES.get(model, model)
