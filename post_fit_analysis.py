@@ -128,6 +128,26 @@ def _tier2_directories(tier2_type):
     ]
 
 
+def _requested_tier2_dirs(tier2_types, standalone_tier2_dirs=()):
+    """Expand Tier 2 types (``Mstar`` -> high/low) and append standalone dirs."""
+    directories = [
+        tier2_dir for tier2_type in tier2_types
+        for tier2_dir, _ in _tier2_directories(tier2_type)
+    ]
+    for tier2_dir in standalone_tier2_dirs:
+        if tier2_dir not in directories:
+            directories.append(str(tier2_dir))
+    return directories
+
+
+def _tier3_stack_dim(tier3_dir, stack_dim, tier3_stack_dims=None):
+    """Return the stack dimension for one Tier 3 directory."""
+    dim = (tier3_stack_dims or {}).get(Path(tier3_dir).name, stack_dim)
+    if dim not in {"a", "m"}:
+        raise ValueError(f"stack dimension for {tier3_dir} must be 'a' or 'm'")
+    return dim
+
+
 def _scalar(summary, key, summary_path):
     if key not in summary:
         raise KeyError(f"{summary_path} does not contain {key!r}")
@@ -837,14 +857,21 @@ def _piecewise_stack_occurrence_samples(path, stack_dim):
     return occurrence.sum(axis=sum_axis)
 
 
-def _piecewise_integrated_values(chain_dir, prefix, stack_dim, n_stack_bins):
-    """Collect per-stack integrated occurrence from the piecewise posterior."""
+def _piecewise_integrated_values(chain_dir, prefix, stack_dim, n_stack_bins,
+                                 percent=False):
+    """Collect per-stack integrated occurrence from the piecewise posterior.
+
+    With ``percent``, values are companions per hundred stars, formatted
+    with a trailing ``\\%``.
+    """
     path = chain_dir / "chains_piecewise.npz"
     if not path.is_file():
         return []
     integrated = _piecewise_stack_occurrence_samples(path, stack_dim)
     if integrated.shape[1] != n_stack_bins:
         raise ValueError(f"piecewise stack-bin count does not match summary in {path}")
+    if percent:
+        integrated = 100*integrated
     values = []
     for bin_index in range(n_stack_bins):
         low, median, high = np.percentile(
@@ -854,7 +881,8 @@ def _piecewise_integrated_values(chain_dir, prefix, stack_dim, n_stack_bins):
             prefix + "PiecewiseIntOcc" +
             f"Bin{stack_dim.lower()}{_number_word(bin_index)}"
         )
-        values.append((name, _format_parameter(median, low, high)))
+        value = _format_parameter(median, low, high)
+        values.append((name, value + r"\%" if percent else value))
     return values
 
 
@@ -2311,7 +2339,8 @@ def make_two_parameter_tables(
 
 
 def calculate_all_delta_bics(
-        results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim="a"):
+        results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim="a",
+        standalone_tier2_dirs=(), tier3_stack_dims=None):
     """Calculate and save delta-BIC values for every requested results folder.
 
     The arguments and Tier 2 expansion rules match :func:`make_variables`.
@@ -2329,10 +2358,10 @@ def calculate_all_delta_bics(
     if stack_dim not in {"a", "m"}:
         raise ValueError("stack_dim must be 'a' or 'm'")
 
+    tier2_dirs = _requested_tier2_dirs(tier2_types, standalone_tier2_dirs)
     all_delta_bics = {}
     for tier1_dir in tier1_dirs:
-        for tier2_type in tier2_types:
-            for tier2_dir, _ in _tier2_directories(tier2_type):
+        for tier2_dir in tier2_dirs:
                 for tier3_dir in tier3_dirs:
                     result_dir = results_dir / tier1_dir / tier2_dir / tier3_dir
                     if not result_dir.is_dir():
@@ -2351,7 +2380,8 @@ def calculate_all_delta_bics(
                     comparisons = calculate_delta_bic(
                         result_dir / "saved_dicts" / "fit_data.npz",
                         chain_dir,
-                        stack_dim,
+                        _tier3_stack_dim(tier3_dir, stack_dim,
+                                         tier3_stack_dims),
                     )
                     all_delta_bics[key] = {
                         model_name: np.asarray(values, dtype=float).tolist()
@@ -2618,7 +2648,9 @@ def _sample_comparison_blocks(
 def make_variables(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim="a",
         three_parameter_t3="stellar3params", stellar_catalog_path=None,
-        three_parameter_cuts=None, low_first_comparisons=()):
+        three_parameter_cuts=None, low_first_comparisons=(),
+        standalone_tier2_dirs=(), tier3_stack_dims=None,
+        percent_tier3_dirs=()):
     """Write non-model fit statistics to a LaTeX variables file.
 
     ``results_dir`` is the parent of all Tier 1 directories.  The output is
@@ -2665,6 +2697,14 @@ def make_variables(
     high relative to low, except for types listed in
     ``low_first_comparisons`` (e.g. ``["Act"]`` for old relative to young).
 
+    ``standalone_tier2_dirs`` lists Tier 2 directories used as-is, like
+    ``"allstars"``, rather than expanded into high/low pairs.
+    ``tier3_stack_dims`` maps Tier 3 directory names to the stack dimension
+    used for their per-bin statistics, overriding ``stack_dim`` (e.g.
+    ``{"cui_run": "m"}`` for rates per mass bin over one separation bin).
+    Integrated piecewise occurrence for the Tier 3 directories in
+    ``percent_tier3_dirs`` is written in percent.
+
     Returns
     -------
     pathlib.Path
@@ -2678,6 +2718,18 @@ def make_variables(
         raise ValueError("tier1_dirs, tier2_types, and tier3_dirs cannot be empty")
     if stack_dim not in {"a", "m"}:
         raise ValueError("stack_dim must be 'a' or 'm'")
+    for tier3_dir in tier3_dirs:
+        _tier3_stack_dim(tier3_dir, stack_dim, tier3_stack_dims)
+    unknown_runs = sorted(
+        (set(tier3_stack_dims or {}) | set(percent_tier3_dirs))
+        - {Path(tier3_dir).name for tier3_dir in tier3_dirs}
+    )
+    if unknown_runs:
+        raise ValueError(
+            f"tier3_stack_dims or percent_tier3_dirs name unrequested Tier 3 "
+            f"directories {unknown_runs}"
+        )
+    percent_tier3_dirs = set(percent_tier3_dirs)
     low_first_comparisons = set(low_first_comparisons)
     unknown_types = sorted(low_first_comparisons - set(tier2_types))
     if unknown_types:
@@ -2695,19 +2747,25 @@ def make_variables(
         raise ValueError("three_parameter_t3 contains duplicate directories")
 
     all_delta_bics = calculate_all_delta_bics(
-        results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim
+        results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim,
+        standalone_tier2_dirs, tier3_stack_dims,
     )
     blocks = []
     command_names = set()
     skipped_experiments = []
     found_tier3_dirs = set()
 
+    requested_tier2_dirs = _requested_tier2_dirs(
+        tier2_types, standalone_tier2_dirs
+    )
     for tier1_dir in tier1_dirs:
         tier1_name = Path(tier1_dir).name
         tier1_path = results_dir / tier1_dir
-        for tier2_type in tier2_types:
-            for tier2_dir, _ in _tier2_directories(tier2_type):
+        for tier2_dir in requested_tier2_dirs:
                 for tier3_dir in tier3_dirs:
+                    experiment_dim = _tier3_stack_dim(
+                        tier3_dir, stack_dim, tier3_stack_dims
+                    )
                     if not (tier1_path / tier2_dir / tier3_dir).is_dir():
                         skipped_experiments.append(
                             _result_key(tier1_dir, tier2_dir, tier3_dir)
@@ -2747,7 +2805,7 @@ def make_variables(
                             summary, "cell_compl_single", summary_path
                         )
                         bin_neff, bin_avg_compl = _stack_statistics(
-                            summary, stack_dim, summary_path
+                            summary, experiment_dim, summary_path
                         )
                         n_stack_bins = len(bin_neff)
 
@@ -2759,7 +2817,7 @@ def make_variables(
                         "Neff": f"{neff:.1f}",
                         "AvgCompl": f"{avg_compl:.2f}",
                     }
-                    dim = stack_dim.upper()
+                    dim = experiment_dim.upper()
                     for bin_index, (neff_value, compl_value) in enumerate(
                             zip(bin_neff, bin_avg_compl)):
                         bin_label = _number_word(bin_index)
@@ -2785,7 +2843,8 @@ def make_variables(
                         tier1_path / tier2_dir / tier3_dir / "saved_chains"
                     )
                     piecewise_values = _piecewise_integrated_values(
-                        chain_dir, prefix, stack_dim, n_stack_bins,
+                        chain_dir, prefix, experiment_dim, n_stack_bins,
+                        percent=Path(tier3_dir).name in percent_tier3_dirs,
                     )
                     if piecewise_values:
                         block.extend([
@@ -2799,7 +2858,7 @@ def make_variables(
                             command_names.add(name)
                             block.append(_command(name, value))
                     parametric_groups = _parametric_values(
-                            chain_dir, prefix, stack_dim, n_stack_bins)
+                            chain_dir, prefix, experiment_dim, n_stack_bins)
                     for model_name, model_values in parametric_groups:
                         block.extend(["", "%"*36, f"% Parametric model: {model_name}"])
                         for name, value in model_values:
@@ -2818,7 +2877,7 @@ def make_variables(
                             for bin_index, delta in enumerate(deltas):
                                 name = (
                                     prefix + model_macro + "Dbic" +
-                                    f"Bin{stack_dim.lower()}{_number_word(bin_index)}"
+                                    f"Bin{experiment_dim}{_number_word(bin_index)}"
                                 )
                                 if name in command_names:
                                     raise ValueError(

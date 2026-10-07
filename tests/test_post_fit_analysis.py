@@ -1452,3 +1452,61 @@ def test_plot_model_cdf_comparison_formats_mass_ratio_ticks(tmp_path,
     assert len(dense) == 8 and all(label.get_rotation() == 45
                                    for label in dense)
     assert "Mass Ratio" in [text.get_text() for text in figures[0].texts][0]
+
+
+def test_make_variables_handles_standalone_mass_binned_percent_runs(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(post_fit_analysis, "calculate_all_delta_bics",
+                        lambda *args: defaultdict(dict))
+    _write_summary(tmp_path / "mtrue", "allstars", "roi")
+    # A standalone sample fit over one separation bin and two mass bins.
+    _write_summary(
+        tmp_path / "mtrue", "Cui_cuts", "cui_run", n_abins=1, n_mbins=2,
+        cell_weights=np.array([12.0, 3.0]), cell_compls=np.array([0.6, 0.7]),
+        a_m_lims_pairs=np.array([[[2.0, 20.0], [5.0, 14.0]],
+                                 [[2.0, 20.0], [14.0, 42.0]]]),
+    )
+    chain_dir = tmp_path / "mtrue" / "Cui_cuts" / "cui_run" / "saved_chains"
+    chain_dir.mkdir()
+    rng = np.random.RandomState(0)
+    density = np.column_stack([
+        0.03*(1 + 0.1*rng.standard_normal(2000)),
+        0.003*(1 + 0.1*rng.standard_normal(2000)),
+    ])
+    np.savez(chain_dir / "chains_piecewise.npz", flat_chains=density,
+             x_edges=np.array([2.0, 20.0]), y_edges=np.array([5.0, 14.0, 42.0]))
+
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["allstars"], ["roi", "cui_run"],
+        three_parameter_t3=None, standalone_tier2_dirs=["Cui_cuts"],
+        tier3_stack_dims={"cui_run": "m"}, percent_tier3_dirs=["cui_run"],
+    ).read_text()
+
+    values = _variables(text)
+    prefix = "McCuiCutsCuiRun"
+    # Statistics and rates follow the two mass bins.
+    assert values[prefix + "NeffBinMZero"] == "12.0"
+    assert values[prefix + "NeffBinMOne"] == "3.0"
+    first = values[prefix + "PiecewiseIntOccBinmZero"]
+    assert first.endswith(r"\%")
+    # Density 0.03 over one decade in a and log10(14/5) in mass, in percent.
+    assert float(first.split("^")[0]) == pytest.approx(
+        100*0.03*np.log10(14/5), rel=0.05)
+    assert prefix + "PiecewiseIntOccBinmOne" in values
+    # The other run keeps separation bins and plain fractions.
+    assert "McAllstarsRoiNeffBinAZero" in values
+    assert "McCuiCutsRoi" not in text
+
+
+def test_make_variables_rejects_unknown_run_options(tmp_path):
+    _write_summary(tmp_path / "mtrue", "allstars", "roi")
+    with pytest.raises(ValueError, match="unrequested Tier 3"):
+        post_fit_analysis.make_variables(
+            tmp_path, ["mtrue"], ["allstars"], ["roi"],
+            three_parameter_t3=None, tier3_stack_dims={"other": "m"},
+        )
+    with pytest.raises(ValueError, match="'a' or 'm'"):
+        post_fit_analysis.make_variables(
+            tmp_path, ["mtrue"], ["allstars"], ["roi"],
+            three_parameter_t3=None, tier3_stack_dims={"roi": "x"},
+        )
