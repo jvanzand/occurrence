@@ -615,8 +615,8 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
     if rate_type=='OR':
         plot_ylabel = 'Occurrence rate\n[Planets per star]'
     elif rate_type=='ORD':
-        plot_ylabel = 'Occurrence rate density'
-        # plot_ylabel = 'Occurrence rate density\n[Planets/star/$\Delta \log_{10}(\omega)$]'
+        # plot_ylabel = 'Occurrence rate density'
+        plot_ylabel = 'Occurrence rate density\n[Planets/star/$\Delta \log_{10}(\omega)$]'
 
     n_a = int(summary_dict['n_abins'])
     n_m = int(summary_dict['n_mbins'])
