@@ -1155,16 +1155,26 @@ def test_plot_model_cdf_comparison_draws_models_by_sample_pairs(
         assert [line.get_linestyle() for line in lines] == ["-", ":", ":", "--"]
         assert all(to_rgba(line.get_color()) == color for line in lines)
         assert len(axis.collections) == 1  # only the first band is filled
-    assert [axis.get_legend() is not None for axis in axes] == [
-        True, False, True, False,
+    legends = [axis.get_legend() for axis in axes]
+    texts = [[text.get_text() for text in legend.get_texts()] if legend else None
+             for legend in legends]
+    # Top left: model color plus sample line styles. Top right: model color.
+    # Lower left: that row's line styles. Lower right: no legend.
+    assert texts == [
+        ["Sigmoid", "highMstar", "lowMstar"],
+        ["Log-Gaussian"],
+        ["highFeH", "lowFeH"],
+        None,
     ]
-    legend = axes[2].get_legend()
-    assert [text.get_text() for text in legend.get_texts()] == [
-        "highFeH", "lowFeH",
-    ]
-    assert [line.get_linestyle() for line in legend.get_lines()] == ["-", "--"]
-    assert all(to_rgba(line.get_color()) == to_rgba("black")
-               for line in legend.get_lines())
+    from matplotlib.patches import Patch
+    top_left = legends[0].legendHandles
+    assert isinstance(top_left[0], Patch)
+    assert to_rgba(top_left[0].get_facecolor())[:3] == to_rgba(
+        mcmc_powerlaw.get_model_spec("sigmoid").color)[:3]
+    assert isinstance(legends[1].legendHandles[0], Patch)
+    lines = legends[2].get_lines()
+    assert [line.get_linestyle() for line in lines] == ["-", "--"]
+    assert all(to_rgba(line.get_color()) == to_rgba("black") for line in lines)
     assert not any(axis.get_xlabel() or axis.get_ylabel() for axis in axes)
     texts = [text.get_text() for text in figures[0].texts]
     assert texts.count(r"Companion mass [$M_{Jup}$]") == 1
@@ -1509,4 +1519,20 @@ def test_make_variables_rejects_unknown_run_options(tmp_path):
         post_fit_analysis.make_variables(
             tmp_path, ["mtrue"], ["allstars"], ["roi"],
             three_parameter_t3=None, tier3_stack_dims={"roi": "x"},
+        )
+
+
+def test_plot_model_cdf_comparison_labels_each_row(tmp_path, monkeypatch):
+    _write_cdf_chains(tmp_path)
+    figures = _capture_cdf_figure(monkeypatch)
+    post_fit_analysis.plot_model_cdf_comparison(
+        tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "rows",
+        row_labels=["Stellar mass", "Metallicity"],
+    )
+    axes = figures[0].axes
+    right_texts = [[text.get_text() for text in axis.texts] for axis in axes]
+    assert right_texts == [[], ["Stellar mass"], [], ["Metallicity"]]
+    with pytest.raises(ValueError, match="row_labels"):
+        post_fit_analysis.plot_model_cdf_comparison(
+            tmp_path, _CDF_ROWS, ["sigmoid"], "bad", row_labels=["one"],
         )

@@ -580,7 +580,8 @@ def plot_model_cdf_comparison(
         ylabel="Cumulative fraction", legend_loc="lower right",
         legend_fontsize=None, panel_size=(5, 3.5), model_colors=None,
         linestyles=("-", "--"), band_styles=("fill", "outline"),
-        band_alpha=0.3, outline_style=":", outline_width=1.2, dpi=300,
+        band_alpha=0.3, outline_style=":", outline_width=1.2, row_labels=None,
+        dpi=300,
         output_file=None):
     """Draw a grid comparing the normalized CDFs of fitted samples.
 
@@ -613,9 +614,16 @@ def plot_model_cdf_comparison(
     ``"outline"`` (edges drawn with ``outline_style`` and
     ``outline_width``), so by default the first curve is solid with a filled
     band and the second is dashed with an outlined band.  Both sequences
-    repeat for longer rows.  Legend lines are black, since they identify
-    curves by style in every column.  ``panel_size`` is the size of each
-    panel in inches.  The
+    repeat for longer rows.
+
+    Legends avoid repetition: the top-left panel shows its model's band
+    color (labeled with the model name) and the line style of each curve;
+    the rest of the top row shows only its model's band color; the rest of
+    the first column shows only its row's line styles.  Line styles are
+    drawn in black, since they identify curves in every column.
+    ``row_labels`` optionally gives one label per row (e.g. the stellar
+    parameter dividing its samples), drawn along the right edge of the row.
+    ``panel_size`` is the size of each panel in inches.  The
     figure is saved with the catalog plots of
     :func:`plot_companions_by_stellar_parameter`, in the ``plots`` folder of
     the first curve's full-sample experiment
@@ -629,6 +637,7 @@ def plot_model_cdf_comparison(
     """
     from matplotlib import pyplot as plt
     from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
     from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
 
     results_dir = Path(results_dir)
@@ -645,6 +654,8 @@ def plot_model_cdf_comparison(
                 raise ValueError(f"CDF curve {curve} is missing {missing}")
     if not 0 < credible < 1:
         raise ValueError("credible must be between 0 and 1")
+    if row_labels is not None and len(row_labels) != len(rows):
+        raise ValueError("row_labels must give one label per row")
     linestyles = list(linestyles)
     band_styles = list(band_styles)
     if not linestyles or not band_styles:
@@ -743,14 +754,28 @@ def plot_model_cdf_comparison(
                     getattr(tick_formatter, "rotate_labels",
                             len(xticks) > 4)):
                 plt.setp(axis.get_xticklabels(), rotation=45, ha="right")
+            handles, labels = [], []
+            if row_index == 0:
+                # Band color identifies the model; shown once per column.
+                handles.append(Patch(facecolor=colors[model],
+                                     alpha=band_alpha, edgecolor="none"))
+                labels.append(MODEL_TITLES.get(model, model))
             if column == 0:
-                handles = [
+                # Line styles identify the samples; shown once per row.
+                handles.extend(
                     Line2D([], [], color="black", lw=2,
                            ls=linestyles[index % len(linestyles)])
                     for index in range(len(row))
-                ]
-                axis.legend(handles, [curve["label"] for curve in row],
-                            loc=legend_loc, fontsize=legend_fontsize)
+                )
+                labels.extend(curve["label"] for curve in row)
+            if handles:
+                axis.legend(handles, labels, loc=legend_loc,
+                            fontsize=legend_fontsize)
+            if column == n_columns - 1 and row_labels is not None:
+                axis.text(1.04, 0.5, row_labels[row_index],
+                          transform=axis.transAxes, rotation=270,
+                          ha="left", va="center",
+                          fontsize=plt.rcParams["axes.titlesize"])
             if row_index == 0 and title:
                 axis.set_title(title.format(
                     model=MODEL_TITLES.get(model, model)
