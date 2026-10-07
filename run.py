@@ -236,6 +236,8 @@ def run_multiple(
         nwalkers=50,
         nsteps=5000,
         burnin=1000,
+        piecewise_nsteps=None,
+        piecewise_burnin=None,
         parallel_fits=False,
         parallel_mcmc=False,
         random_seed=None,
@@ -281,12 +283,26 @@ def run_multiple(
     ``'independent'`` preserves the legacy piecewise priors.
     Missing Tier 1 products
     are generated from ``recoveries_dir`` when ``prepare_missing`` is true.
-    Set ``run_fits=False`` to regenerate plots from saved chains. Fit-level and
-    MCMC-level parallelism are controlled separately. Existing Tier 1 and
+    Set ``run_fits=False`` to regenerate plots from saved chains.
+    ``nsteps`` and ``burnin`` set the production and burn-in steps of every
+    fit; ``piecewise_nsteps`` and ``piecewise_burnin`` override them for the
+    piecewise model alone, whose many correlated bin parameters usually need
+    longer chains.  Fit-level and MCMC-level parallelism are controlled
+    separately. Existing Tier 1 and
     Tier 2 directories are treated as complete and reused; delete one of those
     directories to regenerate that stage. Tier 3 fits always run when
     ``run_fits=True`` and overwrite products at their configured paths.
     """
+    piecewise_nsteps = nsteps if piecewise_nsteps is None else piecewise_nsteps
+    piecewise_burnin = burnin if piecewise_burnin is None else piecewise_burnin
+    for label, steps, burn in (
+            ("", nsteps, burnin),
+            ("piecewise_", piecewise_nsteps, piecewise_burnin)):
+        if int(steps) != steps or int(burn) != burn or steps < 1 or burn < 0:
+            raise ValueError(
+                f"{label}nsteps must be a positive integer and {label}burnin "
+                "a nonnegative integer"
+            )
     output_dir = os.fspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     tier1_definitions = {
@@ -471,6 +487,8 @@ def run_multiple(
                     "nwalkers": nwalkers,
                     "nsteps": nsteps,
                     "burnin": burnin,
+                    "piecewise_nsteps": int(piecewise_nsteps),
+                    "piecewise_burnin": int(piecewise_burnin),
                     "parallel_mcmc": parallel_mcmc,
                     "random_seed": random_seed,
                     "logg_amplitude_bounds": logg_amplitude_bounds,
@@ -670,8 +688,8 @@ def _run_configuration(configuration):
                     x_edges=configuration["a_edges"],
                     y_edges=configuration["m_edges"],
                     nwalkers=configuration["nwalkers"],
-                    nsteps=configuration["nsteps"],
-                    burnin=configuration["burnin"],
+                    nsteps=configuration["piecewise_nsteps"],
+                    burnin=configuration["piecewise_burnin"],
                     parallel=configuration["parallel_mcmc"],
                     save_path=chain_path,
                     random_seed=configuration["random_seed"],

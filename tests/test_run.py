@@ -642,3 +642,53 @@ def test_supplementary_plots_overlap_later_serial_models(tmp_path, monkeypatch):
     assert results[0]["plots"]["piecewise"] == {
         "catalog_roi": "catalog.png", "roi_occurrence": "roi.png",
     }
+
+
+def _capture_fit_steps(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mtrue").mkdir()
+    monkeypatch.setattr(run, "_tier1_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(main, "prep_fit_materials",
+                        lambda **kwargs: "materials.npz")
+    steps = {}
+    monkeypatch.setattr(
+        run.mcmc, "fit_piecewise_file",
+        lambda **kwargs: steps.update(
+            piecewise=(kwargs["nsteps"], kwargs["burnin"])),
+    )
+    monkeypatch.setattr(
+        run.mcmc, "fit_smooth_file",
+        lambda **kwargs: steps.update(
+            logG=(kwargs["nsteps"], kwargs["burnin"])) or ([], ["logG.npz"]),
+    )
+    return steps
+
+
+def _run_piecewise_and_logg(**options):
+    return run.run_multiple(
+        tier1_list=["mtrue"], tier2_list=["allstars"], tier3_list=["fit"],
+        a_edges=[0.1, 10.0], m_edges=[1.0, 10.0],
+        star_df=pd.DataFrame({"star_name": ["a"]}),
+        tier2_df_cuts_dict={"allstars": [{"star_df_query": None}, "All"]},
+        run_models_list=["piecewise", "logG"], plot_models_list=[],
+        make_plots=False, nsteps=3000, burnin=1000, **options,
+    )
+
+
+def test_piecewise_steps_can_differ_from_smooth_models(tmp_path, monkeypatch):
+    steps = _capture_fit_steps(tmp_path, monkeypatch)
+    _run_piecewise_and_logg(piecewise_nsteps=12000, piecewise_burnin=4000)
+    assert steps == {"piecewise": (12000, 4000), "logG": (3000, 1000)}
+
+
+def test_piecewise_steps_default_to_the_shared_settings(tmp_path, monkeypatch):
+    steps = _capture_fit_steps(tmp_path, monkeypatch)
+    _run_piecewise_and_logg()
+    assert steps == {"piecewise": (3000, 1000), "logG": (3000, 1000)}
+
+
+def test_piecewise_steps_are_validated(tmp_path, monkeypatch):
+    _capture_fit_steps(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="piecewise_nsteps"):
+        _run_piecewise_and_logg(piecewise_nsteps=0)
