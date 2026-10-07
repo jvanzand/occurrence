@@ -546,11 +546,15 @@ def _cdf_tick_formatter(tick_values, coordinate, tier1_names):
     return pu.mass_tick_formatter(tick_values)
 
 
-def _set_figure_axis_labels(figure, xlabel, ylabel):
+def _set_figure_axis_labels(figure, xlabel, ylabel, axes=None,
+                            row_labels=None):
     """Label a panel grid once along its bottom and left edges.
 
     The labels use the axis-label font size and are placed in margins kept
-    free by the layout, so they never overlap tick labels.
+    free by the layout, so they never overlap tick labels.  With
+    ``row_labels`` (one per row of the 2-D array ``axes``), each row also
+    gets a single label centered above it, in the title font size and above
+    any panel titles in that row.
     """
     from matplotlib import pyplot as plt
     from matplotlib.font_manager import FontProperties
@@ -563,7 +567,34 @@ def _set_figure_axis_labels(figure, xlabel, ylabel):
     # text; tight_layout adds its own padding for the tick labels.
     margin_x = 1.3*size/72/width
     margin_y = 1.3*size/72/height
-    figure.tight_layout(rect=(margin_x, margin_y, 1, 1))
+    if row_labels is None:
+        figure.tight_layout(rect=(margin_x, margin_y, 1, 1))
+    else:
+        row_size = FontProperties(
+            size=plt.rcParams["axes.titlesize"]
+        ).get_size_in_points()
+        # Room for one line of row-label text above each row: extra space
+        # at the top of the figure and between rows (h_pad is measured in
+        # multiples of the base font size).
+        figure.tight_layout(
+            rect=(margin_x, margin_y, 1, 1 - 1.6*row_size/72/height),
+            h_pad=1.6*row_size/plt.rcParams["font.size"],
+        )
+        figure.canvas.draw()
+        renderer = figure.canvas.get_renderer()
+        to_figure = figure.transFigure.inverted()
+        gap = 0.3*row_size/72/height
+        for row_axes, label in zip(axes, row_labels):
+            top = max(axis.get_position().y1 for axis in row_axes)
+            for axis in row_axes:
+                if axis.get_title():
+                    extent = axis.title.get_window_extent(renderer)
+                    top = max(top, to_figure.transform(
+                        (0, extent.y1))[1])
+            left = min(axis.get_position().x0 for axis in row_axes)
+            right = max(axis.get_position().x1 for axis in row_axes)
+            figure.text((left + right)/2, top + gap, label,
+                        fontsize=row_size, ha="center", va="bottom")
     if hasattr(figure, "supxlabel"):
         figure.supxlabel(xlabel, fontsize=size, y=0.01, va="bottom")
         figure.supylabel(ylabel, fontsize=size, x=0.01, ha="left")
@@ -622,7 +653,7 @@ def plot_model_cdf_comparison(
     the first column shows only its row's line styles.  Line styles are
     drawn in black, since they identify curves in every column.
     ``row_labels`` optionally gives one label per row (e.g. the stellar
-    parameter dividing its samples), drawn along the right edge of the row.
+    parameter dividing its samples), centered above the row's panels.
     ``panel_size`` is the size of each panel in inches.  The
     figure is saved with the catalog plots of
     :func:`plot_companions_by_stellar_parameter`, in the ``plots`` folder of
@@ -771,16 +802,11 @@ def plot_model_cdf_comparison(
             if handles:
                 axis.legend(handles, labels, loc=legend_loc,
                             fontsize=legend_fontsize)
-            if column == n_columns - 1 and row_labels is not None:
-                axis.text(1.04, 0.5, row_labels[row_index],
-                          transform=axis.transAxes, rotation=270,
-                          ha="left", va="center",
-                          fontsize=plt.rcParams["axes.titlesize"])
             if row_index == 0 and title:
                 axis.set_title(title.format(
                     model=MODEL_TITLES.get(model, model)
                 ))
-    _set_figure_axis_labels(figure, xlabel, ylabel)
+    _set_figure_axis_labels(figure, xlabel, ylabel, axes, row_labels)
 
     if output_file is None:
         first = rows[0][0]

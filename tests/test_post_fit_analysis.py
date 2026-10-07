@@ -1529,9 +1529,26 @@ def test_plot_model_cdf_comparison_labels_each_row(tmp_path, monkeypatch):
         tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "rows",
         row_labels=["Stellar mass", "Metallicity"],
     )
-    axes = figures[0].axes
-    right_texts = [[text.get_text() for text in axis.texts] for axis in axes]
-    assert right_texts == [[], ["Stellar mass"], [], ["Metallicity"]]
+    figure = figures[0]
+    axes = figure.axes
+    assert all(not axis.texts for axis in axes)
+    labels = {text.get_text(): text for text in figure.texts}
+    for label, row_axes in (("Stellar mass", axes[:2]), ("Metallicity", axes[2:])):
+        x, y = labels[label].get_position()
+        left = min(axis.get_position().x0 for axis in row_axes)
+        right = max(axis.get_position().x1 for axis in row_axes)
+        top = max(axis.get_position().y1 for axis in row_axes)
+        # One label per row, centered over both panels and above them.
+        assert x == pytest.approx((left + right)/2)
+        assert y > top
+    # The top row's label sits above its column titles.
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    title_top = max(axis.title.get_window_extent(renderer).y1 for axis in axes[:2])
+    assert labels["Stellar mass"].get_window_extent(renderer).y0 > title_top
+    # The middle row's label stays below the top row's panels.
+    assert labels["Metallicity"].get_window_extent(renderer).y1 < min(
+        axis.get_window_extent(renderer).y0 for axis in axes[:2])
     with pytest.raises(ValueError, match="row_labels"):
         post_fit_analysis.plot_model_cdf_comparison(
             tmp_path, _CDF_ROWS, ["sigmoid"], "bad", row_labels=["one"],
