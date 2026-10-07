@@ -171,7 +171,7 @@ def convergence_warning(results):
         for result in failing
     ]
     return (f"WARNING: {len(failing)} of {len(results)} fits span fewer than "
-            f"{target} autocorrelation times: " + "; ".join(items) +
+            f"{target} autocorrelation times: " + "; \n".join(items) +
             f". See each experiment's saved_chains/{CONVERGENCE_FILENAME}.")
 
 
