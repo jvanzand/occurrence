@@ -606,7 +606,7 @@ def _set_figure_axis_labels(figure, xlabel, ylabel, axes=None,
 
 
 def plot_model_cdf_comparison(
-        results_dir, rows, models, name, title="{model} CDF", credible=0.68,
+        results_dir, rows, models, name, title=None, credible=0.68,
         stack_bin=0, n_grid=500, max_samples=2000, xticks=None, xlabel=None,
         ylabel="Cumulative fraction", legend_loc="lower right",
         legend_fontsize=None, panel_size=(5, 3.5), model_colors=None,
@@ -626,9 +626,10 @@ def plot_model_cdf_comparison(
     before anything is drawn.  Each curve is the posterior median of
     :func:`model_cdf_samples`, with the central ``credible`` interval shaded.
 
-    ``title`` heads each column, with ``{model}`` replaced by the column's
-    model name, so the default gives "Sigmoid CDF" and "Log-Gaussian CDF";
-    ``None`` or ``""`` leaves the columns untitled.  Each row's legend appears
+    ``title`` optionally heads each column, with ``{model}`` replaced by the
+    column's model name, so ``"{model} CDF"`` gives "Sigmoid CDF" and
+    "Log-Gaussian CDF".  By default the columns are untitled, since the
+    top row's legends name each column's model.  Each row's legend appears
     in its first column, with ``legend_fontsize`` defaulting to the size the
     occurrence plots use.  Panels share both axes, so the figure carries a
     single x-axis label along the bottom and a single y-axis label along the

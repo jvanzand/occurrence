@@ -1143,9 +1143,8 @@ def test_plot_model_cdf_comparison_draws_models_by_sample_pairs(
     axes = figures[0].axes
     assert len(axes) == 4
     assert axes[0].get_subplotspec().get_gridspec().get_geometry() == (2, 2)
-    assert [axis.get_title() for axis in axes] == [
-        "Sigmoid CDF", "Log-Gaussian CDF", "", "",
-    ]
+    # Columns are untitled by default; the legends name the models.
+    assert [axis.get_title() for axis in axes] == ["", "", "", ""]
     from matplotlib.colors import to_rgba
     from occurrence import mcmc_powerlaw
     for axis, model in zip(axes, ["sigmoid", "logG"]*2):
@@ -1527,7 +1526,7 @@ def test_plot_model_cdf_comparison_labels_each_row(tmp_path, monkeypatch):
     figures = _capture_cdf_figure(monkeypatch)
     post_fit_analysis.plot_model_cdf_comparison(
         tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "rows",
-        row_labels=["Stellar mass", "Metallicity"],
+        title="{model} CDF", row_labels=["Stellar mass", "Metallicity"],
     )
     figure = figures[0]
     axes = figure.axes
