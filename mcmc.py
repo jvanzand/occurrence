@@ -1120,8 +1120,8 @@ def save_model_figures(
         )
     plot_specs = {
         "density": (
-            "Occurrence rate density",#\n"
-            # r"[Planets/star/$\Delta \log_{10}(\omega)$]",
+            "Occurrence rate density" "\n"
+            r"[Planets/star/$\Delta \log_{10}(\omega)$]",
             "occurrence_ORD.png",
         ),
         "occurrence": (
