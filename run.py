@@ -9,6 +9,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from occurrence import plotting_utils as pu
+from occurrence import convergence
 from occurrence import main
 from occurrence import mcmc
 from occurrence import sampling_utils as su
@@ -238,6 +239,7 @@ def run_multiple(
         burnin=1000,
         piecewise_nsteps=None,
         piecewise_burnin=None,
+        convergence_target=convergence.DEFAULT_TARGET,
         parallel_fits=False,
         parallel_mcmc=False,
         random_seed=None,
@@ -287,8 +289,11 @@ def run_multiple(
     ``nsteps`` and ``burnin`` set the production and burn-in steps of every
     fit; ``piecewise_nsteps`` and ``piecewise_burnin`` override them for the
     piecewise model alone, whose many correlated bin parameters usually need
-    longer chains.  Fit-level and MCMC-level parallelism are controlled
-    separately. Existing Tier 1 and
+    longer chains.  After fitting, each experiment's
+    ``saved_chains/convergence.txt`` records whether every chain spans at
+    least ``convergence_target`` autocorrelation times, and a warning at the
+    end names any fits that do not.  Fit-level and MCMC-level parallelism
+    are controlled separately. Existing Tier 1 and
     Tier 2 directories are treated as complete and reused; delete one of those
     directories to regenerate that stage. Tier 3 fits always run when
     ``run_fits=True`` and overwrite products at their configured paths.
@@ -489,6 +494,7 @@ def run_multiple(
                     "burnin": burnin,
                     "piecewise_nsteps": int(piecewise_nsteps),
                     "piecewise_burnin": int(piecewise_burnin),
+                    "convergence_target": convergence_target,
                     "parallel_mcmc": parallel_mcmc,
                     "random_seed": random_seed,
                     "logg_amplitude_bounds": logg_amplitude_bounds,
@@ -597,6 +603,14 @@ def run_multiple(
             _run_configuration(configuration)
             for configuration in configurations
         ]
+    fitted = [chain for result in results
+              for chain in result.get("convergence", [])]
+    warning = convergence.convergence_warning(fitted)
+    if warning:
+        print(warning)
+    elif fitted:
+        print(f"All {len(fitted)} fits span at least {convergence_target} "
+              "autocorrelation times.")
     return results
 
 
@@ -806,6 +820,13 @@ def _run_configuration(configuration):
                         plot_executor = None
                     raise
                 result["chains"][model_name] = chain_paths
+        result["convergence"] = convergence.write_convergence_summary(
+            os.path.join(
+                configuration["tier1_dir"], configuration["tier2_dir"],
+                configuration["tier3_dir"], "saved_chains",
+            ),
+            configuration["convergence_target"],
+        )
 
     if roi_occurrence_future is not None:
         try:

@@ -692,3 +692,36 @@ def test_piecewise_steps_are_validated(tmp_path, monkeypatch):
     _capture_fit_steps(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="piecewise_nsteps"):
         _run_piecewise_and_logg(piecewise_nsteps=0)
+
+
+def test_run_multiple_writes_convergence_summaries(tmp_path, monkeypatch,
+                                                   capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mtrue").mkdir()
+    monkeypatch.setattr(run, "_tier1_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(main, "prep_fit_materials",
+                        lambda **kwargs: "materials.npz")
+
+    def fake_fit(**kwargs):
+        # A random walk: a short chain with a very long autocorrelation time.
+        rng = np.random.RandomState(0)
+        chain = np.cumsum(rng.standard_normal((200, 10, 2)), axis=0)
+        os.makedirs(os.path.dirname(kwargs["save_path"]), exist_ok=True)
+        np.savez(kwargs["save_path"], chains=chain,
+                 latent_chains=np.empty((0,)))
+
+    monkeypatch.setattr(run.mcmc, "fit_piecewise_file", fake_fit)
+    results = run.run_multiple(
+        tier1_list=["mtrue"], tier2_list=["allstars"], tier3_list=["fit"],
+        a_edges=[0.1, 10.0], m_edges=[1.0, 3.0, 10.0],
+        star_df=pd.DataFrame({"star_name": ["a"]}),
+        tier2_df_cuts_dict={"allstars": [{"star_df_query": None}, "All"]},
+        run_models_list=["piecewise"], plot_models_list=[], make_plots=False,
+    )
+
+    summary = tmp_path / "mtrue" / "allstars" / "fit" / "saved_chains"
+    assert (summary / "convergence.txt").is_file()
+    assert results[0]["convergence"][0]["model"] == "piecewise"
+    assert not results[0]["convergence"][0]["converged"]
+    assert "WARNING: 1 of 1 fits span fewer than 50" in capsys.readouterr().out
