@@ -440,7 +440,8 @@ def test_make_three_parameter_tables_create_both_forms(tmp_path):
     assert r"\colhead{Low}" not in text
     assert r"\colhead{High}" not in text
     assert r"\textbf{Low Mass} & \textbf{High Mass}" in text
-    assert r"\textbf{Low [Fe/H]} & \textbf{High [Fe/H]}" in text
+    assert (r"\textbf{Low $\text{[Fe/H]}$} & \textbf{High $\text{[Fe/H]}$}"
+            in text)
     assert r"\textbf{Young} & \textbf{Old}" in text
     assert "Mass OR" not in text
     assert "[Fe/H] OR" not in text
@@ -765,7 +766,7 @@ def test_make_one_parameter_tables_reference_existing_variables(tmp_path):
     )
     # Metallicity medians are compared in linear abundance: 10^(0.3+0.2).
     assert (
-        r"[Fe/H] & \McLowFeHPaperBoundsPiecewiseIntOccBinaZero & "
+        r"$\text{[Fe/H]}$ & \McLowFeHPaperBoundsPiecewiseIntOccBinaZero & "
         r"\McHighFeHPaperBoundsPiecewiseIntOccBinaZero & "
         r"\McFeHPaperBoundsPiecewiseIntOccSignificanceBinaZero & 3.2 \\"
         in reordered
@@ -776,7 +777,10 @@ def test_make_one_parameter_tables_reference_existing_variables(tmp_path):
         r"\McHighMstarPaperBoundsNeff & \McHighMstarPaperBoundsAvgCompl & "
         r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero \\" in original
     )
-    assert r"[Fe/H] & low & \McLowFeHPaperBoundsNstars" in original
+    assert r"$\text{[Fe/H]}$ & low & \McLowFeHPaperBoundsNstars" in original
+    # A bare "[" after the previous row's \\ would be read as its optional
+    # argument, so no row may start with one.
+    assert not re.search(r"\\\\\n\[", original + reordered)
 
 
 def test_make_one_parameter_tables_can_embed_values(tmp_path, monkeypatch):

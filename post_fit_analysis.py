@@ -2091,7 +2091,7 @@ def make_three_parameter_tables(
         lines.append(r"\hline")
 
     add_block(
-        "[Fe/H]", "Age", "Low Mass", "High Mass",
+        r"$\text{[Fe/H]}$", "Age", "Low Mass", "High Mass",
         [
             (metallicity, age,
              table_values[("low", metallicity, age)]["IntOcc"],
@@ -2103,7 +2103,7 @@ def make_three_parameter_tables(
         ],
     )
     add_block(
-        "Mass", "Age", "Low [Fe/H]", "High [Fe/H]",
+        "Mass", "Age", r"Low $\text{[Fe/H]}$", r"High $\text{[Fe/H]}$",
         [
             (mass, age,
              table_values[(mass, "low", age)]["IntOcc"],
@@ -2115,7 +2115,7 @@ def make_three_parameter_tables(
         ],
     )
     add_block(
-        "Mass", "[Fe/H]", "Young", "Old",
+        "Mass", r"$\text{[Fe/H]}$", "Young", "Old",
         [
             (mass, metallicity,
              table_values[(mass, metallicity, "young")]["IntOcc"],
@@ -2149,7 +2149,7 @@ def make_three_parameter_tables(
         rf"\label{{{original_label}}}",
         r"\tablehead{",
         r"\colhead{Mass} &",
-        r"\colhead{[Fe/H]} &",
+        r"\colhead{$\text{[Fe/H]}$} &",
         r"\colhead{Age} &",
         r"\colhead{$N_{\star}$} &",
         r"\colhead{$N_{\mathrm{eff}}$} &",
@@ -2308,7 +2308,7 @@ def make_two_parameter_tables(
         reordered_lines.append(r"\hline")
 
     add_block(
-        "[Fe/H]", "Low Mass", "High Mass",
+        r"$\text{[Fe/H]}$", "Low Mass", "High Mass",
         [
             (metallicity,
              table_values[("low", metallicity)]["IntOcc"],
@@ -2319,7 +2319,7 @@ def make_two_parameter_tables(
         ],
     )
     add_block(
-        "Mass", "Low [Fe/H]", "High [Fe/H]",
+        "Mass", r"Low $\text{[Fe/H]}$", r"High $\text{[Fe/H]}$",
         [
             (mass,
              table_values[(mass, "low")]["IntOcc"],
@@ -2352,7 +2352,7 @@ def make_two_parameter_tables(
         rf"\label{{{original_label}}}",
         r"\tablehead{",
         r"\colhead{Mass} &",
-        r"\colhead{[Fe/H]} &",
+        r"\colhead{$\text{[Fe/H]}$} &",
         r"\colhead{$N_{\star}$} &",
         r"\colhead{$N_{\mathrm{eff}}$} &",
         r"\colhead{Completeness} &",
@@ -2390,10 +2390,11 @@ def make_two_parameter_tables(
 
 
 # Table labels and stellar-catalog columns for the one-parameter tables,
-# keyed by Tier 2 type.
+# keyed by Tier 2 type. [Fe/H] is set in math so a row starting with it is
+# not read as the optional argument of the previous row's \\.
 _ONE_PARAMETER_TYPES = {
     "Mstar": ("Mass", "Mstar"),
-    "FeH": ("[Fe/H]", "feh"),
+    "FeH": (r"$\text{[Fe/H]}$", "feh"),
 }
 
 
