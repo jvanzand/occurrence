@@ -547,14 +547,16 @@ def _cdf_tick_formatter(tick_values, coordinate, tier1_names):
 
 
 def _set_figure_axis_labels(figure, xlabel, ylabel, axes=None,
-                            row_labels=None):
+                            row_labels=None, top_axes=None):
     """Label a panel grid once along its bottom and left edges.
 
     The labels use the axis-label font size and are placed in margins kept
     free by the layout, so they never overlap tick labels.  With
     ``row_labels`` (one per row of the 2-D array ``axes``), each row also
     gets a single label centered above it, in the title font size and above
-    any panel titles in that row.
+    any panel titles in that row.  ``top_axes`` (same shape as ``axes``)
+    holds panels stacked above each row's main panels, if any; the row
+    labels then go above those.
     """
     from matplotlib import pyplot as plt
     from matplotlib.font_manager import FontProperties
@@ -584,7 +586,9 @@ def _set_figure_axis_labels(figure, xlabel, ylabel, axes=None,
         renderer = figure.canvas.get_renderer()
         to_figure = figure.transFigure.inverted()
         gap = 0.3*row_size/72/height
-        for row_axes, label in zip(axes, row_labels):
+        if top_axes is None:
+            top_axes = axes
+        for row_axes, label in zip(top_axes, row_labels):
             top = max(axis.get_position().y1 for axis in row_axes)
             for axis in row_axes:
                 if axis.get_title():
@@ -606,6 +610,32 @@ def _set_figure_axis_labels(figure, xlabel, ylabel, axes=None,
 
 
 _CDF_LEGEND_GRAY = "0.35"
+
+
+def _cdf_difference_significance(first, second):
+    """Return the pointwise significance of ``median(first) - median(second)``.
+
+    ``first`` and ``second`` are ``(samples, grid)`` arrays of CDF draws on
+    the same grid.  At each grid point the difference of the medians is
+    divided by the 16th/84th-percentile errors that face each other, added
+    in quadrature (as in :func:`_comparison_significance`).  Points where
+    both errors vanish, such as the ends of the grid where every CDF is 0
+    or 1, are ``nan``.
+    """
+    first_low, first_median, first_high = np.percentile(
+        first, [16, 50, 84], axis=0
+    )
+    second_low, second_median, second_high = np.percentile(
+        second, [16, 50, 84], axis=0
+    )
+    difference = first_median - second_median
+    error = np.where(
+        difference >= 0,
+        np.hypot(first_median - first_low, second_high - second_median),
+        np.hypot(first_high - first_median, second_median - second_low),
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(error > 1e-9, difference/error, np.nan)
 
 
 def _cdf_curve_handle(band_style, linestyle, show_line, band_alpha, hatch,
@@ -642,7 +672,8 @@ def plot_model_cdf_comparison(
         linestyles=("-", "--"), band_styles=("fill", "hatch"),
         band_alpha=0.3, hatch="++++", hatch_alpha=0.6, hatch_linewidth=0.6,
         hatch_edge_width=0.8, outline_style=":", outline_width=1.2,
-        row_labels=None, dpi=300,
+        row_labels=None, significance_panel=True, significance_height=0.35,
+        significance_ylabel=r"$\Delta/\sigma$", dpi=300,
         output_file=None):
     """Draw a grid comparing the normalized CDFs of fitted samples.
 
@@ -688,6 +719,15 @@ def plot_model_cdf_comparison(
     the median's line style when the medians differ.
     ``row_labels`` optionally gives one label per row (e.g. the stellar
     parameter dividing its samples), centered above the row's panels.
+
+    With ``significance_panel`` (the default), a shorter panel of the same
+    width sits on top of each main panel, ``significance_height`` times its
+    height, showing the significance of the difference between the row's
+    first two CDFs (first minus second) across the grid: the difference of
+    their medians divided by the facing 16th/84th-percentile errors added in
+    quadrature (:func:`_cdf_difference_significance`), independent of
+    ``credible``.  These panels share one y-axis, labeled
+    ``significance_ylabel`` in the first column.
     ``panel_size`` is the size of each panel in inches.  The
     figure is saved with the catalog plots of
     :func:`plot_companions_by_stellar_parameter`, in the ``plots`` folder of
@@ -703,7 +743,9 @@ def plot_model_cdf_comparison(
     from matplotlib import pyplot as plt
     from matplotlib.colors import to_rgba
     from matplotlib.patches import Patch
-    from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
+    from matplotlib.ticker import (
+        FixedLocator, FuncFormatter, MaxNLocator, NullLocator,
+    )
 
     results_dir = Path(results_dir)
     rows = [[dict(curve) for curve in row] for row in rows]
@@ -777,20 +819,58 @@ def plot_model_cdf_comparison(
             else r"Companion mass [$M_{Jup}$]"
         )
     n_rows, n_columns = len(rows), len(models)
-    figure, axes = plt.subplots(
-        n_rows, n_columns, squeeze=False, sharex="col", sharey=True,
-        figsize=(panel_size[0]*n_columns, panel_size[1]*n_rows),
-    )
+    significance_axes = None
+    if significance_panel:
+        if significance_height <= 0:
+            raise ValueError("significance_height must be positive")
+        figure = plt.figure(figsize=(
+            panel_size[0]*n_columns,
+            panel_size[1]*(1 + significance_height)*n_rows,
+        ))
+        outer = figure.add_gridspec(n_rows, n_columns)
+        axes = np.empty((n_rows, n_columns), dtype=object)
+        significance_axes = np.empty((n_rows, n_columns), dtype=object)
+        for row_index in range(n_rows):
+            for column in range(n_columns):
+                # Each cell stacks the significance panel on its main panel.
+                inner = outer[row_index, column].subgridspec(
+                    2, 1, height_ratios=[significance_height, 1], hspace=0,
+                )
+                axes[row_index, column] = figure.add_subplot(
+                    inner[1],
+                    sharex=axes[0, column] if row_index else None,
+                    sharey=axes[0, 0] if row_index or column else None,
+                )
+                significance_axes[row_index, column] = figure.add_subplot(
+                    inner[0], sharex=axes[row_index, column],
+                    sharey=significance_axes[0, 0]
+                    if row_index or column else None,
+                )
+                axes[row_index, column].tick_params(
+                    labelbottom=row_index == n_rows - 1,
+                    labelleft=column == 0,
+                )
+                significance_axes[row_index, column].tick_params(
+                    labelbottom=False, labelleft=column == 0,
+                )
+    else:
+        figure, axes = plt.subplots(
+            n_rows, n_columns, squeeze=False, sharex="col", sharey=True,
+            figsize=(panel_size[0]*n_columns, panel_size[1]*n_rows),
+        )
     tail = 50*(1 - credible)
+    largest_significance = 1.0
     for row_index, row in enumerate(rows):
         for column, model in enumerate(models):
             axis = axes[row_index, column]
             grid_limits = []
+            curve_draws = []
             for curve_index, curve in enumerate(row):
                 grid, cdfs = model_cdf_samples(
                     chain_paths[row_index, curve_index, model], model,
                     n_grid=n_grid, max_samples=max_samples,
                 )
+                curve_draws.append((grid, cdfs))
                 low, median, high = np.percentile(
                     cdfs, [tail, 50, 100 - tail], axis=0
                 )
@@ -815,6 +895,31 @@ def plot_model_cdf_comparison(
                                   ls=outline_style)
                 axis.plot(grid, median, color=color, lw=2, ls=linestyle)
                 grid_limits.extend([grid[0], grid[-1]])
+            if significance_axes is not None:
+                significance_axis = significance_axes[row_index, column]
+                significance_axis.axhline(0, color="0.5", lw=0.8, ls=":")
+                if len(curve_draws) >= 2:
+                    (first_grid, first), (second_grid, second) = (
+                        curve_draws[:2]
+                    )
+                    if not np.array_equal(first_grid, second_grid):
+                        # Compare on the first curve's grid.
+                        second = np.array([
+                            np.interp(first_grid, second_grid, draw)
+                            for draw in second
+                        ])
+                    significance = _cdf_difference_significance(
+                        first, second
+                    )
+                    significance_axis.plot(first_grid, significance,
+                                           color=colors[model], lw=1.5)
+                    if np.isfinite(significance).any():
+                        largest_significance = max(
+                            largest_significance,
+                            np.nanmax(np.abs(significance)),
+                        )
+                if column == 0:
+                    significance_axis.set_ylabel(significance_ylabel)
             axis.set_xscale("log")
             axis.set_xlim(min(grid_limits), max(grid_limits))
             if xticks is not None:
@@ -859,7 +964,16 @@ def plot_model_cdf_comparison(
                 axis.set_title(title.format(
                     model=MODEL_TITLES.get(model, model)
                 ))
-    _set_figure_axis_labels(figure, xlabel, ylabel, axes, row_labels)
+    if significance_axes is not None:
+        # Symmetric about zero, with no tick labels at the panel edges, so
+        # they never collide with the main panels' labels below.
+        limit = 1.15*largest_significance
+        significance_axes[0, 0].set_ylim(-limit, limit)
+        significance_axes[0, 0].yaxis.set_major_locator(MaxNLocator(
+            nbins=4, steps=[1, 2, 5, 10], symmetric=True, prune="both",
+        ))
+    _set_figure_axis_labels(figure, xlabel, ylabel, axes, row_labels,
+                            top_axes=significance_axes)
 
     if output_file is None:
         first = rows[0][0]

@@ -1272,8 +1272,7 @@ def test_plot_model_cdf_comparison_draws_models_by_sample_pairs(
 
     output = post_fit_analysis.plot_model_cdf_comparison(
         tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "cdf_comparison",
-        credible=0.95,
-    )
+        credible=0.95, significance_panel=False)
 
     assert output == (tmp_path / "mtrue" / "allstars" / "paper_bounds" /
                       "plots" / "cdf_comparison.png")
@@ -1356,11 +1355,9 @@ def test_plot_model_cdf_comparison_custom_title_heads_each_column(
     figures = _capture_cdf_figure(monkeypatch)
     post_fit_analysis.plot_model_cdf_comparison(
         tmp_path, _CDF_ROWS[:1], ["sigmoid", "logG"], "fixed",
-        title="Fit: {model}",
-    )
+        title="Fit: {model}", significance_panel=False)
     post_fit_analysis.plot_model_cdf_comparison(
-        tmp_path, _CDF_ROWS[:1], "logG", "untitled", title=None,
-    )
+        tmp_path, _CDF_ROWS[:1], "logG", "untitled", title=None, significance_panel=False)
     assert [axis.get_title() for axis in figures[0].axes] == [
         "Fit: Sigmoid", "Fit: Log-Gaussian",
     ]
@@ -1404,8 +1401,7 @@ def test_plot_model_cdf_comparison_ticks_match_the_piecewise_bins(
     figures = _capture_cdf_figure(monkeypatch)
 
     post_fit_analysis.plot_model_cdf_comparison(
-        tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "ticks",
-    )
+        tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "ticks", significance_panel=False)
 
     for axis in figures[0].axes:
         assert list(axis.get_xticks()) == pytest.approx(edges)
@@ -1696,8 +1692,7 @@ def test_plot_model_cdf_comparison_labels_each_row(tmp_path, monkeypatch):
     figures = _capture_cdf_figure(monkeypatch)
     post_fit_analysis.plot_model_cdf_comparison(
         tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "rows",
-        title="{model} CDF", row_labels=["Stellar mass", "Metallicity"],
-    )
+        title="{model} CDF", row_labels=["Stellar mass", "Metallicity"], significance_panel=False)
     figure = figures[0]
     axes = figure.axes
     assert all(not axis.texts for axis in axes)
@@ -1720,8 +1715,7 @@ def test_plot_model_cdf_comparison_labels_each_row(tmp_path, monkeypatch):
         axis.get_window_extent(renderer).y0 for axis in axes[:2])
     with pytest.raises(ValueError, match="row_labels"):
         post_fit_analysis.plot_model_cdf_comparison(
-            tmp_path, _CDF_ROWS, ["sigmoid"], "bad", row_labels=["one"],
-        )
+            tmp_path, _CDF_ROWS, ["sigmoid"], "bad", row_labels=["one"], significance_panel=False)
 
 
 def test_two_parameter_variables_define_every_table_command(
@@ -1811,3 +1805,51 @@ def test_make_one_parameter_table_adds_an_optional_note(tmp_path):
         tmp_path, stellar_catalog_path=catalog,
     ).read_text()
     assert "tablenotetext" not in plain
+
+
+
+def test_cdf_difference_significance_uses_facing_errors():
+    first = np.array([[0.5, 1.0], [0.6, 1.0], [0.7, 1.0]] * 10)
+    second = np.array([[0.2, 1.0], [0.3, 1.0], [0.4, 1.0]] * 10)
+    significance = post_fit_analysis._cdf_difference_significance(
+        first, second
+    )
+    first_low, first_median = np.percentile(first[:, 0], [16, 50])
+    second_median, second_high = np.percentile(second[:, 0], [50, 84])
+    assert significance[0] == pytest.approx(
+        (first_median - second_median)
+        / np.hypot(first_median - first_low, second_high - second_median)
+    )
+    # Where every draw is pinned at 1, the significance is undefined.
+    assert np.isnan(significance[1])
+
+
+def test_plot_model_cdf_comparison_stacks_a_significance_panel(
+        tmp_path, monkeypatch):
+    _write_cdf_chains(tmp_path)
+    figures = _capture_cdf_figure(monkeypatch)
+    post_fit_analysis.plot_model_cdf_comparison(
+        tmp_path, _CDF_ROWS, ["sigmoid", "logG"], "significance",
+        row_labels=["Stellar mass", "Metallicity"],
+    )
+    figure = figures[0]
+    # Each cell adds its main panel, then the significance panel above it.
+    main, top = figure.axes[0::2], figure.axes[1::2]
+    assert len(main) == len(top) == 4
+    for lower, upper in zip(main, top):
+        lower_box, upper_box = lower.get_position(), upper.get_position()
+        assert upper_box.y0 == pytest.approx(lower_box.y1)
+        assert upper_box.x0 == pytest.approx(lower_box.x0)
+        assert upper_box.width == pytest.approx(lower_box.width)
+        assert upper_box.height < lower_box.height
+        assert lower.get_xlim() == upper.get_xlim()
+        # A zero line and one significance curve
+        assert len(upper.get_lines()) == 2
+    assert top[0].get_ylabel() == r"$\Delta/\sigma$"
+    assert not top[1].get_ylabel()
+    low, high = top[0].get_ylim()
+    assert low == pytest.approx(-high)
+    # Row labels sit above the significance panels.
+    labels = {text.get_text(): text for text in figure.texts}
+    assert labels["Stellar mass"].get_position()[1] > max(
+        axis.get_position().y1 for axis in top[:2])
