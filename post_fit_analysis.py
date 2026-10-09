@@ -638,6 +638,35 @@ def _cdf_difference_significance(first, second):
         return np.where(error > 1e-9, difference/error, np.nan)
 
 
+def _cdf_draw_difference_significance(first, second, seed=0):
+    """Return the pointwise significance from draw-by-draw CDF differences.
+
+    The two posteriors are independent, so draws are paired at random
+    (``min`` of the two sample counts, seeded by ``seed``) and differenced
+    curve by curve, giving the posterior of ``first - second`` at every grid
+    point without assuming Gaussian errors.  The significance is that
+    posterior's median divided by its 16th/84th-percentile error on the side
+    facing zero.  Points where the difference has no spread, such as the
+    ends of the grid, are ``nan``.
+    """
+    rng = np.random.default_rng(seed)
+    count = min(len(first), len(second))
+    difference = (
+        first[rng.permutation(len(first))[:count]] -
+        second[rng.permutation(len(second))[:count]]
+    )
+    low, median, high = np.percentile(difference, [16, 50, 84], axis=0)
+    error = np.where(median >= 0, median - low, high - median)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(error > 1e-9, median/error, np.nan)
+
+
+_CDF_SIGNIFICANCE_METHODS = {
+    "draws": _cdf_draw_difference_significance,
+    "quadrature": _cdf_difference_significance,
+}
+
+
 def _cdf_curve_handle(band_style, linestyle, show_line, band_alpha, hatch,
                       hatch_alpha, hatch_edge_width, outline_style,
                       outline_width):
@@ -673,7 +702,8 @@ def plot_model_cdf_comparison(
         band_alpha=0.3, hatch="++++", hatch_alpha=0.6, hatch_linewidth=0.6,
         hatch_edge_width=0.8, outline_style=":", outline_width=1.2,
         row_labels=None, significance_panel=True, significance_height=0.35,
-        significance_ylabel=r"$\Delta/\sigma$", dpi=300,
+        significance_ylabel=r"$\Delta/\sigma$", significance_method="draws",
+        significance_pair=(0, 1), significance_seed=0, dpi=300,
         output_file=None):
     """Draw a grid comparing the normalized CDFs of fitted samples.
 
@@ -722,12 +752,18 @@ def plot_model_cdf_comparison(
 
     With ``significance_panel`` (the default), a shorter panel of the same
     width sits on top of each main panel, ``significance_height`` times its
-    height, showing the significance of the difference between the row's
-    first two CDFs (first minus second) across the grid: the difference of
-    their medians divided by the facing 16th/84th-percentile errors added in
-    quadrature (:func:`_cdf_difference_significance`), independent of
-    ``credible``.  These panels share one y-axis, labeled
-    ``significance_ylabel`` in the first column.
+    height, showing the significance of the difference between two of the
+    row's CDFs across the grid.  ``significance_pair`` gives their positions
+    in each row (default ``(0, 1)``: first minus second).  With
+    ``significance_method="draws"`` (the default), randomly paired draws of
+    the two CDFs are differenced curve by curve and the significance is the
+    median difference over its 16th/84th-percentile error on the side
+    facing zero (:func:`_cdf_draw_difference_significance`, seeded by
+    ``significance_seed``); ``"quadrature"`` instead divides the difference
+    of the medians by the two curves' facing errors added in quadrature
+    (:func:`_cdf_difference_significance`).  Both ignore ``credible``.
+    These panels share one y-axis, labeled ``significance_ylabel`` in the
+    first column.
     ``panel_size`` is the size of each panel in inches.  The
     figure is saved with the catalog plots of
     :func:`plot_companions_by_stellar_parameter`, in the ``plots`` folder of
@@ -823,6 +859,26 @@ def plot_model_cdf_comparison(
     if significance_panel:
         if significance_height <= 0:
             raise ValueError("significance_height must be positive")
+        if significance_method not in _CDF_SIGNIFICANCE_METHODS:
+            raise ValueError(
+                "significance_method must be one of "
+                f"{sorted(_CDF_SIGNIFICANCE_METHODS)}"
+            )
+        significance_pair = tuple(significance_pair)
+        if (len(significance_pair) != 2 or
+                len(set(significance_pair)) != 2 or
+                any(not isinstance(index, (int, np.integer)) or index < 0
+                    for index in significance_pair)):
+            raise ValueError(
+                "significance_pair must give two distinct curve positions"
+            )
+        short_rows = [index for index, row in enumerate(rows)
+                      if max(significance_pair) >= len(row)]
+        if short_rows:
+            raise ValueError(
+                f"rows {short_rows} have no curves at significance_pair "
+                f"{significance_pair}"
+            )
         figure = plt.figure(figsize=(
             panel_size[0]*n_columns,
             panel_size[1]*(1 + significance_height)*n_rows,
@@ -898,26 +954,29 @@ def plot_model_cdf_comparison(
             if significance_axes is not None:
                 significance_axis = significance_axes[row_index, column]
                 significance_axis.axhline(0, color="0.5", lw=0.8, ls=":")
-                if len(curve_draws) >= 2:
-                    (first_grid, first), (second_grid, second) = (
-                        curve_draws[:2]
+                first_grid, first = curve_draws[significance_pair[0]]
+                second_grid, second = curve_draws[significance_pair[1]]
+                if not np.array_equal(first_grid, second_grid):
+                    # Compare on the first curve's grid.
+                    second = np.array([
+                        np.interp(first_grid, second_grid, draw)
+                        for draw in second
+                    ])
+                if significance_method == "draws":
+                    significance = _cdf_draw_difference_significance(
+                        first, second, significance_seed
                     )
-                    if not np.array_equal(first_grid, second_grid):
-                        # Compare on the first curve's grid.
-                        second = np.array([
-                            np.interp(first_grid, second_grid, draw)
-                            for draw in second
-                        ])
+                else:
                     significance = _cdf_difference_significance(
                         first, second
                     )
-                    significance_axis.plot(first_grid, significance,
-                                           color=colors[model], lw=1.5)
-                    if np.isfinite(significance).any():
-                        largest_significance = max(
-                            largest_significance,
-                            np.nanmax(np.abs(significance)),
-                        )
+                significance_axis.plot(first_grid, significance,
+                                       color=colors[model], lw=1.5)
+                if np.isfinite(significance).any():
+                    largest_significance = max(
+                        largest_significance,
+                        np.nanmax(np.abs(significance)),
+                    )
                 if column == 0:
                     significance_axis.set_ylabel(significance_ylabel)
             axis.set_xscale("log")

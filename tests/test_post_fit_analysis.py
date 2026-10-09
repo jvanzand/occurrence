@@ -1853,3 +1853,63 @@ def test_plot_model_cdf_comparison_stacks_a_significance_panel(
     labels = {text.get_text(): text for text in figure.texts}
     assert labels["Stellar mass"].get_position()[1] > max(
         axis.get_position().y1 for axis in top[:2])
+
+
+def test_cdf_draw_difference_significance_uses_paired_differences():
+    rng = np.random.default_rng(3)
+    first = np.column_stack([rng.normal(0.6, 0.05, 400), np.ones(400)])
+    second = np.column_stack([rng.normal(0.4, 0.05, 300), np.ones(300)])
+    significance = post_fit_analysis._cdf_draw_difference_significance(
+        first, second, seed=1
+    )
+    # Independent Gaussians: the difference is ~0.2 +/- 0.07.
+    assert significance[0] == pytest.approx(0.2/np.hypot(0.05, 0.05),
+                                            rel=0.15)
+    assert np.isnan(significance[1])
+    # Seeded, so repeatable.
+    assert np.array_equal(
+        significance,
+        post_fit_analysis._cdf_draw_difference_significance(
+            first, second, seed=1),
+        equal_nan=True,
+    )
+
+
+def test_plot_model_cdf_comparison_differences_the_chosen_pair(
+        tmp_path, monkeypatch):
+    _write_cdf_chains(tmp_path, tier2s=("highMstar", "lowMstar", "highFeH"))
+    rows = [_cdf_row("highMstar", "lowMstar", "highFeH")]
+    calls = []
+    original = post_fit_analysis._cdf_draw_difference_significance
+
+    def record(first, second, seed=0):
+        calls.append((first.copy(), second.copy()))
+        return original(first, second, seed)
+
+    monkeypatch.setattr(post_fit_analysis,
+                        "_cdf_draw_difference_significance", record)
+    drawn = {}
+    original_samples = post_fit_analysis.model_cdf_samples
+
+    def samples(path, model, **kwargs):
+        grid, cdfs = original_samples(path, model, **kwargs)
+        drawn[path.parent.parent.parent.name] = cdfs
+        return grid, cdfs
+
+    monkeypatch.setattr(post_fit_analysis, "model_cdf_samples", samples)
+    post_fit_analysis.plot_model_cdf_comparison(
+        tmp_path, rows, ["sigmoid"], "pair", significance_pair=(2, 0),
+    )
+    (first, second), = calls
+    assert np.array_equal(first, drawn["highFeH"])
+    assert np.array_equal(second, drawn["highMstar"])
+
+    with pytest.raises(ValueError, match="significance_pair"):
+        post_fit_analysis.plot_model_cdf_comparison(
+            tmp_path, rows, ["sigmoid"], "pair", significance_pair=(0, 3))
+    with pytest.raises(ValueError, match="significance_pair"):
+        post_fit_analysis.plot_model_cdf_comparison(
+            tmp_path, rows, ["sigmoid"], "pair", significance_pair=(1, 1))
+    with pytest.raises(ValueError, match="significance_method"):
+        post_fit_analysis.plot_model_cdf_comparison(
+            tmp_path, rows, ["sigmoid"], "pair", significance_method="ks")
