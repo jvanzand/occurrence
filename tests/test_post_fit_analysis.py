@@ -696,6 +696,137 @@ def test_make_two_parameter_tables_can_embed_values_without_mass_range(
     assert "high & high & 50 & 5.0 & 0.70" in original
 
 
+def test_make_two_parameter_tables_use_quadrature_beyond_resolution(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_statistics",
+        lambda result_dir: {
+            "Nstars": "50", "Neff": "5.0", "AvgCompl": "0.70",
+            "IntOcc": r"0.10^{+0.02}_{-0.02}",
+        },
+    )
+    # High-mass draws never overlap low-mass draws, so the posterior
+    # significance is unresolved and the quadrature value is used.
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_occurrence_samples",
+        lambda result_dir: np.linspace(0.0, 1.0, 101) + (
+            10.0 if result_dir.parent.name.startswith("high") else 0.0
+        ),
+    )
+    monkeypatch.setattr(
+        post_fit_analysis, "_two_parameter_dynamic_ranges",
+        lambda *args: {
+            (varied, fixed): 2.0
+            for varied, fixed, _, _ in
+            post_fit_analysis._two_parameter_comparisons()
+        },
+    )
+    outputs = post_fit_analysis.make_two_parameter_tables(
+        tmp_path, use_latex_variables=False,
+    )
+    reordered = outputs["reordered"].read_text()
+    expected, method = post_fit_analysis._comparison_significance(
+        np.linspace(0.0, 1.0, 101) + 10.0, np.linspace(0.0, 1.0, 101)
+    )
+    assert method == "quadrature"
+    assert f"${expected}$" in reordered
+    assert ">" not in reordered
+
+
+def _one_parameter_catalog(tmp_path):
+    catalog_path = tmp_path / "stars.csv"
+    pd.DataFrame([
+        {"Mstar": mass, "feh": feh}
+        for mass, feh in ((0.5, -0.3), (0.8, -0.1), (1.2, 0.2), (2.0, 0.4))
+    ]).to_csv(catalog_path, index=False)
+    return catalog_path
+
+
+def test_make_one_parameter_tables_reference_existing_variables(tmp_path):
+    outputs = post_fit_analysis.make_one_parameter_tables(
+        tmp_path, stellar_catalog_path=_one_parameter_catalog(tmp_path),
+    )
+    reordered = outputs["reordered"].read_text()
+    original = outputs["original"].read_text()
+
+    assert outputs["reordered"] == (
+        tmp_path / "paper_tables" /
+        "one_parameter_OR_reordered_mtrue_paper_bounds.tex"
+    )
+    assert outputs["original"] == (
+        tmp_path / "paper_tables" / "one_parameter_OR_mtrue_paper_bounds.tex"
+    )
+    # The cells use the commands make_variables writes for the 1D fits.
+    assert (
+        r"Mass & \McLowMstarPaperBoundsPiecewiseIntOccBinaZero & "
+        r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero & "
+        r"\McMstarPaperBoundsPiecewiseIntOccSignificanceBinaZero & 2.5 \\"
+        in reordered
+    )
+    # Metallicity medians are compared in linear abundance: 10^(0.3+0.2).
+    assert (
+        r"[Fe/H] & \McLowFeHPaperBoundsPiecewiseIntOccBinaZero & "
+        r"\McHighFeHPaperBoundsPiecewiseIntOccBinaZero & "
+        r"\McFeHPaperBoundsPiecewiseIntOccSignificanceBinaZero & 3.2 \\"
+        in reordered
+    )
+    assert r"\begin{deluxetable*}{lccccc}" in original
+    assert (
+        r"Mass & high & \McHighMstarPaperBoundsNstars & "
+        r"\McHighMstarPaperBoundsNeff & \McHighMstarPaperBoundsAvgCompl & "
+        r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero \\" in original
+    )
+    assert r"[Fe/H] & low & \McLowFeHPaperBoundsNstars" in original
+
+
+def test_make_one_parameter_tables_can_embed_values(tmp_path, monkeypatch):
+    for tier2_dir in ("highMstar", "lowMstar", "highFeH", "lowFeH"):
+        chain_dir = tmp_path / "mtrue" / tier2_dir / "paper_bounds" / "saved_chains"
+        chain_dir.mkdir(parents=True)
+        (chain_dir / "chains_piecewise.npz").touch()
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_statistics",
+        lambda result_dir: {
+            "Nstars": "200", "Neff": "40.0", "AvgCompl": "0.75",
+            "IntOcc": "unused",
+        },
+    )
+    draws = np.linspace(0.1, 0.2, 101)
+
+    def stack_samples(path, stack_dim):
+        assert stack_dim == "a"
+        offset = 0.05 if path.parent.parent.parent.name.startswith("high") else 0.0
+        return np.column_stack([draws + offset, draws + 1.0])
+
+    monkeypatch.setattr(
+        post_fit_analysis, "_piecewise_stack_occurrence_samples", stack_samples,
+    )
+    outputs = post_fit_analysis.make_one_parameter_tables(
+        tmp_path, use_latex_variables=False,
+        stellar_catalog_path=_one_parameter_catalog(tmp_path),
+    )
+    reordered = outputs["reordered"].read_text()
+    original = outputs["original"].read_text()
+
+    low = post_fit_analysis._format_occurrence_samples(draws)
+    high = post_fit_analysis._format_occurrence_samples(draws + 0.05)
+    significance, _ = post_fit_analysis._comparison_significance(
+        draws + 0.05, draws
+    )
+    assert f"Mass & ${low}$ & ${high}$ & ${significance}$ & 2.5 \\\\" in reordered
+    assert f"Mass & high & 200 & 40.0 & 0.75 & ${high}$ \\\\" in original
+    assert "unused" not in original + reordered
+
+
+def test_make_one_parameter_tables_validate_inputs(tmp_path):
+    with pytest.raises(ValueError, match="tier2_types"):
+        post_fit_analysis.make_one_parameter_tables(
+            tmp_path, tier2_types=["Act"]
+        )
+    with pytest.raises(ValueError, match="stack_bin"):
+        post_fit_analysis.make_one_parameter_tables(tmp_path, stack_bin=-1)
+
+
 def test_posterior_difference_significance_uses_sign_probability():
     probability, z_score, lower_bound = (
         post_fit_analysis._posterior_difference_significance(
@@ -1552,3 +1683,75 @@ def test_plot_model_cdf_comparison_labels_each_row(tmp_path, monkeypatch):
         post_fit_analysis.plot_model_cdf_comparison(
             tmp_path, _CDF_ROWS, ["sigmoid"], "bad", row_labels=["one"],
         )
+
+
+def test_two_parameter_variables_define_every_table_command(
+        tmp_path, monkeypatch):
+    for tier2_dir in post_fit_analysis._TWO_PARAMETER_TIER2_DIRS:
+        result_dir = tmp_path / "mtrue" / tier2_dir / "stellar2params"
+        (result_dir / "saved_dicts").mkdir(parents=True)
+        (result_dir / "saved_dicts" / post_fit_analysis.SUMMARY_FILENAME).touch()
+        (result_dir / "saved_chains").mkdir()
+        (result_dir / "saved_chains" / "chains_piecewise.npz").touch()
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_statistics",
+        lambda result_dir: {
+            "Nstars": "50", "Neff": "5.0", "AvgCompl": "0.70",
+            "IntOcc": r"0.10^{+0.02}_{-0.02}",
+        },
+    )
+    # High-mass draws sit far above low-mass ones (quadrature fallback);
+    # metallicity draws overlap (posterior significance).
+    def occurrence_samples(result_dir):
+        tier2_dir = result_dir.parent.name
+        offset = (10.0 if tier2_dir.startswith("high") else 0.0) + (
+            0.5 if "highFeH" in tier2_dir else 0.0
+        )
+        return np.linspace(0.0, 1.0, 101) + offset
+
+    monkeypatch.setattr(
+        post_fit_analysis, "_three_parameter_occurrence_samples",
+        occurrence_samples,
+    )
+    monkeypatch.setattr(
+        post_fit_analysis, "_two_parameter_dynamic_ranges",
+        lambda *args: {
+            (varied, fixed): 2.0
+            for varied, fixed, _, _ in
+            post_fit_analysis._two_parameter_comparisons()
+        },
+    )
+    command_names = set()
+    blocks, missing_results, missing_comparisons = (
+        post_fit_analysis._two_parameter_variable_blocks(
+            tmp_path, ["mtrue"], ["stellar2params"], None, None,
+            command_names,
+        )
+    )
+    assert not missing_results and not missing_comparisons
+    variables = "\n\n".join(blocks)
+    assert (
+        r"\newcommand{\McStellarTwoParamsHighMstarHighFeHNstars}"
+        r"{\ensuremath{50}}" in variables
+    )
+    quadrature, method = post_fit_analysis._comparison_significance(
+        np.linspace(0.0, 1.0, 101) + 10.0, np.linspace(0.0, 1.0, 101)
+    )
+    assert method == "quadrature"
+    assert (
+        r"\newcommand{\McStellarTwoParamsMassLowFeHSignificance}"
+        rf"{{\ensuremath{{{quadrature}}}}}" in variables
+    )
+    assert (
+        r"\newcommand{\McStellarTwoParamsFeHHighMstarDynamicRange}"
+        r"{\ensuremath{2.0}}" in variables
+    )
+
+    # The default (variables-referencing) tables use exactly these commands.
+    outputs = post_fit_analysis.make_two_parameter_tables(tmp_path)
+    used = set(re.findall(
+        r"\\(Mc[A-Za-z]+)",
+        outputs["reordered"].read_text() + outputs["original"].read_text(),
+    ))
+    assert used
+    assert used <= command_names

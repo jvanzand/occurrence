@@ -2205,8 +2205,9 @@ def make_two_parameter_tables(
     Unlike the age-activity analysis, dynamic ranges use the complete stellar
     catalog without restricting stellar mass to 0.82--1.21 solar masses.
     Set ``use_latex_variables=False`` to embed values from the saved results;
-    otherwise both tables contain the command names that a future variables
-    generator can provide.
+    otherwise both tables contain the command names that
+    :func:`make_variables` writes when given ``two_parameter_t3``.  Embedded significances follow the variables'
+    rules: posterior when the draws resolve it, quadrature otherwise.
     """
     results_dir = Path(results_dir)
     if tier2_dirs is None:
@@ -2268,15 +2269,13 @@ def make_two_parameter_tables(
             significance_values[key] = rf"\{significance_name}"
             dynamic_range_values[key] = rf"\{dynamic_range_name}"
         else:
-            probability, z_score, lower_bound = (
-                _posterior_difference_significance(
-                    posterior_samples[low_levels],
-                    posterior_samples[high_levels],
-                )
+            # Same rules as the variables: beyond what the draws resolve,
+            # fall back to the quadrature significance.
+            significance, _ = _comparison_significance(
+                posterior_samples[high_levels],
+                posterior_samples[low_levels],
             )
-            significance_values[key] = (
-                f"${_format_posterior_significance(z_score, lower_bound)}$"
-            )
+            significance_values[key] = f"${significance}$"
             dynamic_range_values[key] = (
                 f"{numerical_dynamic_ranges[key]:.1f}"
             )
@@ -2377,6 +2376,240 @@ def make_two_parameter_tables(
         original_output_path = (
             results_dir / PAPER_TABLES_DIRNAME /
             f"two_parameter_OR_{t1}_{t3}.tex"
+        )
+    else:
+        original_output_path = Path(original_output_file)
+    original_output_path.parent.mkdir(parents=True, exist_ok=True)
+    original_output_path.write_text(
+        "\n".join(original_lines) + "\n", encoding="utf-8"
+    )
+    return {
+        "reordered": reordered_output_path,
+        "original": original_output_path,
+    }
+
+
+# Table labels and stellar-catalog columns for the one-parameter tables,
+# keyed by Tier 2 type.
+_ONE_PARAMETER_TYPES = {
+    "Mstar": ("Mass", "Mstar"),
+    "FeH": ("[Fe/H]", "feh"),
+}
+
+
+def _one_parameter_dynamic_ranges(tier2_types, catalog_path=None, cuts=None):
+    """Return high/low median ratios of each parameter over the full catalog.
+
+    Metallicity medians are converted from dex to linear abundance first, as
+    in the two- and three-parameter tables.
+    """
+    import pandas as pd
+
+    if catalog_path is None:
+        catalog_path = (
+            Path(__file__).resolve().parent / "cls_files" /
+            "cls_all_stars_all_params.csv"
+        )
+    else:
+        catalog_path = Path(catalog_path)
+    parameter_cuts = {
+        "Mstar": _THREE_PARAMETER_DEFAULT_CUTS["Mstar"],
+        "feh": _THREE_PARAMETER_DEFAULT_CUTS["feh"],
+    }
+    if cuts is not None:
+        unknown = set(cuts) - set(parameter_cuts)
+        if unknown:
+            raise ValueError(
+                f"unknown one-parameter cut names: {sorted(unknown)}"
+            )
+        parameter_cuts.update(cuts)
+
+    catalog = pd.read_csv(catalog_path)
+    dynamic_ranges = {}
+    for tier2_type in tier2_types:
+        column = _ONE_PARAMETER_TYPES[tier2_type][1]
+        if column not in catalog.columns:
+            raise KeyError(f"{catalog_path} lacks column {column!r}")
+        values = pd.to_numeric(catalog[column], errors="coerce").dropna()
+        cut = parameter_cuts[column]
+        medians = [float(np.median(values[values <= cut])),
+                   float(np.median(values[values > cut]))]
+        if column == "feh":
+            medians = [10**value for value in medians]
+        lower, upper = medians
+        if lower <= 0:
+            raise ValueError(
+                f"dynamic-range medians must be positive; got {medians} for "
+                f"{tier2_type}"
+            )
+        dynamic_ranges[tier2_type] = upper/lower
+    return dynamic_ranges
+
+
+def make_one_parameter_tables(
+        results_dir, t1="mtrue", t3="paper_bounds",
+        tier2_types=("Mstar", "FeH"), stack_dim="a", stack_bin=0,
+        reordered_caption="Occurrence Rates of High and Low Stellar Samples",
+        reordered_label="tab:one_param_OR_reordered",
+        original_caption="Occurrence Rates by Stellar Mass or Metallicity",
+        original_label="tab:one_param_OR",
+        reordered_output_file=None, original_output_file=None,
+        use_latex_variables=True, stellar_catalog_path=None,
+        one_parameter_cuts=None):
+    """Create reordered and original-form tables for single stellar splits.
+
+    Each Tier 2 type in ``tier2_types`` (``"Mstar"``, ``"FeH"``) contributes
+    its ``high`` and ``low`` samples from the one-parameter fits in
+    ``t1/<high|low><type>/t3``, so no extra runs are needed.  The original
+    table lists every sample's star count, effective companions, average
+    completeness, and integrated piecewise occurrence; the reordered table
+    puts each pair's low and high occurrence side by side with the
+    significance of their difference and the high/low ratio of the
+    parameter's median, as in :func:`make_two_parameter_tables`.
+
+    By default the cells reference the commands :func:`make_variables`
+    already emits for these samples (e.g. ``\\McHighMstarPaperBoundsNstars``
+    and ``\\McMstarPaperBoundsPiecewiseIntOccSignificanceBinaZero``), with
+    occurrence from stack bin ``stack_bin`` along ``stack_dim``.  Set
+    ``use_latex_variables=False`` to embed numbers from the saved results
+    instead; significances then follow the same rules as the variables.
+    The median ratios always come from the stellar catalog, using
+    ``stellar_catalog_path`` and ``one_parameter_cuts``.
+    """
+    results_dir = Path(results_dir)
+    tier2_types = list(tier2_types)
+    unknown = sorted(set(tier2_types) - set(_ONE_PARAMETER_TYPES))
+    if not tier2_types or unknown:
+        raise ValueError(
+            f"tier2_types must list types from {sorted(_ONE_PARAMETER_TYPES)}"
+            f"; got {tier2_types}"
+        )
+    if len(set(tier2_types)) != len(tier2_types):
+        raise ValueError("tier2_types contains duplicates")
+    if not isinstance(use_latex_variables, (bool, np.bool_)):
+        raise TypeError("use_latex_variables must be a boolean")
+    if stack_dim not in {"a", "m"}:
+        raise ValueError("stack_dim must be 'a' or 'm'")
+    if (not isinstance(stack_bin, (int, np.integer)) or stack_bin < 0):
+        raise ValueError("stack_bin must be a nonnegative integer")
+    bin_suffix = f"Bin{stack_dim}{_number_word(stack_bin)}"
+
+    table_values = {}
+    significance_values = {}
+    for tier2_type in tier2_types:
+        samples = {}
+        for level in ("high", "low"):
+            tier2_dir = f"{level}{tier2_type}"
+            result_dir = results_dir / t1 / tier2_dir / t3
+            if use_latex_variables:
+                prefix = _experiment_prefix(t1, tier2_dir, t3)
+                values = {
+                    statistic: rf"\{prefix}{statistic}"
+                    for statistic in ("Nstars", "Neff", "AvgCompl")
+                }
+                values["IntOcc"] = rf"\{prefix}PiecewiseIntOcc{bin_suffix}"
+            else:
+                values = dict(_three_parameter_statistics(result_dir))
+                chain_path = result_dir / "saved_chains" / "chains_piecewise.npz"
+                if not chain_path.is_file():
+                    raise FileNotFoundError(
+                        f"piecewise chain not found: {chain_path}"
+                    )
+                occurrence = _piecewise_stack_occurrence_samples(
+                    chain_path, stack_dim
+                )
+                if stack_bin >= occurrence.shape[1]:
+                    raise ValueError(
+                        f"stack_bin {stack_bin} exceeds the "
+                        f"{occurrence.shape[1]} bins in {chain_path}"
+                    )
+                samples[level] = occurrence[:, stack_bin]
+                values["IntOcc"] = (
+                    f"${_format_occurrence_samples(samples[level])}$"
+                )
+            table_values[(tier2_type, level)] = values
+        if use_latex_variables:
+            significance_values[tier2_type] = (
+                "\\" + _tier1_prefix(t1) + _latex_token(tier2_type) +
+                _latex_token(Path(t3).name) + "PiecewiseIntOccSignificance" +
+                bin_suffix
+            )
+        else:
+            significance, _ = _comparison_significance(
+                samples["high"], samples["low"]
+            )
+            significance_values[tier2_type] = f"${significance}$"
+    dynamic_ranges = _one_parameter_dynamic_ranges(
+        tier2_types, stellar_catalog_path, one_parameter_cuts
+    )
+
+    reordered_lines = [
+        r"\begin{deluxetable*}{ccccc}",
+        rf"\tablecaption{{{reordered_caption}}}",
+        rf"\label{{{reordered_label}}}",
+        r"\tablehead{",
+        r"\colhead{Parameter} &",
+        r"\colhead{Low} &",
+        r"\colhead{High} &",
+        r"\colhead{Significance} &",
+        r"\colhead{High/Low}",
+        r"}",
+        r"\startdata",
+    ]
+    for tier2_type in tier2_types:
+        reordered_lines.append(
+            rf"{_ONE_PARAMETER_TYPES[tier2_type][0]} & "
+            rf"{table_values[(tier2_type, 'low')]['IntOcc']} & "
+            rf"{table_values[(tier2_type, 'high')]['IntOcc']} & "
+            rf"{significance_values[tier2_type]} & "
+            rf"{dynamic_ranges[tier2_type]:.1f} \\"
+        )
+    reordered_lines.extend([
+        r"\enddata",
+        r"\end{deluxetable*}",
+    ])
+    if reordered_output_file is None:
+        reordered_output_path = (
+            results_dir / PAPER_TABLES_DIRNAME /
+            f"one_parameter_OR_reordered_{t1}_{Path(t3).name}.tex"
+        )
+    else:
+        reordered_output_path = Path(reordered_output_file)
+    reordered_output_path.parent.mkdir(parents=True, exist_ok=True)
+    reordered_output_path.write_text(
+        "\n".join(reordered_lines) + "\n", encoding="utf-8"
+    )
+
+    original_lines = [
+        r"\begin{deluxetable*}{lccccc}",
+        rf"\tablecaption{{{original_caption}}}",
+        rf"\label{{{original_label}}}",
+        r"\tablehead{",
+        r"\colhead{Parameter} &",
+        r"\colhead{Sample} &",
+        r"\colhead{$N_{\star}$} &",
+        r"\colhead{$N_{\mathrm{eff}}$} &",
+        r"\colhead{Completeness} &",
+        r"\colhead{Occurrence Rate}",
+        r"}",
+        r"\startdata",
+    ]
+    for tier2_type in tier2_types:
+        for level in ("high", "low"):
+            values = table_values[(tier2_type, level)]
+            original_lines.append(
+                f"{_ONE_PARAMETER_TYPES[tier2_type][0]} & {level} & "
+                f"{values['Nstars']} & {values['Neff']} & "
+                f"{values['AvgCompl']} & {values['IntOcc']} " + r"\\"
+            )
+    original_lines.extend([
+        r"\enddata",
+        r"\end{deluxetable*}",
+    ])
+    if original_output_file is None:
+        original_output_path = (
+            results_dir / PAPER_TABLES_DIRNAME /
+            f"one_parameter_OR_{t1}_{Path(t3).name}.tex"
         )
     else:
         original_output_path = Path(original_output_file)
@@ -2697,12 +2930,94 @@ def _sample_comparison_blocks(
     return blocks
 
 
+def _two_parameter_variable_blocks(
+        results_dir, tier1_dirs, two_parameter_t3s, stellar_catalog_path,
+        two_parameter_cuts, command_names):
+    """Build variables for the mass-metallicity subsets of each Tier 3 run.
+
+    Each subset gets the statistics in :func:`make_two_parameter_tables`
+    (``Nstars``, ``Neff``, ``AvgCompl``, ``PiecewiseIntOcc``), and each
+    comparison in the reordered table gets a ``Significance`` (posterior, or
+    quadrature beyond what the draws resolve) and a ``DynamicRange``.
+    Returns the blocks and the subsets and comparisons that were missing.
+    """
+    blocks, missing_results, missing_comparisons = [], [], []
+
+    def add(block, name, value):
+        if name in command_names:
+            raise ValueError(f"duplicate LaTeX command name: {name}")
+        command_names.add(name)
+        block.append(_command(name, value))
+
+    for two_parameter_t3 in two_parameter_t3s:
+        for tier1_dir in tier1_dirs:
+            tier1_name = Path(tier1_dir).name
+            samples = {}
+            for tier2_dir in _TWO_PARAMETER_TIER2_DIRS:
+                result_dir = (
+                    results_dir / tier1_dir / tier2_dir / two_parameter_t3
+                )
+                summary_path = result_dir / "saved_dicts" / SUMMARY_FILENAME
+                if not summary_path.is_file():
+                    missing_results.append(
+                        _result_key(tier1_dir, tier2_dir, two_parameter_t3)
+                    )
+                    continue
+                levels = _two_parameter_levels(tier2_dir)
+                block = [
+                    "%"*72,
+                    f"% {tier1_name} / {tier2_dir} / {two_parameter_t3}",
+                ]
+                for statistic, value in _three_parameter_statistics(
+                        result_dir).items():
+                    add(block, _two_parameter_command_name(
+                        tier1_name, two_parameter_t3, levels, statistic
+                    ), value)
+                blocks.append("\n".join(block))
+                if (result_dir / "saved_chains" /
+                        "chains_piecewise.npz").is_file():
+                    samples[levels] = _three_parameter_occurrence_samples(
+                        result_dir
+                    )
+
+            block = [
+                "%"*72,
+                f"% {tier1_name} / {two_parameter_t3} comparisons",
+            ]
+            dynamic_ranges = None
+            for varied_parameter, fixed_level, low_levels, high_levels in (
+                    _two_parameter_comparisons()):
+                significance_name = _two_parameter_comparison_command_name(
+                    tier1_name, two_parameter_t3, varied_parameter,
+                    fixed_level, "Significance",
+                )
+                if low_levels not in samples or high_levels not in samples:
+                    missing_comparisons.append(significance_name)
+                    continue
+                significance, _ = _comparison_significance(
+                    samples[high_levels], samples[low_levels]
+                )
+                add(block, significance_name, significance)
+                if dynamic_ranges is None:
+                    dynamic_ranges = _two_parameter_dynamic_ranges(
+                        stellar_catalog_path, two_parameter_cuts
+                    )
+                add(block, _two_parameter_comparison_command_name(
+                    tier1_name, two_parameter_t3, varied_parameter,
+                    fixed_level, "DynamicRange",
+                ), f"{dynamic_ranges[(varied_parameter, fixed_level)]:.1f}")
+            if len(block) > 2:
+                blocks.append("\n".join(block))
+    return blocks, missing_results, missing_comparisons
+
+
 def make_variables(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim="a",
         three_parameter_t3="stellar3params", stellar_catalog_path=None,
         three_parameter_cuts=None, low_first_comparisons=(),
         standalone_tier2_dirs=(), tier3_stack_dims=None,
-        percent_tier3_dirs=()):
+        percent_tier3_dirs=(), two_parameter_t3=None,
+        two_parameter_cuts=None):
     """Write non-model fit statistics to a LaTeX variables file.
 
     ``results_dir`` is the parent of all Tier 1 directories.  The output is
@@ -2756,6 +3071,14 @@ def make_variables(
     ``{"cui_run": "m"}`` for rates per mass bin over one separation bin).
     Integrated piecewise occurrence for the Tier 3 directories in
     ``percent_tier3_dirs`` is written in percent.
+
+    ``two_parameter_t3`` names one or more Tier 3 directories (or ``None``)
+    holding the mass-metallicity subsets (``highMstarhighFeH`` etc.).  Their
+    statistics, comparison significances, and dynamic ranges get the
+    command names :func:`make_two_parameter_tables` references, e.g.
+    ``\\McStellarTwoParamsHighMstarHighFeHPiecewiseIntOcc`` and
+    ``\\McStellarTwoParamsMassHighFeHSignificance``.  Dynamic ranges use the
+    full stellar catalog with ``two_parameter_cuts``.
 
     Returns
     -------
@@ -3131,6 +3454,31 @@ def make_variables(
                     ))
             if len(comparison_block) > 2:
                 blocks.append("\n".join(comparison_block))
+    if two_parameter_t3 is None:
+        two_parameter_t3s = []
+    elif isinstance(two_parameter_t3, (str, os.PathLike)):
+        two_parameter_t3s = [two_parameter_t3]
+    else:
+        two_parameter_t3s = list(two_parameter_t3)
+    two_blocks, missing_two_results, missing_two_comparisons = (
+        _two_parameter_variable_blocks(
+            results_dir, tier1_dirs, two_parameter_t3s,
+            stellar_catalog_path, two_parameter_cuts, command_names,
+        )
+    )
+    blocks.extend(two_blocks)
+    if missing_two_results:
+        print(
+            "post_fit_analysis.make_variables: two-parameter occurrence "
+            "results have not been calculated for: "
+            + ", ".join(missing_two_results)
+        )
+    if missing_two_comparisons:
+        print(
+            "post_fit_analysis.make_variables: two-parameter significance "
+            "could not be calculated without both piecewise chains for: "
+            + ", ".join(missing_two_comparisons)
+        )
     if missing_three_parameter_results:
         print(
             "post_fit_analysis.make_variables: three-parameter occurrence "
