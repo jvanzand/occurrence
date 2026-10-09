@@ -1843,16 +1843,16 @@ def test_plot_model_cdf_comparison_stacks_a_significance_panel(
         assert upper_box.width == pytest.approx(lower_box.width)
         assert upper_box.height < lower_box.height
         assert lower.get_xlim() == upper.get_xlim()
-        # A zero line, red dotted lines at +/-2, and one significance curve
-        lines = upper.get_lines()
-        assert len(lines) == 4
-        assert sorted(line.get_ydata()[0] for line in lines[1:3]) == [-2, 2]
-        assert all(line.get_color() == "red" and line.get_linestyle() == ":"
-                   for line in lines[1:3])
-    assert top[0].get_ylabel() == r"$\Delta/\sigma$"
+        # A red dotted line at 2 and one nonnegative significance curve
+        threshold, curve = upper.get_lines()
+        assert threshold.get_color() == "red"
+        assert threshold.get_linestyle() == ":"
+        assert list(threshold.get_ydata()) == [2, 2]
+        assert not (np.asarray(curve.get_ydata()) < 0).any()
+    assert top[0].get_ylabel() == r"$|\Delta|/\sigma$"
     assert not top[1].get_ylabel()
     low, high = top[0].get_ylim()
-    assert low == pytest.approx(-high)
+    assert low == 0 and high > 2
     # Row labels sit above the significance panels.
     labels = {text.get_text(): text for text in figure.texts}
     assert labels["Stellar mass"].get_position()[1] > max(
@@ -1934,8 +1934,8 @@ def test_plot_model_cdf_comparison_threshold_lines_are_optional(
     )
     plain, five = (figure.axes[1] for figure in figures)
     assert not any(line.get_color() == "red" for line in plain.get_lines())
-    assert sorted(line.get_ydata()[0] for line in five.get_lines()
-                  if line.get_color() == "red") == [-5, 5]
+    assert [line.get_ydata()[0] for line in five.get_lines()
+            if line.get_color() == "red"] == [5]
     # The axis always reaches past the threshold lines.
     assert five.get_ylim()[1] > 5
     with pytest.raises(ValueError, match="significance_threshold"):

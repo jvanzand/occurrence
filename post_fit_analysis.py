@@ -702,7 +702,7 @@ def plot_model_cdf_comparison(
         band_alpha=0.3, hatch="++++", hatch_alpha=0.6, hatch_linewidth=0.6,
         hatch_edge_width=0.8, outline_style=":", outline_width=1.2,
         row_labels=None, significance_panel=True, significance_height=0.35,
-        significance_ylabel=r"$\Delta/\sigma$", significance_method="draws",
+        significance_ylabel=r"$|\Delta|/\sigma$", significance_method="draws",
         significance_pair=(0, 1), significance_seed=0,
         significance_threshold=2, dpi=300,
         output_file=None):
@@ -754,8 +754,10 @@ def plot_model_cdf_comparison(
     With ``significance_panel`` (the default), a shorter panel of the same
     width sits on top of each main panel, ``significance_height`` times its
     height, showing the significance of the difference between two of the
-    row's CDFs across the grid.  ``significance_pair`` gives their positions
-    in each row (default ``(0, 1)``: first minus second).  With
+    row's CDFs across the grid, as an absolute value, so the panel shows how
+    far apart the curves are but not which is higher (the main panel shows
+    that).  ``significance_pair`` gives their positions in each row (default
+    ``(0, 1)``: first minus second).  With
     ``significance_method="draws"`` (the default), randomly paired draws of
     the two CDFs are differenced curve by curve and the significance is the
     median difference over its 16th/84th-percentile error on the side
@@ -763,10 +765,10 @@ def plot_model_cdf_comparison(
     ``significance_seed``); ``"quadrature"`` instead divides the difference
     of the medians by the two curves' facing errors added in quadrature
     (:func:`_cdf_difference_significance`).  Both ignore ``credible``.
-    These panels share one y-axis, labeled ``significance_ylabel`` in the
-    first column, with red dotted lines at plus and minus
+    These panels share one y-axis starting at zero, labeled
+    ``significance_ylabel`` in the first column, with a red dotted line at
     ``significance_threshold`` (default 2) to guide the eye; ``None`` omits
-    them.
+    it.
     ``panel_size`` is the size of each panel in inches.  The
     figure is saved with the catalog plots of
     :func:`plot_companions_by_stellar_parameter`, in the ``plots`` folder of
@@ -960,12 +962,9 @@ def plot_model_cdf_comparison(
                 grid_limits.extend([grid[0], grid[-1]])
             if significance_axes is not None:
                 significance_axis = significance_axes[row_index, column]
-                significance_axis.axhline(0, color="0.5", lw=0.8, ls=":")
                 if significance_threshold is not None:
-                    for level in (significance_threshold,
-                                  -significance_threshold):
-                        significance_axis.axhline(level, color="red", lw=1,
-                                                  ls=":")
+                    significance_axis.axhline(significance_threshold,
+                                              color="red", lw=1, ls=":")
                 first_grid, first = curve_draws[significance_pair[0]]
                 second_grid, second = curve_draws[significance_pair[1]]
                 if not np.array_equal(first_grid, second_grid):
@@ -982,12 +981,13 @@ def plot_model_cdf_comparison(
                     significance = _cdf_difference_significance(
                         first, second
                     )
+                significance = np.abs(significance)
                 significance_axis.plot(first_grid, significance,
                                        color=colors[model], lw=1.5)
                 if np.isfinite(significance).any():
                     largest_significance = max(
                         largest_significance,
-                        np.nanmax(np.abs(significance)),
+                        np.nanmax(significance),
                     )
                 if column == 0:
                     significance_axis.set_ylabel(significance_ylabel)
@@ -1036,13 +1036,13 @@ def plot_model_cdf_comparison(
                     model=MODEL_TITLES.get(model, model)
                 ))
     if significance_axes is not None:
-        # Symmetric about zero, with no tick labels at the panel edges, so
-        # they never collide with the main panels' labels below.
-        # Keep the threshold lines inside the panels.
+        # From zero, with no tick label at the bottom edge, so it never
+        # collides with the main panels' top label; the threshold line
+        # always stays inside the panels.
         limit = 1.15*max(largest_significance, significance_threshold or 0)
-        significance_axes[0, 0].set_ylim(-limit, limit)
+        significance_axes[0, 0].set_ylim(0, limit)
         significance_axes[0, 0].yaxis.set_major_locator(MaxNLocator(
-            nbins=4, steps=[1, 2, 5, 10], symmetric=True, prune="both",
+            nbins=4, steps=[1, 2, 5, 10], prune="lower",
         ))
     _set_figure_axis_labels(figure, xlabel, ylabel, axes, row_labels,
                             top_axes=significance_axes)
