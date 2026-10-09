@@ -1288,12 +1288,14 @@ def test_plot_model_cdf_comparison_draws_models_by_sample_pairs(
     for axis, model in zip(axes, ["sigmoid", "logG"]*2):
         color = to_rgba(mcmc_powerlaw.get_model_spec(model).color)
         lines = axis.get_lines()
-        # Both medians are solid; the bands are filled and hatched.
-        assert [line.get_linestyle() for line in lines] == ["-", "-"]
+        # Solid median over a filled band; then the hatched band's two thin
+        # solid edges and a dashed median.
+        assert [line.get_linestyle() for line in lines] == ["-", "-", "-", "--"]
+        assert [line.get_linewidth() for line in lines] == [2, 0.8, 0.8, 2]
         assert all(to_rgba(line.get_color()) == color for line in lines)
         filled, hatched = axis.collections
         assert not filled.get_hatch()
-        assert hatched.get_hatch() == "////"
+        assert hatched.get_hatch() == "++++"
         assert to_rgba(hatched.get_edgecolor()[0])[:3] == color[:3]
         assert len(hatched.get_facecolor()) == 0 or (
             hatched.get_facecolor()[0][3] == 0)
@@ -1314,10 +1316,10 @@ def test_plot_model_cdf_comparison_draws_models_by_sample_pairs(
     assert to_rgba(top_left[0].get_facecolor())[:3] == to_rgba(
         mcmc_powerlaw.get_model_spec("sigmoid").color)[:3]
     assert isinstance(legends[1].legendHandles[0], Patch)
-    filled, hatched = legends[2].legendHandles
-    assert isinstance(filled, Patch) and not filled.get_hatch()
-    assert isinstance(hatched, Patch) and hatched.get_hatch() == "////"
-    assert not legends[2].get_lines()
+    # Each sample's swatch shows its band style; the medians differ, so
+    # their line styles are drawn over the swatches.
+    assert [text.get_text() for text in legends[2].get_texts()] == [
+        "highFeH", "lowFeH"]
     assert not any(axis.get_xlabel() or axis.get_ylabel() for axis in axes)
     texts = [text.get_text() for text in figures[0].texts]
     assert texts.count(r"Companion mass [$M_{Jup}$]") == 1
@@ -1339,8 +1341,8 @@ def test_plot_model_cdf_comparison_shows_differing_medians_in_legend(
     assert [text.get_text() for text in axis.get_legend().get_texts()] == [
         "Sigmoid", "highMstar", "lowMstar"]
     # With differing medians, each sample's handle adds its line style.
-    options = dict(band_alpha=0.3, hatch="////", hatch_alpha=0.6,
-                   outline_style=":", outline_width=1.2)
+    options = dict(band_alpha=0.3, hatch="++++", hatch_alpha=0.6,
+                   hatch_edge_width=0.8, outline_style=":", outline_width=1.2)
     band, line = post_fit_analysis._cdf_curve_handle(
         "outline", "--", show_line=True, **options)
     assert band.get_linestyle() == ":" and line.get_linestyle() == "--"

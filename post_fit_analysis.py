@@ -609,7 +609,8 @@ _CDF_LEGEND_GRAY = "0.35"
 
 
 def _cdf_curve_handle(band_style, linestyle, show_line, band_alpha, hatch,
-                      hatch_alpha, outline_style, outline_width):
+                      hatch_alpha, hatch_edge_width, outline_style,
+                      outline_width):
     """Return a gray legend handle showing one CDF curve's band style.
 
     With ``show_line`` the median's line style is drawn over the band, for
@@ -624,7 +625,7 @@ def _cdf_curve_handle(band_style, linestyle, show_line, band_alpha, hatch,
         band = Patch(facecolor=gray, alpha=band_alpha, edgecolor="none")
     elif band_style == "hatch":
         band = Patch(facecolor="none", edgecolor=to_rgba(gray, hatch_alpha),
-                     hatch=hatch, lw=0)
+                     hatch=hatch, lw=hatch_edge_width)
     else:
         band = Patch(facecolor="none", edgecolor=gray, ls=outline_style,
                      lw=outline_width)
@@ -638,9 +639,10 @@ def plot_model_cdf_comparison(
         stack_bin=0, n_grid=500, max_samples=2000, xticks=None, xlabel=None,
         ylabel="Cumulative fraction", legend_loc="lower right",
         legend_fontsize=None, panel_size=(5, 3.5), model_colors=None,
-        linestyles=("-", "-"), band_styles=("fill", "hatch"),
-        band_alpha=0.3, hatch="////", hatch_alpha=0.6, outline_style=":",
-        outline_width=1.2, row_labels=None, dpi=300,
+        linestyles=("-", "--"), band_styles=("fill", "hatch"),
+        band_alpha=0.3, hatch="++++", hatch_alpha=0.6, hatch_linewidth=0.6,
+        hatch_edge_width=0.8, outline_style=":", outline_width=1.2,
+        row_labels=None, dpi=300,
         output_file=None):
     """Draw a grid comparing the normalized CDFs of fitted samples.
 
@@ -671,11 +673,12 @@ def plot_model_cdf_comparison(
     per model.  Curves within a row are told apart by position: the i-th
     curve uses ``linestyles[i]`` for its median and ``band_styles[i]`` for
     its credible interval, one of ``"fill"`` (shaded with ``band_alpha``),
-    ``"hatch"`` (hatched with ``hatch`` at opacity ``hatch_alpha``), or
-    ``"outline"`` (edges drawn with ``outline_style`` and
-    ``outline_width``).  By default both medians are solid and the bands
-    are filled and hatched, so neither curve looks more important.  Both
-    sequences repeat for longer rows.
+    ``"hatch"`` (hatched with ``hatch`` in lines ``hatch_linewidth`` wide at
+    opacity ``hatch_alpha``, bounded by solid edges ``hatch_edge_width``
+    wide), or ``"outline"`` (edges drawn with ``outline_style`` and
+    ``outline_width``).  By default the first curve has a solid median and
+    a filled band, and the second a dashed median and a band hatched as a
+    dense square grid.  Both sequences repeat for longer rows.
 
     Legends avoid repetition: the top-left panel shows its model's band
     color (labeled with the model name) and each curve's style; the rest of
@@ -798,10 +801,14 @@ def plot_model_cdf_comparison(
                     axis.fill_between(grid, low, high, color=color,
                                       alpha=band_alpha, lw=0)
                 elif band_style == "hatch":
-                    # Hatch lines take the edge color; lw=0 drops the border.
+                    # Hatch lines take the edge color; lw=0 drops the
+                    # border, which is drawn instead as solid edges.
                     axis.fill_between(grid, low, high, facecolor="none",
                                       edgecolor=to_rgba(color, hatch_alpha),
                                       hatch=hatch, lw=0)
+                    for edge in (low, high):
+                        axis.plot(grid, edge, color=color,
+                                  lw=hatch_edge_width, ls="-")
                 else:
                     for edge in (low, high):
                         axis.plot(grid, edge, color=color, lw=outline_width,
@@ -837,7 +844,9 @@ def plot_model_cdf_comparison(
                         linestyles[index % len(linestyles)],
                         show_line=len(set(linestyles[:len(row)])) > 1,
                         band_alpha=band_alpha, hatch=hatch,
-                        hatch_alpha=hatch_alpha, outline_style=outline_style,
+                        hatch_alpha=hatch_alpha,
+                        hatch_edge_width=hatch_edge_width,
+                        outline_style=outline_style,
                         outline_width=outline_width,
                     )
                     for index in range(len(row))
@@ -861,7 +870,9 @@ def plot_model_cdf_comparison(
     else:
         output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output_path, dpi=dpi)
+    # Hatch line widths are read from rcParams when the figure is drawn.
+    with plt.rc_context({"hatch.linewidth": hatch_linewidth}):
+        figure.savefig(output_path, dpi=dpi)
     plt.close(figure)
     return output_path
 
