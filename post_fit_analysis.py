@@ -2389,6 +2389,18 @@ def make_two_parameter_tables(
     }
 
 
+def _table_note_lines(note):
+    """Return the lines of an AASTeX table note, or none without a note.
+
+    The note is set after ``\\enddata`` as ``\\tablenotetext{}`` with a bold
+    "Note." lead-in, matching the paper's hand-written tables.
+    """
+    if note is None or not str(note).strip():
+        return []
+    return ["", r"\tablenotetext{}{%", r"\textbf{Note.} " + str(note).strip(),
+            "}"]
+
+
 # Table labels and stellar-catalog columns for the one-parameter tables,
 # keyed by Tier 2 type. [Fe/H] is set in math so a row starting with it is
 # not read as the optional argument of the previous row's \\.
@@ -2453,7 +2465,7 @@ def make_one_parameter_table(
         caption="Occurrence Rates by Stellar Mass or Metallicity",
         label="tab:one_param_OR", output_file=None,
         use_latex_variables=True, stellar_catalog_path=None,
-        one_parameter_cuts=None):
+        one_parameter_cuts=None, note=None):
     """Create one table comparing the high and low samples of single splits.
 
     Each Tier 2 type in ``tier2_types`` (``"Mstar"``, ``"FeH"``) contributes
@@ -2475,7 +2487,8 @@ def make_one_parameter_table(
     ``use_latex_variables=False`` to embed numbers from the saved results
     instead; significances then follow the same rules as the variables.
     The median ratios always come from the stellar catalog, using
-    ``stellar_catalog_path`` and ``one_parameter_cuts``.
+    ``stellar_catalog_path`` and ``one_parameter_cuts``.  ``note`` is LaTeX
+    text for a table note below the data; it is omitted when ``None``.
     """
     results_dir = Path(results_dir)
     tier2_types = list(tier2_types)
@@ -2583,10 +2596,9 @@ def make_one_parameter_table(
                 f"{values['AvgCompl']} & {values['IntOcc']} & "
                 f"{pair_cells} " + r"\\"
             )
-    lines.extend([
-        r"\enddata",
-        r"\end{deluxetable*}",
-    ])
+    lines.append(r"\enddata")
+    lines.extend(_table_note_lines(note))
+    lines.append(r"\end{deluxetable*}")
     if output_file is None:
         output_path = (
             results_dir / PAPER_TABLES_DIRNAME /

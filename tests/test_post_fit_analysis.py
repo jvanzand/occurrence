@@ -1762,3 +1762,20 @@ def test_two_parameter_variables_define_every_table_command(
     ))
     assert used
     assert used <= command_names
+
+
+def test_make_one_parameter_table_adds_an_optional_note(tmp_path):
+    catalog = _one_parameter_catalog(tmp_path)
+    table = post_fit_analysis.make_one_parameter_table(
+        tmp_path, stellar_catalog_path=catalog,
+        note=r"High and low samples are split at $1~M_\odot$.",
+    ).read_text()
+    assert table.endswith(
+        "\\enddata\n\n\\tablenotetext{}{%\n"
+        "\\textbf{Note.} High and low samples are split at $1~M_\\odot$.\n"
+        "}\n\\end{deluxetable*}\n"
+    )
+    plain = post_fit_analysis.make_one_parameter_table(
+        tmp_path, stellar_catalog_path=catalog,
+    ).read_text()
+    assert "tablenotetext" not in plain
