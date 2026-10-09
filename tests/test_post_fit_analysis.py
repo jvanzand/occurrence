@@ -743,47 +743,46 @@ def _one_parameter_catalog(tmp_path):
     return catalog_path
 
 
-def test_make_one_parameter_tables_reference_existing_variables(tmp_path):
-    outputs = post_fit_analysis.make_one_parameter_tables(
+def test_make_one_parameter_table_references_existing_variables(tmp_path):
+    output = post_fit_analysis.make_one_parameter_table(
         tmp_path, stellar_catalog_path=_one_parameter_catalog(tmp_path),
     )
-    reordered = outputs["reordered"].read_text()
-    original = outputs["original"].read_text()
+    table = output.read_text()
 
-    assert outputs["reordered"] == (
-        tmp_path / "paper_tables" /
-        "one_parameter_OR_reordered_mtrue_paper_bounds.tex"
-    )
-    assert outputs["original"] == (
+    assert output == (
         tmp_path / "paper_tables" / "one_parameter_OR_mtrue_paper_bounds.tex"
     )
-    # The cells use the commands make_variables writes for the 1D fits.
-    assert (
-        r"Mass & \McLowMstarPaperBoundsPiecewiseIntOccBinaZero & "
-        r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero & "
-        r"\McMstarPaperBoundsPiecewiseIntOccSignificanceBinaZero & 2.5 \\"
-        in reordered
-    )
-    # Metallicity medians are compared in linear abundance: 10^(0.3+0.2).
-    assert (
-        r"$\text{[Fe/H]}$ & \McLowFeHPaperBoundsPiecewiseIntOccBinaZero & "
-        r"\McHighFeHPaperBoundsPiecewiseIntOccBinaZero & "
-        r"\McFeHPaperBoundsPiecewiseIntOccSignificanceBinaZero & 3.2 \\"
-        in reordered
-    )
-    assert r"\begin{deluxetable*}{lccccc}" in original
+    assert r"\begin{deluxetable*}{lccccccc}" in table
+    assert r"\colhead{Significance} &" in table
+    assert r"\colhead{High/Low}" in table
+    # The pair's significance and median ratio are set once, on the high
+    # row, centered across both rows; the low row leaves them empty.
     assert (
         r"Mass & high & \McHighMstarPaperBoundsNstars & "
         r"\McHighMstarPaperBoundsNeff & \McHighMstarPaperBoundsAvgCompl & "
-        r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero \\" in original
+        r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero & "
+        r"\multirow{2}{*}{\McMstarPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
+        r" & \multirow{2}{*}{2.5} \\" in table
     )
-    assert r"$\text{[Fe/H]}$ & low & \McLowFeHPaperBoundsNstars" in original
+    assert (
+        r"Mass & low & \McLowMstarPaperBoundsNstars & "
+        r"\McLowMstarPaperBoundsNeff & \McLowMstarPaperBoundsAvgCompl & "
+        r"\McLowMstarPaperBoundsPiecewiseIntOccBinaZero &  &  \\" in table
+    )
+    # Metallicity medians are compared in linear abundance: 10^(0.3+0.2).
+    assert (
+        r"\multirow{2}{*}{\McFeHPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
+        r" & \multirow{2}{*}{3.2} \\" in table
+    )
+    assert r"$\text{[Fe/H]}$ & low & \McLowFeHPaperBoundsNstars" in table
     # A bare "[" after the previous row's \\ would be read as its optional
     # argument, so no row may start with one.
-    assert not re.search(r"\\\\\n\[", original + reordered)
+    assert not re.search(r"\\\\\n\[", table)
+    assert not (tmp_path / "paper_tables" /
+                "one_parameter_OR_reordered_mtrue_paper_bounds.tex").exists()
 
 
-def test_make_one_parameter_tables_can_embed_values(tmp_path, monkeypatch):
+def test_make_one_parameter_table_can_embed_values(tmp_path, monkeypatch):
     for tier2_dir in ("highMstar", "lowMstar", "highFeH", "lowFeH"):
         chain_dir = tmp_path / "mtrue" / tier2_dir / "paper_bounds" / "saved_chains"
         chain_dir.mkdir(parents=True)
@@ -805,30 +804,32 @@ def test_make_one_parameter_tables_can_embed_values(tmp_path, monkeypatch):
     monkeypatch.setattr(
         post_fit_analysis, "_piecewise_stack_occurrence_samples", stack_samples,
     )
-    outputs = post_fit_analysis.make_one_parameter_tables(
+    table = post_fit_analysis.make_one_parameter_table(
         tmp_path, use_latex_variables=False,
         stellar_catalog_path=_one_parameter_catalog(tmp_path),
-    )
-    reordered = outputs["reordered"].read_text()
-    original = outputs["original"].read_text()
+    ).read_text()
 
     low = post_fit_analysis._format_occurrence_samples(draws)
     high = post_fit_analysis._format_occurrence_samples(draws + 0.05)
     significance, _ = post_fit_analysis._comparison_significance(
         draws + 0.05, draws
     )
-    assert f"Mass & ${low}$ & ${high}$ & ${significance}$ & 2.5 \\\\" in reordered
-    assert f"Mass & high & 200 & 40.0 & 0.75 & ${high}$ \\\\" in original
-    assert "unused" not in original + reordered
+    assert (
+        f"Mass & high & 200 & 40.0 & 0.75 & ${high}$ & "
+        rf"\multirow{{2}}{{*}}{{${significance}$}} & "
+        r"\multirow{2}{*}{2.5} \\" in table
+    )
+    assert f"Mass & low & 200 & 40.0 & 0.75 & ${low}$ &  &  \\\\" in table
+    assert "unused" not in table
 
 
-def test_make_one_parameter_tables_validate_inputs(tmp_path):
+def test_make_one_parameter_table_validates_inputs(tmp_path):
     with pytest.raises(ValueError, match="tier2_types"):
-        post_fit_analysis.make_one_parameter_tables(
+        post_fit_analysis.make_one_parameter_table(
             tmp_path, tier2_types=["Act"]
         )
     with pytest.raises(ValueError, match="stack_bin"):
-        post_fit_analysis.make_one_parameter_tables(tmp_path, stack_bin=-1)
+        post_fit_analysis.make_one_parameter_table(tmp_path, stack_bin=-1)
 
 
 def test_posterior_difference_significance_uses_sign_probability():

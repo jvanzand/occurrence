@@ -2447,26 +2447,25 @@ def _one_parameter_dynamic_ranges(tier2_types, catalog_path=None, cuts=None):
     return dynamic_ranges
 
 
-def make_one_parameter_tables(
+def make_one_parameter_table(
         results_dir, t1="mtrue", t3="paper_bounds",
         tier2_types=("Mstar", "FeH"), stack_dim="a", stack_bin=0,
-        reordered_caption="Occurrence Rates of High and Low Stellar Samples",
-        reordered_label="tab:one_param_OR_reordered",
-        original_caption="Occurrence Rates by Stellar Mass or Metallicity",
-        original_label="tab:one_param_OR",
-        reordered_output_file=None, original_output_file=None,
+        caption="Occurrence Rates by Stellar Mass or Metallicity",
+        label="tab:one_param_OR", output_file=None,
         use_latex_variables=True, stellar_catalog_path=None,
         one_parameter_cuts=None):
-    """Create reordered and original-form tables for single stellar splits.
+    """Create one table comparing the high and low samples of single splits.
 
     Each Tier 2 type in ``tier2_types`` (``"Mstar"``, ``"FeH"``) contributes
     its ``high`` and ``low`` samples from the one-parameter fits in
-    ``t1/<high|low><type>/t3``, so no extra runs are needed.  The original
-    table lists every sample's star count, effective companions, average
-    completeness, and integrated piecewise occurrence; the reordered table
-    puts each pair's low and high occurrence side by side with the
-    significance of their difference and the high/low ratio of the
-    parameter's median, as in :func:`make_two_parameter_tables`.
+    ``t1/<high|low><type>/t3``, so no extra runs are needed.  Each sample's
+    row lists its star count, effective companions, average completeness,
+    and integrated piecewise occurrence.  The significance of the pair's
+    occurrence difference and the high/low ratio of the parameter's median
+    are each set once per pair, vertically centered across its two rows
+    with ``\\multirow`` (the paper must load the ``multirow`` package).
+    Unlike :func:`make_two_parameter_tables`, no separate reordered table
+    is made, since each parameter has only one comparison.
 
     By default the cells reference the commands :func:`make_variables`
     already emits for these samples (e.g. ``\\McHighMstarPaperBoundsNstars``
@@ -2544,84 +2543,54 @@ def make_one_parameter_tables(
         tier2_types, stellar_catalog_path, one_parameter_cuts
     )
 
-    reordered_lines = [
-        r"\begin{deluxetable*}{ccccc}",
-        rf"\tablecaption{{{reordered_caption}}}",
-        rf"\label{{{reordered_label}}}",
-        r"\tablehead{",
-        r"\colhead{Parameter} &",
-        r"\colhead{Low} &",
-        r"\colhead{High} &",
-        r"\colhead{Significance} &",
-        r"\colhead{High/Low}",
-        r"}",
-        r"\startdata",
-    ]
-    for tier2_type in tier2_types:
-        reordered_lines.append(
-            rf"{_ONE_PARAMETER_TYPES[tier2_type][0]} & "
-            rf"{table_values[(tier2_type, 'low')]['IntOcc']} & "
-            rf"{table_values[(tier2_type, 'high')]['IntOcc']} & "
-            rf"{significance_values[tier2_type]} & "
-            rf"{dynamic_ranges[tier2_type]:.1f} \\"
-        )
-    reordered_lines.extend([
-        r"\enddata",
-        r"\end{deluxetable*}",
-    ])
-    if reordered_output_file is None:
-        reordered_output_path = (
-            results_dir / PAPER_TABLES_DIRNAME /
-            f"one_parameter_OR_reordered_{t1}_{Path(t3).name}.tex"
-        )
-    else:
-        reordered_output_path = Path(reordered_output_file)
-    reordered_output_path.parent.mkdir(parents=True, exist_ok=True)
-    reordered_output_path.write_text(
-        "\n".join(reordered_lines) + "\n", encoding="utf-8"
-    )
-
-    original_lines = [
-        r"\begin{deluxetable*}{lccccc}",
-        rf"\tablecaption{{{original_caption}}}",
-        rf"\label{{{original_label}}}",
+    lines = [
+        r"\begin{deluxetable*}{lccccccc}",
+        rf"\tablecaption{{{caption}}}",
+        rf"\label{{{label}}}",
         r"\tablehead{",
         r"\colhead{Parameter} &",
         r"\colhead{Sample} &",
         r"\colhead{$N_{\star}$} &",
         r"\colhead{$N_{\mathrm{eff}}$} &",
         r"\colhead{Completeness} &",
-        r"\colhead{Occurrence Rate}",
+        r"\colhead{Occurrence Rate} &",
+        r"\colhead{Significance} &",
+        r"\colhead{High/Low}",
         r"}",
         r"\startdata",
     ]
     for tier2_type in tier2_types:
         for level in ("high", "low"):
             values = table_values[(tier2_type, level)]
-            original_lines.append(
+            if level == "high":
+                # Set once per pair, centered across its two rows
+                pair_cells = (
+                    rf"\multirow{{2}}{{*}}{{{significance_values[tier2_type]}}}"
+                    rf" & \multirow{{2}}{{*}}"
+                    rf"{{{dynamic_ranges[tier2_type]:.1f}}}"
+                )
+            else:
+                pair_cells = " & "
+            lines.append(
                 f"{_ONE_PARAMETER_TYPES[tier2_type][0]} & {level} & "
                 f"{values['Nstars']} & {values['Neff']} & "
-                f"{values['AvgCompl']} & {values['IntOcc']} " + r"\\"
+                f"{values['AvgCompl']} & {values['IntOcc']} & "
+                f"{pair_cells} " + r"\\"
             )
-    original_lines.extend([
+    lines.extend([
         r"\enddata",
         r"\end{deluxetable*}",
     ])
-    if original_output_file is None:
-        original_output_path = (
+    if output_file is None:
+        output_path = (
             results_dir / PAPER_TABLES_DIRNAME /
             f"one_parameter_OR_{t1}_{Path(t3).name}.tex"
         )
     else:
-        original_output_path = Path(original_output_file)
-    original_output_path.parent.mkdir(parents=True, exist_ok=True)
-    original_output_path.write_text(
-        "\n".join(original_lines) + "\n", encoding="utf-8"
-    )
-    return {
-        "reordered": reordered_output_path,
-        "original": original_output_path,
-    }
+        output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return output_path
 
 
 def calculate_all_delta_bics(
