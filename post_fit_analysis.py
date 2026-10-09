@@ -605,14 +605,42 @@ def _set_figure_axis_labels(figure, xlabel, ylabel, axes=None,
                     ha="left", va="center", rotation="vertical")
 
 
+_CDF_LEGEND_GRAY = "0.35"
+
+
+def _cdf_curve_handle(band_style, linestyle, show_line, band_alpha, hatch,
+                      hatch_alpha, outline_style, outline_width):
+    """Return a gray legend handle showing one CDF curve's band style.
+
+    With ``show_line`` the median's line style is drawn over the band, for
+    rows whose medians differ in line style.
+    """
+    from matplotlib.colors import to_rgba
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+
+    gray = _CDF_LEGEND_GRAY
+    if band_style == "fill":
+        band = Patch(facecolor=gray, alpha=band_alpha, edgecolor="none")
+    elif band_style == "hatch":
+        band = Patch(facecolor="none", edgecolor=to_rgba(gray, hatch_alpha),
+                     hatch=hatch, lw=0)
+    else:
+        band = Patch(facecolor="none", edgecolor=gray, ls=outline_style,
+                     lw=outline_width)
+    if not show_line:
+        return band
+    return (band, Line2D([], [], color=gray, lw=2, ls=linestyle))
+
+
 def plot_model_cdf_comparison(
         results_dir, rows, models, name, title=None, credible=0.68,
         stack_bin=0, n_grid=500, max_samples=2000, xticks=None, xlabel=None,
         ylabel="Cumulative fraction", legend_loc="lower right",
         legend_fontsize=None, panel_size=(5, 3.5), model_colors=None,
-        linestyles=("-", "--"), band_styles=("fill", "outline"),
-        band_alpha=0.3, outline_style=":", outline_width=1.2, row_labels=None,
-        dpi=300,
+        linestyles=("-", "-"), band_styles=("fill", "hatch"),
+        band_alpha=0.3, hatch="////", hatch_alpha=0.6, outline_style=":",
+        outline_width=1.2, row_labels=None, dpi=300,
         output_file=None):
     """Draw a grid comparing the normalized CDFs of fitted samples.
 
@@ -642,17 +670,19 @@ def plot_model_cdf_comparison(
     (``mcmc_powerlaw.MODEL_REGISTRY``), which ``model_colors`` may override
     per model.  Curves within a row are told apart by position: the i-th
     curve uses ``linestyles[i]`` for its median and ``band_styles[i]`` for
-    its credible interval, either ``"fill"`` (shaded with ``band_alpha``) or
+    its credible interval, one of ``"fill"`` (shaded with ``band_alpha``),
+    ``"hatch"`` (hatched with ``hatch`` at opacity ``hatch_alpha``), or
     ``"outline"`` (edges drawn with ``outline_style`` and
-    ``outline_width``), so by default the first curve is solid with a filled
-    band and the second is dashed with an outlined band.  Both sequences
-    repeat for longer rows.
+    ``outline_width``).  By default both medians are solid and the bands
+    are filled and hatched, so neither curve looks more important.  Both
+    sequences repeat for longer rows.
 
     Legends avoid repetition: the top-left panel shows its model's band
-    color (labeled with the model name) and the line style of each curve;
-    the rest of the top row shows only its model's band color; the rest of
-    the first column shows only its row's line styles.  Line styles are
-    drawn in black, since they identify curves in every column.
+    color (labeled with the model name) and each curve's style; the rest of
+    the top row shows only its model's band color; the rest of the first
+    column shows only its row's curve styles.  Curve styles are drawn in
+    gray, since they identify curves in every column: the band style, with
+    the median's line style when the medians differ.
     ``row_labels`` optionally gives one label per row (e.g. the stellar
     parameter dividing its samples), centered above the row's panels.
     ``panel_size`` is the size of each panel in inches.  The
@@ -668,7 +698,7 @@ def plot_model_cdf_comparison(
         Path to the saved figure.
     """
     from matplotlib import pyplot as plt
-    from matplotlib.lines import Line2D
+    from matplotlib.colors import to_rgba
     from matplotlib.patches import Patch
     from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
 
@@ -692,10 +722,11 @@ def plot_model_cdf_comparison(
     band_styles = list(band_styles)
     if not linestyles or not band_styles:
         raise ValueError("linestyles and band_styles cannot be empty")
-    unknown_bands = sorted(set(band_styles) - {"fill", "outline"})
+    unknown_bands = sorted(set(band_styles) - {"fill", "hatch", "outline"})
     if unknown_bands:
         raise ValueError(
-            f"band_styles must be 'fill' or 'outline', not {unknown_bands}"
+            "band_styles must be 'fill', 'hatch', or 'outline', not "
+            f"{unknown_bands}"
         )
     colors = {
         model: mcmc_powerlaw.get_model_spec(model).color for model in models
@@ -762,9 +793,15 @@ def plot_model_cdf_comparison(
                 )
                 color = colors[model]
                 linestyle = linestyles[curve_index % len(linestyles)]
-                if band_styles[curve_index % len(band_styles)] == "fill":
+                band_style = band_styles[curve_index % len(band_styles)]
+                if band_style == "fill":
                     axis.fill_between(grid, low, high, color=color,
                                       alpha=band_alpha, lw=0)
+                elif band_style == "hatch":
+                    # Hatch lines take the edge color; lw=0 drops the border.
+                    axis.fill_between(grid, low, high, facecolor="none",
+                                      edgecolor=to_rgba(color, hatch_alpha),
+                                      hatch=hatch, lw=0)
                 else:
                     for edge in (low, high):
                         axis.plot(grid, edge, color=color, lw=outline_width,
@@ -793,10 +830,16 @@ def plot_model_cdf_comparison(
                                      alpha=band_alpha, edgecolor="none"))
                 labels.append(MODEL_TITLES.get(model, model))
             if column == 0:
-                # Line styles identify the samples; shown once per row.
+                # Curve styles identify the samples; shown once per row.
                 handles.extend(
-                    Line2D([], [], color="black", lw=2,
-                           ls=linestyles[index % len(linestyles)])
+                    _cdf_curve_handle(
+                        band_styles[index % len(band_styles)],
+                        linestyles[index % len(linestyles)],
+                        show_line=len(set(linestyles[:len(row)])) > 1,
+                        band_alpha=band_alpha, hatch=hatch,
+                        hatch_alpha=hatch_alpha, outline_style=outline_style,
+                        outline_width=outline_width,
+                    )
                     for index in range(len(row))
                 )
                 labels.extend(curve["label"] for curve in row)
