@@ -703,7 +703,8 @@ def plot_model_cdf_comparison(
         hatch_edge_width=0.8, outline_style=":", outline_width=1.2,
         row_labels=None, significance_panel=True, significance_height=0.35,
         significance_ylabel=r"$\Delta/\sigma$", significance_method="draws",
-        significance_pair=(0, 1), significance_seed=0, dpi=300,
+        significance_pair=(0, 1), significance_seed=0,
+        significance_threshold=2, dpi=300,
         output_file=None):
     """Draw a grid comparing the normalized CDFs of fitted samples.
 
@@ -763,7 +764,9 @@ def plot_model_cdf_comparison(
     of the medians by the two curves' facing errors added in quadrature
     (:func:`_cdf_difference_significance`).  Both ignore ``credible``.
     These panels share one y-axis, labeled ``significance_ylabel`` in the
-    first column.
+    first column, with red dotted lines at plus and minus
+    ``significance_threshold`` (default 2) to guide the eye; ``None`` omits
+    them.
     ``panel_size`` is the size of each panel in inches.  The
     figure is saved with the catalog plots of
     :func:`plot_companions_by_stellar_parameter`, in the ``plots`` folder of
@@ -872,6 +875,10 @@ def plot_model_cdf_comparison(
             raise ValueError(
                 "significance_pair must give two distinct curve positions"
             )
+        if significance_threshold is not None and not (
+                np.isfinite(significance_threshold) and
+                significance_threshold > 0):
+            raise ValueError("significance_threshold must be positive or None")
         short_rows = [index for index, row in enumerate(rows)
                       if max(significance_pair) >= len(row)]
         if short_rows:
@@ -954,6 +961,11 @@ def plot_model_cdf_comparison(
             if significance_axes is not None:
                 significance_axis = significance_axes[row_index, column]
                 significance_axis.axhline(0, color="0.5", lw=0.8, ls=":")
+                if significance_threshold is not None:
+                    for level in (significance_threshold,
+                                  -significance_threshold):
+                        significance_axis.axhline(level, color="red", lw=1,
+                                                  ls=":")
                 first_grid, first = curve_draws[significance_pair[0]]
                 second_grid, second = curve_draws[significance_pair[1]]
                 if not np.array_equal(first_grid, second_grid):
@@ -1026,7 +1038,8 @@ def plot_model_cdf_comparison(
     if significance_axes is not None:
         # Symmetric about zero, with no tick labels at the panel edges, so
         # they never collide with the main panels' labels below.
-        limit = 1.15*largest_significance
+        # Keep the threshold lines inside the panels.
+        limit = 1.15*max(largest_significance, significance_threshold or 0)
         significance_axes[0, 0].set_ylim(-limit, limit)
         significance_axes[0, 0].yaxis.set_major_locator(MaxNLocator(
             nbins=4, steps=[1, 2, 5, 10], symmetric=True, prune="both",
