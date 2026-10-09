@@ -2462,7 +2462,8 @@ def make_one_parameter_table(
     row lists its star count, effective companions, average completeness,
     and integrated piecewise occurrence.  The significance of the pair's
     occurrence difference and the high/low ratio of the parameter's median
-    are each set once per pair, vertically centered across its two rows
+    are each set once per pair, as is the parameter's name, vertically
+    centered across its two rows
     with ``\\multirow`` (the paper must load the ``multirow`` package).
     Unlike :func:`make_two_parameter_tables`, no separate reordered table
     is made, since each parameter has only one comparison.
@@ -2564,15 +2565,20 @@ def make_one_parameter_table(
             values = table_values[(tier2_type, level)]
             if level == "high":
                 # Set once per pair, centered across its two rows
+                parameter_cell = (
+                    rf"\multirow{{2}}{{*}}"
+                    rf"{{{_ONE_PARAMETER_TYPES[tier2_type][0]}}}"
+                )
                 pair_cells = (
                     rf"\multirow{{2}}{{*}}{{{significance_values[tier2_type]}}}"
                     rf" & \multirow{{2}}{{*}}"
                     rf"{{{dynamic_ranges[tier2_type]:.1f}}}"
                 )
             else:
+                parameter_cell = ""
                 pair_cells = " & "
             lines.append(
-                f"{_ONE_PARAMETER_TYPES[tier2_type][0]} & {level} & "
+                f"{parameter_cell} & {level} & "
                 f"{values['Nstars']} & {values['Neff']} & "
                 f"{values['AvgCompl']} & {values['IntOcc']} & "
                 f"{pair_cells} " + r"\\"

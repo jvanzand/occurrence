@@ -758,14 +758,14 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
     # The pair's significance and median ratio are set once, on the high
     # row, centered across both rows; the low row leaves them empty.
     assert (
-        r"Mass & high & \McHighMstarPaperBoundsNstars & "
+        r"\multirow{2}{*}{Mass} & high & \McHighMstarPaperBoundsNstars & "
         r"\McHighMstarPaperBoundsNeff & \McHighMstarPaperBoundsAvgCompl & "
         r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero & "
         r"\multirow{2}{*}{\McMstarPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
         r" & \multirow{2}{*}{2.5} \\" in table
     )
     assert (
-        r"Mass & low & \McLowMstarPaperBoundsNstars & "
+        r" & low & \McLowMstarPaperBoundsNstars & "
         r"\McLowMstarPaperBoundsNeff & \McLowMstarPaperBoundsAvgCompl & "
         r"\McLowMstarPaperBoundsPiecewiseIntOccBinaZero &  &  \\" in table
     )
@@ -774,7 +774,9 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
         r"\multirow{2}{*}{\McFeHPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
         r" & \multirow{2}{*}{3.2} \\" in table
     )
-    assert r"$\text{[Fe/H]}$ & low & \McLowFeHPaperBoundsNstars" in table
+    assert (r"\multirow{2}{*}{$\text{[Fe/H]}$} & high & "
+            r"\McHighFeHPaperBoundsNstars" in table)
+    assert "\n & low & \\McLowFeHPaperBoundsNstars" in table
     # A bare "[" after the previous row's \\ would be read as its optional
     # argument, so no row may start with one.
     assert not re.search(r"\\\\\n\[", table)
@@ -815,11 +817,11 @@ def test_make_one_parameter_table_can_embed_values(tmp_path, monkeypatch):
         draws + 0.05, draws
     )
     assert (
-        f"Mass & high & 200 & 40.0 & 0.75 & ${high}$ & "
+        rf"\multirow{{2}}{{*}}{{Mass}} & high & 200 & 40.0 & 0.75 & ${high}$ & "
         rf"\multirow{{2}}{{*}}{{${significance}$}} & "
         r"\multirow{2}{*}{2.5} \\" in table
     )
-    assert f"Mass & low & 200 & 40.0 & 0.75 & ${low}$ &  &  \\\\" in table
+    assert f"\n & low & 200 & 40.0 & 0.75 & ${low}$ &  &  \\\\" in table
     assert "unused" not in table
 
 
