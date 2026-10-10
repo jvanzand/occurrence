@@ -771,15 +771,16 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
     # The pair's significance and median ratio are set once, on the high
     # row, centered across both rows; the low row leaves them empty.
     assert (
-        r"\multirow{2}{*}{Mass} & high & $1.60$ & $0.30$ & "
-        r"\McHighMstarPaperBoundsNstars & "
+        r"\multirow{2}{*}{Mass} & high & $\McHighMstarPaperBoundsMedianMstar$ & "
+        r"$\McHighMstarPaperBoundsMedianFeH$ & \McHighMstarPaperBoundsNstars & "
         r"\McHighMstarPaperBoundsNeff & \McHighMstarPaperBoundsAvgCompl & "
         r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero & "
         r"\multirow{2}{*}{\McMstarPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
         r" & \multirow{2}{*}{2.5} \\" in table
     )
     assert (
-        r" & low & $0.65$ & $-0.20$ & \McLowMstarPaperBoundsNstars & "
+        r" & low & $\McLowMstarPaperBoundsMedianMstar$ & "
+        r"$\McLowMstarPaperBoundsMedianFeH$ & \McLowMstarPaperBoundsNstars & "
         r"\McLowMstarPaperBoundsNeff & \McLowMstarPaperBoundsAvgCompl & "
         r"\McLowMstarPaperBoundsPiecewiseIntOccBinaZero &  &  \\" in table
     )
@@ -788,9 +789,10 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
         r"\multirow{2}{*}{\McFeHPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
         r" & \multirow{2}{*}{3.2} \\" in table
     )
-    assert (r"\multirow{2}{*}{$\text{[Fe/H]}$} & high & $1.60$ & $0.30$ & "
+    assert (r"\multirow{2}{*}{$\text{[Fe/H]}$} & high & "
+            r"$\McHighFeHPaperBoundsMedianMstar$ & "
+            r"$\McHighFeHPaperBoundsMedianFeH$ & "
             r"\McHighFeHPaperBoundsNstars" in table)
-    assert "\n & low & $0.65$ & $-0.20$ & \\McLowFeHPaperBoundsNstars" in table
     assert r"\colhead{Median $M_{\star}$ ($M_{\odot}$)} &" in table
     assert r"\colhead{Median $\text{[Fe/H]}$ (dex)} &" in table
     # A bare "[" after the previous row's \\ would be read as its optional
@@ -1780,6 +1782,8 @@ def test_two_parameter_variables_define_every_table_command(
         post_fit_analysis._two_parameter_variable_blocks(
             tmp_path, ["mtrue"], ["stellar2params"], None, None,
             command_names,
+            lambda tier2_dir, nstars: {"MedianMstar": "1.00",
+                                       "MedianFeH": "0.10"},
         )
     )
     assert not missing_results and not missing_comparisons
@@ -1999,3 +2003,44 @@ def test_subset_counts_must_match_the_fits():
     with pytest.raises(ValueError, match="do not match"):
         post_fit_analysis._check_subset_counts(
             subsets, {("high",): {"Nstars": "230"}}, "one-parameter")
+
+
+
+def test_make_variables_adds_sample_medians_from_the_fit_queries(tmp_path):
+    for tier2, nstars in (("highMstar", 2), ("lowMstar", 3), ("allstars", 5)):
+        _write_summary(tmp_path / "mtrue", tier2, "paper_bounds",
+                       nstars=nstars)
+    catalog = pd.DataFrame({
+        "Mstar": [1.1, 1.2, 0.9, 0.85, 0.5],
+        "feh": [0.1, 0.155, 0.16, -0.2, np.nan],
+        "age": [3.0, 5.0, 7.0, 9.0, 2.0],
+    })
+    queries = {"highMstar": "Mstar > 1", "lowMstar": "Mstar <= 1",
+               "allstars": None}
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["allstars", "Mstar"], ["paper_bounds"],
+        sample_queries=queries, sample_catalog=catalog,
+    ).read_text()
+    # Rounded half up; missing values are skipped.
+    assert (r"\newcommand{\McHighMstarPaperBoundsMedianFeH}"
+            r"{\ensuremath{0.13}}") in text
+    assert (r"\newcommand{\McLowMstarPaperBoundsMedianMstar}"
+            r"{\ensuremath{0.85}}") in text
+    assert (r"\newcommand{\McLowMstarPaperBoundsMedianFeH}"
+            r"{\ensuremath{-0.02}}") in text
+    # Age only where every star lies within 0.82-1.21 Msun.
+    assert r"\McHighMstarPaperBoundsMedianAge}{\ensuremath{4.0}}" in text
+    assert "LowMstarPaperBoundsMedianAge" not in text
+    assert "AllstarsPaperBoundsMedianAge" not in text
+
+    queries["highMstar"] = "Mstar > 1.15"
+    with pytest.raises(ValueError, match="its fit used 2"):
+        post_fit_analysis.make_variables(
+            tmp_path, ["mtrue"], ["allstars", "Mstar"], ["paper_bounds"],
+            sample_queries=queries, sample_catalog=catalog,
+        )
+    with pytest.raises(ValueError, match="go together"):
+        post_fit_analysis.make_variables(
+            tmp_path, ["mtrue"], ["allstars"], ["paper_bounds"],
+            sample_queries=queries,
+        )

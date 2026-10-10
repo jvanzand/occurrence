@@ -1938,6 +1938,43 @@ def _check_subset_counts(subset_medians, table_values, label):
         )
 
 
+# Median stellar properties written to variables.tex: catalog column ->
+# command suffix.
+_MEDIAN_VARIABLES = {"Mstar": "MedianMstar", "feh": "MedianFeH",
+                     "age": "MedianAge"}
+
+
+def _sample_median_values(sample_catalog, query, nstars, sample):
+    """Return ``{suffix: value}`` medians for one sample of the catalog.
+
+    ``query`` selects the sample from ``sample_catalog`` (a DataFrame) the
+    way the fits did (``None`` keeps every star); its star count must equal
+    the fit's ``nstars``.  Median age is included only when every star lies
+    in the mass range where the age-activity relation holds.
+    """
+    selected = sample_catalog if query is None else sample_catalog.query(query)
+    if len(selected) != int(nstars):
+        raise ValueError(
+            f"sample {sample!r} selects {len(selected)} catalog stars, but "
+            f"its fit used {int(nstars)}; check sample_queries and the catalog"
+        )
+    masses = selected["Mstar"]
+    in_age_range = bool(
+        (masses >= _THREE_PARAMETER_DEFAULT_CUTS["Mstar_min"]).all() and
+        (masses <= _THREE_PARAMETER_DEFAULT_CUTS["Mstar_max"]).all()
+    )
+    values = {}
+    for column, suffix in _MEDIAN_VARIABLES.items():
+        if column == "age" and not in_age_range:
+            continue
+        finite = selected[column].dropna()
+        if len(finite):
+            values[suffix] = _round_half_up(
+                np.median(finite), _MEDIAN_DECIMALS[column]
+            )
+    return values
+
+
 def _two_parameter_levels(tier2_dir):
     """Extract mass and metallicity levels from a subset directory."""
     match = re.fullmatch(
@@ -2484,15 +2521,25 @@ def make_three_parameter_tables(
     )
 
     median_columns = ("Mstar", "feh", "age")
-    subset_medians = _subset_medians(
-        {
-            levels: {"Mstar": levels[0], "feh": levels[1], "age": levels[2]}
+    if use_latex_variables:
+        subset_medians = {
+            levels: ({
+                column: "\\" + _three_parameter_command_name(
+                    t1, t3, levels, _MEDIAN_VARIABLES[column])
+                for column in median_columns
+            }, None)
             for levels in table_values
-        },
-        median_columns, stellar_catalog_path, three_parameter_cuts,
-        mass_range=True,
-    )
-    if not use_latex_variables:
+        }
+    else:
+        subset_medians = _subset_medians(
+            {
+                levels: {"Mstar": levels[0], "feh": levels[1],
+                         "age": levels[2]}
+                for levels in table_values
+            },
+            median_columns, stellar_catalog_path, three_parameter_cuts,
+            mass_range=True,
+        )
         _check_subset_counts(subset_medians, table_values, "three-parameter")
     original_lines = [
         r"\begin{deluxetable*}{lccccccccc}",
@@ -2701,12 +2748,21 @@ def make_two_parameter_tables(
     )
 
     median_columns = ("Mstar", "feh")
-    subset_medians = _subset_medians(
-        {levels: {"Mstar": levels[0], "feh": levels[1]}
-         for levels in table_values},
-        median_columns, stellar_catalog_path, two_parameter_cuts,
-    )
-    if not use_latex_variables:
+    if use_latex_variables:
+        subset_medians = {
+            levels: ({
+                column: "\\" + _two_parameter_command_name(
+                    t1, t3, levels, _MEDIAN_VARIABLES[column])
+                for column in median_columns
+            }, None)
+            for levels in table_values
+        }
+    else:
+        subset_medians = _subset_medians(
+            {levels: {"Mstar": levels[0], "feh": levels[1]}
+             for levels in table_values},
+            median_columns, stellar_catalog_path, two_parameter_cuts,
+        )
         _check_subset_counts(subset_medians, table_values, "two-parameter")
     original_lines = [
         r"\begin{deluxetable*}{lccccccc}",
@@ -2923,12 +2979,22 @@ def make_one_parameter_table(
     )
 
     median_columns = ("Mstar", "feh")
-    subset_medians = _subset_medians(
-        {key: {_ONE_PARAMETER_TYPES[key[0]][1]: key[1]}
-         for key in table_values},
-        median_columns, stellar_catalog_path, one_parameter_cuts,
-    )
-    if not use_latex_variables:
+    if use_latex_variables:
+        subset_medians = {
+            (tier2_type, level): ({
+                column: "\\" + _experiment_prefix(
+                    t1, f"{level}{tier2_type}", t3
+                ) + _MEDIAN_VARIABLES[column]
+                for column in median_columns
+            }, None)
+            for tier2_type, level in table_values
+        }
+    else:
+        subset_medians = _subset_medians(
+            {key: {_ONE_PARAMETER_TYPES[key[0]][1]: key[1]}
+             for key in table_values},
+            median_columns, stellar_catalog_path, one_parameter_cuts,
+        )
         _check_subset_counts(subset_medians, table_values, "one-parameter")
     lines = [
         r"\begin{deluxetable*}{lccccccccc}",
@@ -3297,7 +3363,7 @@ def _sample_comparison_blocks(
 
 def _two_parameter_variable_blocks(
         results_dir, tier1_dirs, two_parameter_t3s, stellar_catalog_path,
-        two_parameter_cuts, command_names):
+        two_parameter_cuts, command_names, median_values=None):
     """Build variables for the mass-metallicity subsets of each Tier 3 run.
 
     Each subset gets the statistics in :func:`make_two_parameter_tables`
@@ -3333,8 +3399,12 @@ def _two_parameter_variable_blocks(
                     "%"*72,
                     f"% {tier1_name} / {tier2_dir} / {two_parameter_t3}",
                 ]
-                for statistic, value in _three_parameter_statistics(
-                        result_dir).items():
+                statistics = _three_parameter_statistics(result_dir)
+                if median_values is not None:
+                    statistics.update(
+                        median_values(tier2_dir, statistics["Nstars"])
+                    )
+                for statistic, value in statistics.items():
                     add(block, _two_parameter_command_name(
                         tier1_name, two_parameter_t3, levels, statistic
                     ), value)
@@ -3382,7 +3452,7 @@ def make_variables(
         three_parameter_cuts=None, low_first_comparisons=(),
         standalone_tier2_dirs=(), tier3_stack_dims=None,
         percent_tier3_dirs=(), two_parameter_t3=None,
-        two_parameter_cuts=None):
+        two_parameter_cuts=None, sample_queries=None, sample_catalog=None):
     """Write non-model fit statistics to a LaTeX variables file.
 
     ``results_dir`` is the parent of all Tier 1 directories.  The output is
@@ -3445,6 +3515,14 @@ def make_variables(
     ``\\McStellarTwoParamsMassHighFeHSignificance``.  Dynamic ranges use the
     full stellar catalog with ``two_parameter_cuts``.
 
+    With ``sample_queries`` (Tier 2 directory -> the pandas query that
+    selected its stars, ``None`` for all) and ``sample_catalog`` (the
+    stellar DataFrame the fits used), every sample, including the two- and
+    three-parameter subsets, also gets ``MedianMstar``, ``MedianFeH``, and,
+    when all its stars lie within the age-activity mass range,
+    ``MedianAge`` (e.g. ``\\McHighMstarPaperBoundsMedianMstar``).  Each
+    query must select as many stars as the fit used.
+
     Returns
     -------
     pathlib.Path
@@ -3485,6 +3563,16 @@ def make_variables(
         three_parameter_t3s = list(three_parameter_t3)
     if len(set(map(str, three_parameter_t3s))) != len(three_parameter_t3s):
         raise ValueError("three_parameter_t3 contains duplicate directories")
+
+    if (sample_queries is None) != (sample_catalog is None):
+        raise ValueError("sample_queries and sample_catalog go together")
+
+    def median_values(tier2_dir, nstars):
+        if sample_queries is None or str(tier2_dir) not in sample_queries:
+            return {}
+        return _sample_median_values(
+            sample_catalog, sample_queries[str(tier2_dir)], nstars, tier2_dir
+        )
 
     all_delta_bics = calculate_all_delta_bics(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim,
@@ -3557,6 +3645,7 @@ def make_variables(
                         "Neff": f"{neff:.1f}",
                         "AvgCompl": f"{avg_compl:.2f}",
                     }
+                    values.update(median_values(tier2_dir, nstars))
                     dim = experiment_dim.upper()
                     for bin_index, (neff_value, compl_value) in enumerate(
                             zip(bin_neff, bin_avg_compl)):
@@ -3674,6 +3763,9 @@ def make_variables(
                         _three_parameter_occurrence_samples(result_dir)
                     )
                 statistics = _three_parameter_statistics(result_dir)
+                statistics.update(
+                    median_values(tier2_dir, statistics["Nstars"])
+                )
                 block = [
                     "%"*72,
                     f"% {tier1_name} / {tier2_dir} / {three_parameter_t3}",
@@ -3829,6 +3921,7 @@ def make_variables(
         _two_parameter_variable_blocks(
             results_dir, tier1_dirs, two_parameter_t3s,
             stellar_catalog_path, two_parameter_cuts, command_names,
+            median_values,
         )
     )
     blocks.extend(two_blocks)
