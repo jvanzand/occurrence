@@ -488,7 +488,7 @@ def test_make_three_parameter_tables_create_both_forms(tmp_path):
     assert text.count(rf"\{hhy}") == 3
 
     original = outputs["original"].read_text()
-    assert r"\begin{deluxetable*}{lcccccc}" in original
+    assert r"\begin{deluxetable*}{lccccccccc}" in original
     assert r"\tablecaption{Occurrence Rates by Stellar Mass, Metallicity, and Age}" in original
     assert original.index(r"\colhead{$N_{\star}$}") < original.index(
         r"\colhead{$N_{\mathrm{eff}}$}"
@@ -510,6 +510,9 @@ def test_make_three_parameter_tables_create_both_forms(tmp_path):
 
 def test_make_three_parameter_tables_can_embed_numerical_values(
         tmp_path, monkeypatch):
+    # Fake star counts: skip the check against the catalog subsets.
+    monkeypatch.setattr(post_fit_analysis, "_check_subset_counts",
+                        lambda *args: None)
     values = {
         "Nstars": "47",
         "Neff": "4.0",
@@ -548,7 +551,7 @@ def test_make_three_parameter_tables_can_embed_numerical_values(
     assert formatted_occurrence in reordered
     assert reordered.count(formatted_occurrence) == 24
     assert (
-        "high & high & young & 47 & 4.0 & 0.64 & "
+        "high & high & young & $1.21$ & $0.20$ & $2.0$ & 47 & 4.0 & 0.64 & "
         + formatted_occurrence
     ) in original
     assert r"\McStellarThreeParamsHighMstarHighFeHYoungIntOcc" not in reordered
@@ -560,6 +563,9 @@ def test_make_three_parameter_tables_can_embed_numerical_values(
 
 def test_make_three_parameter_tables_can_select_occurrence_model(
         tmp_path, monkeypatch):
+    # Fake star counts: skip the check against the catalog subsets.
+    monkeypatch.setattr(post_fit_analysis, "_check_subset_counts",
+                        lambda *args: None)
     outputs = post_fit_analysis.make_three_parameter_tables(
         tmp_path, occurrence_model="logG"
     )
@@ -651,7 +657,7 @@ def test_make_two_parameter_tables_create_both_forms(tmp_path):
         rf"high & \{low_occurrence} & \{high_occurrence} & "
         rf"\{significance} & \{ratio} \\" in reordered
     )
-    assert r"\begin{deluxetable*}{lccccc}" in original
+    assert r"\begin{deluxetable*}{lccccccc}" in original
     assert r"\McStellarTwoParamsHighMstarHighFeHNstars" in original
     assert r"\McStellarTwoParamsHighMstarHighFeHPiecewiseIntOcc" in original
     assert not (tmp_path / "paper_tables" / "variables.tex").exists()
@@ -659,6 +665,9 @@ def test_make_two_parameter_tables_create_both_forms(tmp_path):
 
 def test_make_two_parameter_tables_can_embed_values_without_mass_range(
         tmp_path, monkeypatch):
+    # Fake star counts: skip the check against the catalog subsets.
+    monkeypatch.setattr(post_fit_analysis, "_check_subset_counts",
+                        lambda *args: None)
     monkeypatch.setattr(
         post_fit_analysis, "_three_parameter_statistics",
         lambda result_dir: {
@@ -694,11 +703,15 @@ def test_make_two_parameter_tables_can_embed_values_without_mass_range(
     assert reordered.count(" & 3.2 ") == 2
     assert r"\McStellarTwoParamsHighMstarHighFeHIntOcc" not in reordered
     assert r"$0.10^{+0.02}_{-0.02}$" in reordered
-    assert "high & high & 50 & 5.0 & 0.70" in original
+    # Median mass and metallicity of the subset, then the fit statistics
+    assert "high & high & $1.60$ & $0.20$ & 50 & 5.0 & 0.70" in original
 
 
 def test_make_two_parameter_tables_use_quadrature_beyond_resolution(
         tmp_path, monkeypatch):
+    # Fake star counts: skip the check against the catalog subsets.
+    monkeypatch.setattr(post_fit_analysis, "_check_subset_counts",
+                        lambda *args: None)
     monkeypatch.setattr(
         post_fit_analysis, "_three_parameter_statistics",
         lambda result_dir: {
@@ -752,20 +765,21 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
     assert output == (
         tmp_path / "paper_tables" / "one_parameter_OR_mtrue_paper_bounds.tex"
     )
-    assert r"\begin{deluxetable*}{lccccccc}" in table
+    assert r"\begin{deluxetable*}{lccccccccc}" in table
     assert r"\colhead{Significance} &" in table
     assert r"\colhead{High/Low}" in table
     # The pair's significance and median ratio are set once, on the high
     # row, centered across both rows; the low row leaves them empty.
     assert (
-        r"\multirow{2}{*}{Mass} & high & \McHighMstarPaperBoundsNstars & "
+        r"\multirow{2}{*}{Mass} & high & $1.60$ & $0.30$ & "
+        r"\McHighMstarPaperBoundsNstars & "
         r"\McHighMstarPaperBoundsNeff & \McHighMstarPaperBoundsAvgCompl & "
         r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero & "
         r"\multirow{2}{*}{\McMstarPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
         r" & \multirow{2}{*}{2.5} \\" in table
     )
     assert (
-        r" & low & \McLowMstarPaperBoundsNstars & "
+        r" & low & $0.65$ & $-0.20$ & \McLowMstarPaperBoundsNstars & "
         r"\McLowMstarPaperBoundsNeff & \McLowMstarPaperBoundsAvgCompl & "
         r"\McLowMstarPaperBoundsPiecewiseIntOccBinaZero &  &  \\" in table
     )
@@ -774,9 +788,11 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
         r"\multirow{2}{*}{\McFeHPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
         r" & \multirow{2}{*}{3.2} \\" in table
     )
-    assert (r"\multirow{2}{*}{$\text{[Fe/H]}$} & high & "
+    assert (r"\multirow{2}{*}{$\text{[Fe/H]}$} & high & $1.60$ & $0.30$ & "
             r"\McHighFeHPaperBoundsNstars" in table)
-    assert "\n & low & \\McLowFeHPaperBoundsNstars" in table
+    assert "\n & low & $0.65$ & $-0.20$ & \\McLowFeHPaperBoundsNstars" in table
+    assert r"\colhead{Median $M_{\star}$ ($M_{\odot}$)} &" in table
+    assert r"\colhead{Median $\text{[Fe/H]}$ (dex)} &" in table
     # A bare "[" after the previous row's \\ would be read as its optional
     # argument, so no row may start with one.
     assert not re.search(r"\\\\\n\[", table)
@@ -785,6 +801,9 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
 
 
 def test_make_one_parameter_table_can_embed_values(tmp_path, monkeypatch):
+    # Fake star counts: skip the check against the catalog subsets.
+    monkeypatch.setattr(post_fit_analysis, "_check_subset_counts",
+                        lambda *args: None)
     for tier2_dir in ("highMstar", "lowMstar", "highFeH", "lowFeH"):
         chain_dir = tmp_path / "mtrue" / tier2_dir / "paper_bounds" / "saved_chains"
         chain_dir.mkdir(parents=True)
@@ -817,11 +836,13 @@ def test_make_one_parameter_table_can_embed_values(tmp_path, monkeypatch):
         draws + 0.05, draws
     )
     assert (
-        rf"\multirow{{2}}{{*}}{{Mass}} & high & 200 & 40.0 & 0.75 & ${high}$ & "
+        rf"\multirow{{2}}{{*}}{{Mass}} & high & $1.60$ & $0.30$ & 200 & 40.0 & "
+        rf"0.75 & ${high}$ & "
         rf"\multirow{{2}}{{*}}{{${significance}$}} & "
         r"\multirow{2}{*}{2.5} \\" in table
     )
-    assert f"\n & low & 200 & 40.0 & 0.75 & ${low}$ &  &  \\\\" in table
+    assert (f"\n & low & $0.65$ & $-0.20$ & 200 & 40.0 & 0.75 & ${low}$ &  &  "
+            "\\\\") in table
     assert "unused" not in table
 
 
@@ -1943,3 +1964,38 @@ def test_plot_model_cdf_comparison_threshold_lines_are_optional(
             tmp_path, _CDF_ROWS[:1], ["sigmoid"], "bad",
             significance_threshold=-1,
         )
+
+
+
+def test_subset_medians_follow_the_fit_cuts_and_round_half_up(tmp_path):
+    catalog_path = tmp_path / "stars.csv"
+    pd.DataFrame({
+        "Mstar": [0.5, 0.9, 1.1, 1.3, 0.85, 1.25],
+        "feh": [-0.2, 0.15, 0.16, -0.1, 0.0, 0.3],
+        "age": [2.0, 6.0, 3.0, 7.0, 9.0, 4.0],
+    }).to_csv(catalog_path, index=False)
+    medians = post_fit_analysis._subset_medians(
+        {"lowMetalRich": {"Mstar": "low", "feh": "high"},
+         "highOld": {"Mstar": "high", "age": "old"}},
+        ("Mstar", "feh", "age"), catalog_path,
+    )
+    assert medians["lowMetalRich"] == (
+        {"Mstar": "0.90", "feh": "0.15", "age": "6.0"}, 1)
+    # Within the age-activity mass range only the 1.1 and 1.25 Msun stars
+    # are high mass; neither is old.
+    with pytest.raises(ValueError, match="no finite"):
+        post_fit_analysis._subset_medians(
+            {"highOld": {"Mstar": "high", "age": "old"}}, ("Mstar",),
+            catalog_path, mass_range=True,
+        )
+    assert post_fit_analysis._round_half_up(0.155, 2) == "0.16"
+    assert post_fit_analysis._round_half_up(-0.027, 2) == "-0.03"
+
+
+def test_subset_counts_must_match_the_fits():
+    subsets = {("high",): ({"Mstar": "1.10"}, 229)}
+    post_fit_analysis._check_subset_counts(
+        subsets, {("high",): {"Nstars": "229"}}, "one-parameter")
+    with pytest.raises(ValueError, match="do not match"):
+        post_fit_analysis._check_subset_counts(
+            subsets, {("high",): {"Nstars": "230"}}, "one-parameter")

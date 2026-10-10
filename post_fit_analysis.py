@@ -1838,6 +1838,106 @@ def _three_parameter_dynamic_ranges(catalog_path=None, cuts=None):
     return dynamic_ranges
 
 
+# Column heads for the median stellar properties in the original-form
+# occurrence tables, keyed by catalog column.
+_MEDIAN_COLUMN_HEADS = {
+    "Mstar": r"\colhead{Median $M_{\star}$ ($M_{\odot}$)} &",
+    "feh": r"\colhead{Median $\text{[Fe/H]}$ (dex)} &",
+    "age": r"\colhead{Median Age (Gyr)} &",
+}
+_MEDIAN_DECIMALS = {"Mstar": 2, "feh": 2, "age": 1}
+
+
+def _round_half_up(value, decimals):
+    """Format ``value`` rounded half up, e.g. a median of 0.155 as 0.16.
+
+    Rounding the shortest decimal form avoids binary artifacts that make
+    ``f"{0.155:.2f}"`` give ``0.15``.
+    """
+    from decimal import ROUND_HALF_UP, Decimal
+
+    quantum = Decimal(1).scaleb(-decimals)
+    return str(Decimal(repr(float(value))).quantize(quantum, ROUND_HALF_UP))
+
+
+def _subset_medians(subsets, columns, catalog_path=None, cuts=None,
+                    mass_range=False):
+    """Return each stellar subset's median properties and star count.
+
+    ``subsets`` maps a key to ``{column: level}``, where ``column`` is
+    ``"Mstar"``, ``"feh"`` (levels ``"high"``/``"low"``), or ``"age"``
+    (``"young"``/``"old"``); the subset is the catalog stars on that side of
+    each cut in ``cuts`` (defaults: 1 solar mass, zero dex, 5 Gyr), within
+    ``Mstar_min``--``Mstar_max`` when ``mass_range`` is set, as for the fits.
+    Returns ``{key: ({column: formatted median}, star count)}`` for the
+    requested ``columns``.
+    """
+    import pandas as pd
+
+    if catalog_path is None:
+        catalog_path = (
+            Path(__file__).resolve().parent / "cls_files" /
+            "cls_all_stars_all_params.csv"
+        )
+    else:
+        catalog_path = Path(catalog_path)
+    parameter_cuts = dict(_THREE_PARAMETER_DEFAULT_CUTS)
+    if cuts is not None:
+        unknown = set(cuts) - set(parameter_cuts)
+        if unknown:
+            raise ValueError(f"unknown cut names: {sorted(unknown)}")
+        parameter_cuts.update(cuts)
+    catalog = pd.read_csv(catalog_path)
+    needed = set(columns) | {
+        column for levels in subsets.values() for column in levels
+    }
+    missing = sorted(needed - set(catalog.columns))
+    if missing:
+        raise KeyError(f"{catalog_path} lacks columns {missing}")
+    for column in needed | {"Mstar"}:
+        catalog[column] = pd.to_numeric(catalog[column], errors="coerce")
+
+    results = {}
+    for key, levels in subsets.items():
+        mask = pd.Series(True, index=catalog.index)
+        if mass_range:
+            mask &= ((catalog["Mstar"] >= parameter_cuts["Mstar_min"]) &
+                     (catalog["Mstar"] <= parameter_cuts["Mstar_max"]))
+        for column, level in levels.items():
+            values, cut = catalog[column], parameter_cuts[column]
+            if column == "age":
+                mask &= values < cut if level == "young" else values >= cut
+            else:
+                mask &= values > cut if level == "high" else values <= cut
+        medians = {}
+        for column in columns:
+            values = catalog.loc[mask, column].dropna().to_numpy()
+            if values.size == 0:
+                raise ValueError(
+                    f"no finite {column} values for subset {key} in "
+                    f"{catalog_path}"
+                )
+            medians[column] = _round_half_up(
+                np.median(values), _MEDIAN_DECIMALS[column]
+            )
+        results[key] = (medians, int(mask.sum()))
+    return results
+
+
+def _check_subset_counts(subset_medians, table_values, label):
+    """Raise if catalog subsets do not hold the stars the fits used."""
+    mismatched = {
+        key: (count, table_values[key]["Nstars"])
+        for key, (_, count) in subset_medians.items()
+        if str(count) != str(table_values[key]["Nstars"])
+    }
+    if mismatched:
+        raise ValueError(
+            f"{label} catalog subsets do not match the fitted star counts "
+            f"(catalog, fit): {mismatched}; check the cuts and catalog"
+        )
+
+
 def _two_parameter_levels(tier2_dir):
     """Extract mass and metallicity levels from a subset directory."""
     match = re.fullmatch(
@@ -2383,14 +2483,26 @@ def make_three_parameter_tables(
         "\n".join(lines) + "\n", encoding="utf-8"
     )
 
+    median_columns = ("Mstar", "feh", "age")
+    subset_medians = _subset_medians(
+        {
+            levels: {"Mstar": levels[0], "feh": levels[1], "age": levels[2]}
+            for levels in table_values
+        },
+        median_columns, stellar_catalog_path, three_parameter_cuts,
+        mass_range=True,
+    )
+    if not use_latex_variables:
+        _check_subset_counts(subset_medians, table_values, "three-parameter")
     original_lines = [
-        r"\begin{deluxetable*}{lcccccc}",
+        r"\begin{deluxetable*}{lccccccccc}",
         rf"\tablecaption{{{original_caption}}}",
         rf"\label{{{original_label}}}",
         r"\tablehead{",
         r"\colhead{Mass} &",
         r"\colhead{$\text{[Fe/H]}$} &",
         r"\colhead{Age} &",
+        *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
         r"\colhead{$N_{\star}$} &",
         r"\colhead{$N_{\mathrm{eff}}$} &",
         r"\colhead{Completeness} &",
@@ -2402,9 +2514,11 @@ def make_three_parameter_tables(
         levels = _three_parameter_levels(tier2_dir)
         mass, metallicity, age = levels
         values = table_values[levels]
+        medians = subset_medians[levels][0]
         original_lines.append(
             f"{mass} & {metallicity} & {age} & "
-            f"{values['Nstars']} & {values['Neff']} & "
+            + "".join(f"${medians[column]}$ & " for column in median_columns)
+            + f"{values['Nstars']} & {values['Neff']} & "
             f"{values['AvgCompl']} & {values['IntOcc']} " + r"\\"
         )
     original_lines.extend([
@@ -2586,13 +2700,22 @@ def make_two_parameter_tables(
         "\n".join(reordered_lines) + "\n", encoding="utf-8"
     )
 
+    median_columns = ("Mstar", "feh")
+    subset_medians = _subset_medians(
+        {levels: {"Mstar": levels[0], "feh": levels[1]}
+         for levels in table_values},
+        median_columns, stellar_catalog_path, two_parameter_cuts,
+    )
+    if not use_latex_variables:
+        _check_subset_counts(subset_medians, table_values, "two-parameter")
     original_lines = [
-        r"\begin{deluxetable*}{lccccc}",
+        r"\begin{deluxetable*}{lccccccc}",
         rf"\tablecaption{{{original_caption}}}",
         rf"\label{{{original_label}}}",
         r"\tablehead{",
         r"\colhead{Mass} &",
         r"\colhead{$\text{[Fe/H]}$} &",
+        *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
         r"\colhead{$N_{\star}$} &",
         r"\colhead{$N_{\mathrm{eff}}$} &",
         r"\colhead{Completeness} &",
@@ -2603,9 +2726,11 @@ def make_two_parameter_tables(
     for tier2_dir in tier2_dirs:
         mass, metallicity = _two_parameter_levels(tier2_dir)
         values = table_values[(mass, metallicity)]
+        medians = subset_medians[(mass, metallicity)][0]
         original_lines.append(
             f"{mass} & {metallicity} & "
-            f"{values['Nstars']} & {values['Neff']} & "
+            + "".join(f"${medians[column]}$ & " for column in median_columns)
+            + f"{values['Nstars']} & {values['Neff']} & "
             f"{values['AvgCompl']} & {values['IntOcc']} " + r"\\"
         )
     original_lines.extend([
@@ -2797,13 +2922,22 @@ def make_one_parameter_table(
         tier2_types, stellar_catalog_path, one_parameter_cuts
     )
 
+    median_columns = ("Mstar", "feh")
+    subset_medians = _subset_medians(
+        {key: {_ONE_PARAMETER_TYPES[key[0]][1]: key[1]}
+         for key in table_values},
+        median_columns, stellar_catalog_path, one_parameter_cuts,
+    )
+    if not use_latex_variables:
+        _check_subset_counts(subset_medians, table_values, "one-parameter")
     lines = [
-        r"\begin{deluxetable*}{lccccccc}",
+        r"\begin{deluxetable*}{lccccccccc}",
         rf"\tablecaption{{{caption}}}",
         rf"\label{{{label}}}",
         r"\tablehead{",
         r"\colhead{Parameter} &",
         r"\colhead{Sample} &",
+        *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
         r"\colhead{$N_{\star}$} &",
         r"\colhead{$N_{\mathrm{eff}}$} &",
         r"\colhead{Completeness} &",
@@ -2830,9 +2964,12 @@ def make_one_parameter_table(
             else:
                 parameter_cell = ""
                 pair_cells = " & "
+            medians = subset_medians[(tier2_type, level)][0]
             lines.append(
                 f"{parameter_cell} & {level} & "
-                f"{values['Nstars']} & {values['Neff']} & "
+                + "".join(f"${medians[column]}$ & "
+                          for column in median_columns)
+                + f"{values['Nstars']} & {values['Neff']} & "
                 f"{values['AvgCompl']} & {values['IntOcc']} & "
                 f"{pair_cells} " + r"\\"
             )
