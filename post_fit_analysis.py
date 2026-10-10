@@ -1838,13 +1838,25 @@ def _three_parameter_dynamic_ranges(catalog_path=None, cuts=None):
     return dynamic_ranges
 
 
-# Column heads for the median stellar properties in the original-form
-# occurrence tables, keyed by catalog column.
+# Two-row column heads (top, bottom) for the median stellar properties in
+# the original-form occurrence tables, keyed by catalog column.
 _MEDIAN_COLUMN_HEADS = {
-    "Mstar": r"\colhead{Median $M_{\star}$ ($M_{\odot}$)} &",
-    "feh": r"\colhead{Median $\text{[Fe/H]}$ (dex)} &",
-    "age": r"\colhead{Median Age (Gyr)} &",
+    "Mstar": ("Median", r"$M_{\star}$ ($M_{\odot}$)"),
+    "feh": ("Median", r"$\text{[Fe/H]}$ (dex)"),
+    "age": ("Median", "Age (Gyr)"),
 }
+
+
+def _two_row_tablehead(columns):
+    """Return ``\\tablehead`` lines for two-row column heads.
+
+    ``columns`` lists ``(top, bottom)`` pairs; single-row heads use an
+    empty top, so their text sits on the bottom row with the units.
+    """
+    rows = []
+    for row in zip(*columns):
+        rows.append(" & ".join(rf"\colhead{{{text}}}" for text in row))
+    return [r"\tablehead{", rows[0] + r" \\", rows[1], "}"]
 _MEDIAN_DECIMALS = {"Mstar": 2, "feh": 2, "age": 1}
 
 
@@ -2545,16 +2557,12 @@ def make_three_parameter_tables(
         r"\begin{deluxetable*}{lccccccccc}",
         rf"\tablecaption{{{original_caption}}}",
         rf"\label{{{original_label}}}",
-        r"\tablehead{",
-        r"\colhead{Mass} &",
-        r"\colhead{$\text{[Fe/H]}$} &",
-        r"\colhead{Age} &",
-        *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
-        r"\colhead{$N_{\star}$} &",
-        r"\colhead{$N_{\mathrm{eff}}$} &",
-        r"\colhead{Completeness} &",
-        r"\colhead{Occurrence Rate}",
-        r"}",
+        *_two_row_tablehead([
+            ("", "Mass"), ("", r"$\text{[Fe/H]}$"), ("", "Age"),
+            *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
+            ("", r"$N_{\star}$"), ("", r"$N_{\mathrm{eff}}$"),
+            ("Average", "Completeness"), ("", "Occurrence Rate"),
+        ]),
         r"\startdata",
     ]
     for tier2_dir in tier2_dirs:
@@ -2768,15 +2776,12 @@ def make_two_parameter_tables(
         r"\begin{deluxetable*}{lccccccc}",
         rf"\tablecaption{{{original_caption}}}",
         rf"\label{{{original_label}}}",
-        r"\tablehead{",
-        r"\colhead{Mass} &",
-        r"\colhead{$\text{[Fe/H]}$} &",
-        *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
-        r"\colhead{$N_{\star}$} &",
-        r"\colhead{$N_{\mathrm{eff}}$} &",
-        r"\colhead{Completeness} &",
-        r"\colhead{Occurrence Rate}",
-        r"}",
+        *_two_row_tablehead([
+            ("", "Mass"), ("", r"$\text{[Fe/H]}$"),
+            *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
+            ("", r"$N_{\star}$"), ("", r"$N_{\mathrm{eff}}$"),
+            ("Average", "Completeness"), ("", "Occurrence Rate"),
+        ]),
         r"\startdata",
     ]
     for tier2_dir in tier2_dirs:
@@ -3000,17 +3005,13 @@ def make_one_parameter_table(
         r"\begin{deluxetable*}{lccccccccc}",
         rf"\tablecaption{{{caption}}}",
         rf"\label{{{label}}}",
-        r"\tablehead{",
-        r"\colhead{Parameter} &",
-        r"\colhead{Sample} &",
-        *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
-        r"\colhead{$N_{\star}$} &",
-        r"\colhead{$N_{\mathrm{eff}}$} &",
-        r"\colhead{Completeness} &",
-        r"\colhead{Occurrence Rate} &",
-        r"\colhead{Significance} &",
-        r"\colhead{High/Low}",
-        r"}",
+        *_two_row_tablehead([
+            ("", "Parameter"), ("", "Sample"),
+            *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
+            ("", r"$N_{\star}$"), ("", r"$N_{\mathrm{eff}}$"),
+            ("Average", "Completeness"), ("", "Occurrence Rate"),
+            ("", "Significance"), ("", "High/Low"),
+        ]),
         r"\startdata",
     ]
     for tier2_type in tier2_types:
