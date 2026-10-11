@@ -1841,22 +1841,27 @@ def _three_parameter_dynamic_ranges(catalog_path=None, cuts=None):
 # Two-row column heads (top, bottom) for the median stellar properties in
 # the original-form occurrence tables, keyed by catalog column.
 _MEDIAN_COLUMN_HEADS = {
-    "Mstar": ("Median", r"$M_{\star}$ ($M_{\odot}$)"),
-    "feh": ("Median", r"$\text{[Fe/H]}$ (dex)"),
+    "Mstar": ("Median", r"$M_{\star}$"),
+    "feh": ("Median", r"$\text{[Fe/H]}$"),
     "age": ("Median", "Age (Gyr)"),
 }
+
+
+# Pulls the two rows of a two-row table head together; AASTeX otherwise
+# leaves a full table row of space between them.
+_HEADER_ROW_BREAK = r" \\[-1.6ex]"
 
 
 def _two_row_tablehead(columns):
     """Return ``\\tablehead`` lines for two-row column heads.
 
     ``columns`` lists ``(top, bottom)`` pairs; single-row heads use an
-    empty top, so their text sits on the bottom row with the units.
+    empty top, so their text sits on the bottom row.
     """
     rows = []
     for row in zip(*columns):
         rows.append(" & ".join(rf"\colhead{{{text}}}" for text in row))
-    return [r"\tablehead{", rows[0] + r" \\", rows[1], "}"]
+    return [r"\tablehead{", rows[0] + _HEADER_ROW_BREAK, rows[1], "}"]
 _MEDIAN_DECIMALS = {"Mstar": 2, "feh": 2, "age": 1}
 
 
@@ -2595,7 +2600,7 @@ def make_three_parameter_tables(
             ("", "Mass"), ("", r"$\text{[Fe/H]}$"), ("", "Age"),
             *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
             ("", r"$N_{\star}$"), ("", r"$N_{\mathrm{eff}}$"),
-            ("Average", "Completeness"), ("", "Occurrence Rate"),
+            ("Average", "Completeness"), ("Occurrence", "Rate"),
         ]),
         r"\startdata",
     ]
@@ -2740,7 +2745,7 @@ def make_two_parameter_tables(
         rf"\label{{{reordered_label}}}",
         r"\tablehead{",
         r"\colhead{} & \multicolumn{2}{c}{} & \colhead{} & "
-        r"\colhead{High/Low} & \colhead{High/Low} \\",
+        r"\colhead{High/Low} & \colhead{High/Low}" + _HEADER_ROW_BREAK,
         r"\colhead{Fixed Parameter} & \multicolumn{2}{c}{Occurrence Rate} & "
         r"\colhead{Significance} & \colhead{$M_{\star}$} & "
         r"\colhead{$\text{[Fe/H]}$}",
@@ -2826,7 +2831,7 @@ def make_two_parameter_tables(
             ("", "Mass"), ("", r"$\text{[Fe/H]}$"),
             *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
             ("", r"$N_{\star}$"), ("", r"$N_{\mathrm{eff}}$"),
-            ("Average", "Completeness"), ("", "Occurrence Rate"),
+            ("Average", "Completeness"), ("Occurrence", "Rate"),
         ]),
         r"\startdata",
     ]
@@ -3025,7 +3030,7 @@ def make_one_parameter_table(
             ("", "Parameter"), ("", "Sample"),
             *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
             ("", r"$N_{\star}$"), ("", r"$N_{\mathrm{eff}}$"),
-            ("Average", "Completeness"), ("", "Occurrence Rate"),
+            ("Average", "Completeness"), ("Occurrence", "Rate"),
             ("", "Significance"), ("High/Low", r"$M_{\star}$"),
             ("High/Low", r"$\text{[Fe/H]}$"),
         ]),

@@ -798,14 +798,15 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
             r"\McHighFeHPaperBoundsNstars" in table)
     # Two-row heads: top row, then the bottom row with names and units.
     head = table.split(r"\tablehead{")[1].split(r"\startdata")[0]
-    top, bottom = head.strip().rstrip("}").strip().split(" \\\\\n")
-    assert top.split(" & ")[2:7] == [
+    # The rows are pulled together by a negative space after the break.
+    top, bottom = head.strip().rstrip("}").strip().split(" \\\\[-1.6ex]\n")
+    assert top.split(" & ")[2:8] == [
         r"\colhead{Median}", r"\colhead{Median}", r"\colhead{}",
-        r"\colhead{}", r"\colhead{Average}"]
-    assert bottom.split(" & ")[2:7] == [
-        r"\colhead{$M_{\star}$ ($M_{\odot}$)}",
-        r"\colhead{$\text{[Fe/H]}$ (dex)}", r"\colhead{$N_{\star}$}",
-        r"\colhead{$N_{\mathrm{eff}}$}", r"\colhead{Completeness}"]
+        r"\colhead{}", r"\colhead{Average}", r"\colhead{Occurrence}"]
+    assert bottom.split(" & ")[2:8] == [
+        r"\colhead{$M_{\star}$}", r"\colhead{$\text{[Fe/H]}$}",
+        r"\colhead{$N_{\star}$}", r"\colhead{$N_{\mathrm{eff}}$}",
+        r"\colhead{Completeness}", r"\colhead{Rate}"]
     # A bare "[" after the previous row's \\ would be read as its optional
     # argument, so no row may start with one.
     assert not re.search(r"\\\\\n\[", table)
