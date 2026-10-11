@@ -653,10 +653,10 @@ def test_make_two_parameter_tables_create_both_forms(tmp_path):
     significance = post_fit_analysis._two_parameter_comparison_command_name(
         "mtrue", "stellar2params", "Mass", "high", "Significance"
     )
-    # Ratios of the subsets' catalog medians (repository catalog)
-    assert re.search(
-        rf"high & \\{low_occurrence} & \\{high_occurrence} & "
-        rf"\\{significance} & \d\.\d & \d\.\d \\\\", reordered
+    assert (
+        rf"high & \{low_occurrence} & \{high_occurrence} & "
+        rf"\{significance} & \McStellarTwoParamsMassHighFeHMedianMstarRatio & "
+        r"\McStellarTwoParamsMassHighFeHMedianFeHRatio \\" in reordered
     )
     assert r"\begin{deluxetable*}{lccccccc}" in original
     assert r"\McStellarTwoParamsHighMstarHighFeHNstars" in original
@@ -777,7 +777,8 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
         r"\McHighMstarPaperBoundsNeff & \McHighMstarPaperBoundsAvgCompl & "
         r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero & "
         r"\multirow{2}{*}{\McMstarPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
-        r" & \multirow{2}{*}{2.5} & \multirow{2}{*}{3.2} \\" in table
+        r" & \multirow{2}{*}{\McMstarPaperBoundsMedianMstarRatio}"
+        r" & \multirow{2}{*}{\McMstarPaperBoundsMedianFeHRatio} \\" in table
     )
     assert (
         r" & low & $\McLowMstarPaperBoundsMedianMstar$ & "
@@ -788,7 +789,8 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
     # Metallicity medians are compared in linear abundance: 10^(0.3+0.2).
     assert (
         r"\multirow{2}{*}{\McFeHPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
-        r" & \multirow{2}{*}{2.5} & \multirow{2}{*}{3.2} \\" in table
+        r" & \multirow{2}{*}{\McFeHPaperBoundsMedianMstarRatio}"
+        r" & \multirow{2}{*}{\McFeHPaperBoundsMedianFeHRatio} \\" in table
     )
     assert (r"\multirow{2}{*}{$\text{[Fe/H]}$} & high & "
             r"$\McHighFeHPaperBoundsMedianMstar$ & "
@@ -1793,6 +1795,7 @@ def test_two_parameter_variables_define_every_table_command(
             command_names,
             lambda tier2_dir, nstars: {"MedianMstar": "1.00",
                                        "MedianFeH": "0.10"},
+            lambda first, second: ("1.4", "1.2"),
         )
     )
     assert not missing_results and not missing_comparisons
@@ -2053,3 +2056,37 @@ def test_make_variables_adds_sample_medians_from_the_fit_queries(tmp_path):
             tmp_path, ["mtrue"], ["allstars"], ["paper_bounds"],
             sample_queries=queries,
         )
+
+
+
+def test_make_variables_adds_median_ratios_for_sample_pairs(
+        tmp_path, monkeypatch):
+    for tier2, nstars in (("highMstar", 2), ("lowMstar", 3)):
+        _write_summary(tmp_path / "mtrue", tier2, "paper_bounds",
+                       nstars=nstars)
+        chain_dir = tmp_path / "mtrue" / tier2 / "paper_bounds" / "saved_chains"
+        chain_dir.mkdir()
+        (chain_dir / "chains_piecewise.npz").touch()
+    # One piecewise comparison row so the pair gets a block
+    monkeypatch.setattr(
+        post_fit_analysis, "_piecewise_stack_occurrence_samples",
+        lambda path, stack_dim: np.linspace(0.1, 0.2, 50)[:, None] + (
+            0.1 if "high" in str(path) else 0.0),
+    )
+    monkeypatch.setattr(post_fit_analysis, "_piecewise_integrated_values",
+                        lambda *args, **kwargs: [])
+    catalog = pd.DataFrame({
+        "Mstar": [1.1, 1.3, 0.9, 0.8, 0.7],
+        "feh": [0.2, 0.2, 0.0, -0.1, -0.2],
+        "age": [3.0, 5.0, 7.0, 9.0, 2.0],
+    })
+    text = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["Mstar"], ["paper_bounds"],
+        sample_queries={"highMstar": "Mstar > 1", "lowMstar": "Mstar <= 1"},
+        sample_catalog=catalog,
+    ).read_text()
+    # 1.2/0.8 = 1.5; 10^(0.2 - (-0.1)) = 2.0
+    assert (r"\newcommand{\McMstarPaperBoundsMedianMstarRatio}"
+            r"{\ensuremath{1.5}}") in text
+    assert (r"\newcommand{\McMstarPaperBoundsMedianFeHRatio}"
+            r"{\ensuremath{2.0}}") in text

@@ -1951,14 +1951,23 @@ def _median_ratios(pairs, catalog_path=None, cuts=None, mass_range=False):
         subsets[key, "low"], subsets[key, "high"] = low, high
     medians = _subset_medians(subsets, ("Mstar", "feh"), catalog_path, cuts,
                               mass_range, raw=True)
-    ratios = {}
-    for key in pairs:
-        low, high = medians[key, "low"][0], medians[key, "high"][0]
-        ratios[key] = (
-            _round_half_up(high["Mstar"]/low["Mstar"], 1),
-            _round_half_up(10**(high["feh"] - low["feh"]), 1),
-        )
-    return ratios
+    return {
+        key: _format_median_ratios(medians[key, "high"][0],
+                                   medians[key, "low"][0])
+        for key in pairs
+    }
+
+
+def _format_median_ratios(first, second):
+    """Return (mass ratio, metallicity ratio) of two samples' raw medians.
+
+    ``first`` and ``second`` map ``"Mstar"`` and ``"feh"`` to medians; the
+    metallicity ratio compares linear abundances, ``10**(first - second)``.
+    """
+    return (
+        _round_half_up(first["Mstar"]/second["Mstar"], 1),
+        _round_half_up(10**(first["feh"] - second["feh"]), 1),
+    )
 
 
 def _check_subset_counts(subset_medians, table_values, label):
@@ -2680,17 +2689,28 @@ def make_two_parameter_tables(
     significance_values = {}
     posterior_samples = {}
     # High/low ratios of the median stellar mass and metallicity between
-    # the two subsets of each comparison, from the stellar catalog
-    ratio_values = _median_ratios(
-        {
-            (varied, fixed): (
-                {"Mstar": low[0], "feh": low[1]},
-                {"Mstar": high[0], "feh": high[1]},
+    # the two subsets of each comparison: variables.tex commands, or values
+    # from the stellar catalog
+    if use_latex_variables:
+        ratio_values = {
+            (varied, fixed): tuple(
+                "\\" + _two_parameter_comparison_command_name(
+                    t1, t3, varied, fixed, suffix)
+                for suffix in ("MedianMstarRatio", "MedianFeHRatio")
             )
-            for varied, fixed, low, high in _two_parameter_comparisons()
-        },
-        stellar_catalog_path, two_parameter_cuts,
-    )
+            for varied, fixed, _, _ in _two_parameter_comparisons()
+        }
+    else:
+        ratio_values = _median_ratios(
+            {
+                (varied, fixed): (
+                    {"Mstar": low[0], "feh": low[1]},
+                    {"Mstar": high[0], "feh": high[1]},
+                )
+                for varied, fixed, low, high in _two_parameter_comparisons()
+            },
+            stellar_catalog_path, two_parameter_cuts,
+        )
     if not use_latex_variables:
         for tier2_dir in tier2_dirs:
             levels = _two_parameter_levels(tier2_dir)
@@ -2957,17 +2977,27 @@ def make_one_parameter_table(
             )
             significance_values[tier2_type] = f"${significance}$"
     # High/low ratios of the median stellar mass and metallicity of each
-    # pair, from the stellar catalog
-    ratios = _median_ratios(
-        {
+    # pair: variables.tex commands, or values from the stellar catalog
+    if use_latex_variables:
+        ratios = {
             tier2_type: tuple(
-                {_ONE_PARAMETER_TYPES[tier2_type][1]: level}
-                for level in ("low", "high")
+                "\\" + _tier1_prefix(t1) + _latex_token(tier2_type) +
+                _latex_token(Path(t3).name) + suffix
+                for suffix in ("MedianMstarRatio", "MedianFeHRatio")
             )
             for tier2_type in tier2_types
-        },
-        stellar_catalog_path, one_parameter_cuts,
-    )
+        }
+    else:
+        ratios = _median_ratios(
+            {
+                tier2_type: tuple(
+                    {_ONE_PARAMETER_TYPES[tier2_type][1]: level}
+                    for level in ("low", "high")
+                )
+                for tier2_type in tier2_types
+            },
+            stellar_catalog_path, one_parameter_cuts,
+        )
 
     median_columns = ("Mstar", "feh")
     if use_latex_variables:
@@ -3224,7 +3254,7 @@ def _parameter_samples(chain_path):
 
 def _sample_comparison_blocks(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim,
-        low_first_types, command_names):
+        low_first_types, command_names, median_ratios=None):
     """Build variables comparing every high/low sample pair.
 
     A pair is the ``high<type>`` and ``low<type>`` folders of one Tier 1
@@ -3304,6 +3334,13 @@ def _sample_comparison_blocks(
                             "rate",
                         ))
                         bin_index += 1
+                if rows and median_ratios is not None:
+                    ratios = median_ratios(*pair)
+                    if ratios is not None:
+                        rows.extend([
+                            (prefix + "MedianMstarRatio", ratios[0], None),
+                            (prefix + "MedianFeHRatio", ratios[1], None),
+                        ])
                 if not rows:
                     continue
                 block = [
@@ -3311,7 +3348,8 @@ def _sample_comparison_blocks(
                     f"% High/low sample comparison: {tier1_name} / "
                     f"{tier2_type} / {Path(tier3_dir).name}",
                     f"% Ratio = {pair[0]}/{pair[1]}; Diff = {pair[0]} - "
-                    f"{pair[1]} (dex); Factor = 10^Diff",
+                    f"{pair[1]} (dex); Factor = 10^Diff; MedianFeHRatio "
+                    "compares linear abundances",
                 ]
                 quadrature = []
                 for command, value, method in rows:
@@ -3351,7 +3389,8 @@ def _sample_comparison_blocks(
 
 def _two_parameter_variable_blocks(
         results_dir, tier1_dirs, two_parameter_t3s, stellar_catalog_path,
-        two_parameter_cuts, command_names, median_values=None):
+        two_parameter_cuts, command_names, median_values=None,
+        median_ratios=None):
     """Build variables for the mass-metallicity subsets of each Tier 3 run.
 
     Each subset gets the statistics in :func:`make_two_parameter_tables`
@@ -3429,6 +3468,17 @@ def _two_parameter_variable_blocks(
                     tier1_name, two_parameter_t3, varied_parameter,
                     fixed_level, "DynamicRange",
                 ), f"{dynamic_ranges[(varied_parameter, fixed_level)]:.1f}")
+                ratios = None if median_ratios is None else median_ratios(
+                    "{}Mstar{}FeH".format(*high_levels),
+                    "{}Mstar{}FeH".format(*low_levels),
+                )
+                if ratios is not None:
+                    for suffix, value in zip(
+                            ("MedianMstarRatio", "MedianFeHRatio"), ratios):
+                        add(block, _two_parameter_comparison_command_name(
+                            tier1_name, two_parameter_t3, varied_parameter,
+                            fixed_level, suffix,
+                        ), value)
             if len(block) > 2:
                 blocks.append("\n".join(block))
     return blocks, missing_results, missing_comparisons
@@ -3508,8 +3558,12 @@ def make_variables(
     stellar DataFrame the fits used), every sample, including the two- and
     three-parameter subsets, also gets ``MedianMstar``, ``MedianFeH``, and,
     when all its stars lie within the age-activity mass range,
-    ``MedianAge`` (e.g. ``\\McHighMstarPaperBoundsMedianMstar``).  Each
-    query must select as many stars as the fit used.
+    ``MedianAge`` (e.g. ``\\McHighMstarPaperBoundsMedianMstar``), and
+    every high/low comparison (1D pairs and the two-parameter comparisons)
+    gets ``MedianMstarRatio`` and ``MedianFeHRatio``, the ratios of the two
+    samples' medians, with [Fe/H] in linear abundance (e.g.
+    ``\\McMstarPaperBoundsMedianFeHRatio``).  Each query must select as many
+    stars as the fit used.
 
     Returns
     -------
@@ -3561,6 +3615,20 @@ def make_variables(
         return _sample_median_values(
             sample_catalog, sample_queries[str(tier2_dir)], nstars, tier2_dir
         )
+
+    def median_ratios(first_dir, second_dir):
+        """High/low median mass and metallicity ratios of two samples."""
+        if sample_queries is None or not {
+                str(first_dir), str(second_dir)} <= set(sample_queries):
+            return None
+        medians = []
+        for tier2_dir in (first_dir, second_dir):
+            query = sample_queries[str(tier2_dir)]
+            selected = (sample_catalog if query is None
+                        else sample_catalog.query(query))
+            medians.append({column: float(selected[column].median())
+                            for column in ("Mstar", "feh")})
+        return _format_median_ratios(*medians)
 
     all_delta_bics = calculate_all_delta_bics(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim,
@@ -3721,7 +3789,7 @@ def make_variables(
 
     blocks.extend(_sample_comparison_blocks(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim,
-        low_first_comparisons, command_names,
+        low_first_comparisons, command_names, median_ratios,
     ))
 
     missing_three_parameter_results = []
@@ -3909,7 +3977,7 @@ def make_variables(
         _two_parameter_variable_blocks(
             results_dir, tier1_dirs, two_parameter_t3s,
             stellar_catalog_path, two_parameter_cuts, command_names,
-            median_values,
+            median_values, median_ratios,
         )
     )
     blocks.extend(two_blocks)
