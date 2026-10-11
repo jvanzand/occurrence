@@ -397,7 +397,7 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
     assert len(all_data_rows) == 23
     first_block = all_data_rows[:4]
     expected_models = [
-        rf"\textbf{{{model}}}"
+        model  # model names are not bold
         for model in post_fit_analysis._APPENDIX_MODEL_ORDER
     ]
     assert [row.split(" & ")[5] for row in first_block] == expected_models
@@ -2091,3 +2091,17 @@ def test_make_variables_adds_median_ratios_for_sample_pairs(
             r"{\ensuremath{1.5}}") in text
     assert (r"\newcommand{\McMstarPaperBoundsMedianFeHRatio}"
             r"{\ensuremath{2.0}}") in text
+
+
+
+def test_appendix_and_two_parameter_tables_take_notes(tmp_path):
+    appendix = post_fit_analysis.make_appendix_parameter_table(
+        tmp_path, ["mtrue"], ["allstars"], "paper_bounds",
+        note="Appendix note.",
+    ).read_text()
+    assert "\\textbf{Note.} Appendix note.\n}\n\\end{deluxetable*}" in appendix
+    outputs = post_fit_analysis.make_two_parameter_tables(
+        tmp_path, reordered_note="Reordered note.",
+    )
+    assert "\\textbf{Note.} Reordered note." in outputs["reordered"].read_text()
+    assert "tablenotetext" not in outputs["original"].read_text()
