@@ -26,7 +26,7 @@ MODEL_REGISTRY = {
     "escarpment": ModelSpec(
         dl.escarpment_density,
         4,
-        ("C1", "C2", r"$\log_{10}(x_{t,1})$", r"$\log_{10}(x_{t,2})$"),
+        ("C1", "C2", r"$\log(x_{t,1})$", r"$\log(x_{t,2})$"),
         "RoyalBlue",
     ),
     "sigmoid": ModelSpec(
@@ -38,7 +38,7 @@ MODEL_REGISTRY = {
     "bpl": ModelSpec(
         dl.broken_powerlaw_density,
         4,
-        ("C", r"$\log_{10}(x_0)$", r"$\beta$", r"$\gamma$"),
+        ("C", r"$\log(x_0)$", r"$\beta$", r"$\gamma$"),
         "deeppink",
     ),
     "loglinear": ModelSpec(

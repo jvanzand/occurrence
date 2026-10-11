@@ -332,7 +332,7 @@ def test_make_parameter_table_references_variables_commands(
         ["logG", "escaprment", "sigmoid"], caption="Custom Fit Caption",
     )
     text = output.read_text()
-    assert r"$\log_{10}(x_t)$" in text
+    assert r"$\log(x_t)$" in text
     assert r"$W$" in text
     assert "Center &" not in text
     assert "Width &" not in text
@@ -476,12 +476,12 @@ def test_make_three_parameter_tables_create_both_forms(tmp_path):
         )
     )
     assert (
-        rf"high & old & \{lho} & \{hho} & \{mass_significance} & "
+        rf"High & Old & \{lho} & \{hho} & \{mass_significance} & "
         rf"\{mass_dynamic_range} \\"
         in text
     )
     assert (
-        rf"high & high & \{hhy} & \{hho} & \{age_significance} & "
+        rf"High & High & \{hhy} & \{hho} & \{age_significance} & "
         rf"\{age_dynamic_range} \\"
         in text
     )
@@ -494,9 +494,9 @@ def test_make_three_parameter_tables_create_both_forms(tmp_path):
         r"\colhead{$N_{\mathrm{eff}}$}"
     ) < original.index(r"\colhead{Completeness}")
     first_row = next(
-        line for line in original.splitlines() if line.startswith("high")
+        line for line in original.splitlines() if line.startswith("High")
     )
-    assert first_row.startswith("high & high & young &")
+    assert first_row.startswith("High & High & Young &")
     assert first_row.index("Nstars") < first_row.index("Neff") < first_row.index(
         "AvgCompl"
     )
@@ -551,7 +551,7 @@ def test_make_three_parameter_tables_can_embed_numerical_values(
     assert formatted_occurrence in reordered
     assert reordered.count(formatted_occurrence) == 24
     assert (
-        "high & high & young & $1.21$ & $0.20$ & $2.0$ & 47 & 4.0 & 0.64 & "
+        "High & High & Young & $1.21$ & $0.20$ & $2.0$ & 47 & 4.0 & 0.64 & "
         + formatted_occurrence
     ) in original
     assert r"\McStellarThreeParamsHighMstarHighFeHYoungIntOcc" not in reordered
@@ -654,7 +654,7 @@ def test_make_two_parameter_tables_create_both_forms(tmp_path):
         "mtrue", "stellar2params", "Mass", "high", "Significance"
     )
     assert (
-        rf"high & \{low_occurrence} & \{high_occurrence} & "
+        rf"High & \{low_occurrence} & \{high_occurrence} & "
         rf"\{significance} & \McStellarTwoParamsMassHighFeHMedianMstarRatio & "
         r"\McStellarTwoParamsMassHighFeHMedianFeHRatio \\" in reordered
     )
@@ -705,7 +705,7 @@ def test_make_two_parameter_tables_can_embed_values_without_mass_range(
     assert r"\McStellarTwoParamsHighMstarHighFeHIntOcc" not in reordered
     assert r"$0.10^{+0.02}_{-0.02}$" in reordered
     # Median mass and metallicity of the subset, then the fit statistics
-    assert "high & high & $1.60$ & $0.20$ & 50 & 5.0 & 0.70" in original
+    assert "High & High & $1.60$ & $0.20$ & 50 & 5.0 & 0.70" in original
 
 
 def test_make_two_parameter_tables_use_quadrature_beyond_resolution(
@@ -772,7 +772,7 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
     # The pair's significance and median ratio are set once, on the high
     # row, centered across both rows; the low row leaves them empty.
     assert (
-        r"\multirow{2}{*}{Mass} & high & $\McHighMstarPaperBoundsMedianMstar$ & "
+        r"\multirow{2}{*}{Mass} & High & $\McHighMstarPaperBoundsMedianMstar$ & "
         r"$\McHighMstarPaperBoundsMedianFeH$ & \McHighMstarPaperBoundsNstars & "
         r"\McHighMstarPaperBoundsNeff & \McHighMstarPaperBoundsAvgCompl & "
         r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero & "
@@ -781,7 +781,7 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
         r" & \multirow{2}{*}{\McMstarPaperBoundsMedianFeHRatio} \\" in table
     )
     assert (
-        r" & low & $\McLowMstarPaperBoundsMedianMstar$ & "
+        r" & Low & $\McLowMstarPaperBoundsMedianMstar$ & "
         r"$\McLowMstarPaperBoundsMedianFeH$ & \McLowMstarPaperBoundsNstars & "
         r"\McLowMstarPaperBoundsNeff & \McLowMstarPaperBoundsAvgCompl & "
         r"\McLowMstarPaperBoundsPiecewiseIntOccBinaZero &  &  &  \\" in table
@@ -792,7 +792,7 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
         r" & \multirow{2}{*}{\McFeHPaperBoundsMedianMstarRatio}"
         r" & \multirow{2}{*}{\McFeHPaperBoundsMedianFeHRatio} \\" in table
     )
-    assert (r"\multirow{2}{*}{$\text{[Fe/H]}$} & high & "
+    assert (r"\multirow{2}{*}{$\text{[Fe/H]}$} & High & "
             r"$\McHighFeHPaperBoundsMedianMstar$ & "
             r"$\McHighFeHPaperBoundsMedianFeH$ & "
             r"\McHighFeHPaperBoundsNstars" in table)
@@ -850,12 +850,12 @@ def test_make_one_parameter_table_can_embed_values(tmp_path, monkeypatch):
         draws + 0.05, draws
     )
     assert (
-        rf"\multirow{{2}}{{*}}{{Mass}} & high & $1.60$ & $0.30$ & 200 & 40.0 & "
+        rf"\multirow{{2}}{{*}}{{Mass}} & High & $1.60$ & $0.30$ & 200 & 40.0 & "
         rf"0.75 & ${high}$ & "
         rf"\multirow{{2}}{{*}}{{${significance}$}} & "
         r"\multirow{2}{*}{2.5} & \multirow{2}{*}{3.2} \\" in table
     )
-    assert (f"\n & low & $0.65$ & $-0.20$ & 200 & 40.0 & 0.75 & ${low}$ &  &  &  "
+    assert (f"\n & Low & $0.65$ & $-0.20$ & 200 & 40.0 & 0.75 & ${low}$ &  &  &  "
             "\\\\") in table
     assert "unused" not in table
 
@@ -2105,3 +2105,33 @@ def test_appendix_and_two_parameter_tables_take_notes(tmp_path):
     )
     assert "\\textbf{Note.} Reordered note." in outputs["reordered"].read_text()
     assert "tablenotetext" not in outputs["original"].read_text()
+
+
+def test_appendix_table_restricts_models_and_labels_samples(tmp_path):
+    for tier1 in ("mtrue", "qtrue"):
+        for tier2 in ("allstars", "highMstar"):
+            chain_dir = tmp_path / tier1 / tier2 / "paper_bounds" / "saved_chains"
+            chain_dir.mkdir(parents=True)
+            for model in ("logG", "loglinear"):
+                (chain_dir / f"chains_{model}_bin0.npz").touch()
+    text = post_fit_analysis.make_appendix_parameter_table(
+        tmp_path, ["mtrue", "qtrue"], ["allstars", "Mstar"], "paper_bounds",
+        model_samples={"loglinear": [("mtrue", "allstars")]},
+        omit_occurrence=["loglinear"],
+        tier1_labels={"mtrue": "$M_c$", "qtrue": "$q$"},
+        sample_labels={"allstars": "All Stars", "highMstar": r"High $M_\star$"},
+    ).read_text()
+    data = text.split("\\startdata")[1].split("\\enddata")[0]
+    rows = [line for line in data.splitlines() if " & " in line]
+    models = [row.split(" & ")[5] for row in rows]
+    # loglinear only for mtrue/allstars, with no integrated occurrence
+    assert models.count("loglinear") == 1
+    loglinear_row = rows[models.index("loglinear")]
+    assert loglinear_row.split(" & ")[6] == r"\nodata"
+    assert rows[models.index("loglinear") - 1].startswith("$M_c$ & All Stars")
+    assert "$q$ & High $M_\\star$" in text
+    assert r"\shortstack{Mass\\Variable}" in text
+    with pytest.raises(ValueError, match="unknown models"):
+        post_fit_analysis.make_appendix_parameter_table(
+            tmp_path, ["mtrue"], ["allstars"], "paper_bounds",
+            omit_occurrence=["linear"])
