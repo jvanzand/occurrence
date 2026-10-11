@@ -637,10 +637,13 @@ def test_make_two_parameter_tables_create_both_forms(tmp_path):
         tmp_path / "paper_tables" /
         "two_parameter_OR_mtrue_stellar2params.tex"
     )
-    assert r"\begin{deluxetable*}{ccccc}" in reordered
+    assert r"\begin{deluxetable*}{cccccc}" in reordered
     assert r"\colhead{Fixed Parameter}" in reordered
     assert r"\colhead{Significance}" in reordered
-    assert r"\colhead{High/Low}" in reordered
+    # Two High/Low columns: median stellar mass and metallicity ratios
+    assert (r"\colhead{High/Low} & \colhead{High/Low} \\" in reordered)
+    assert (r"\colhead{$M_{\star}$} & \colhead{$\text{[Fe/H]}$}"
+            in reordered)
     low_occurrence = post_fit_analysis._two_parameter_command_name(
         "mtrue", "stellar2params", ("low", "high")
     )
@@ -650,12 +653,10 @@ def test_make_two_parameter_tables_create_both_forms(tmp_path):
     significance = post_fit_analysis._two_parameter_comparison_command_name(
         "mtrue", "stellar2params", "Mass", "high", "Significance"
     )
-    ratio = post_fit_analysis._two_parameter_comparison_command_name(
-        "mtrue", "stellar2params", "Mass", "high", "DynamicRange"
-    )
-    assert (
-        rf"high & \{low_occurrence} & \{high_occurrence} & "
-        rf"\{significance} & \{ratio} \\" in reordered
+    # Ratios of the subsets' catalog medians (repository catalog)
+    assert re.search(
+        rf"high & \\{low_occurrence} & \\{high_occurrence} & "
+        rf"\\{significance} & \d\.\d & \d\.\d \\\\", reordered
     )
     assert r"\begin{deluxetable*}{lccccccc}" in original
     assert r"\McStellarTwoParamsHighMstarHighFeHNstars" in original
@@ -765,7 +766,7 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
     assert output == (
         tmp_path / "paper_tables" / "one_parameter_OR_mtrue_paper_bounds.tex"
     )
-    assert r"\begin{deluxetable*}{lccccccccc}" in table
+    assert r"\begin{deluxetable*}{lcccccccccc}" in table
     assert r"\colhead{Significance} &" in table
     assert r"\colhead{High/Low}" in table
     # The pair's significance and median ratio are set once, on the high
@@ -776,18 +777,18 @@ def test_make_one_parameter_table_references_existing_variables(tmp_path):
         r"\McHighMstarPaperBoundsNeff & \McHighMstarPaperBoundsAvgCompl & "
         r"\McHighMstarPaperBoundsPiecewiseIntOccBinaZero & "
         r"\multirow{2}{*}{\McMstarPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
-        r" & \multirow{2}{*}{2.5} \\" in table
+        r" & \multirow{2}{*}{2.5} & \multirow{2}{*}{3.2} \\" in table
     )
     assert (
         r" & low & $\McLowMstarPaperBoundsMedianMstar$ & "
         r"$\McLowMstarPaperBoundsMedianFeH$ & \McLowMstarPaperBoundsNstars & "
         r"\McLowMstarPaperBoundsNeff & \McLowMstarPaperBoundsAvgCompl & "
-        r"\McLowMstarPaperBoundsPiecewiseIntOccBinaZero &  &  \\" in table
+        r"\McLowMstarPaperBoundsPiecewiseIntOccBinaZero &  &  &  \\" in table
     )
     # Metallicity medians are compared in linear abundance: 10^(0.3+0.2).
     assert (
         r"\multirow{2}{*}{\McFeHPaperBoundsPiecewiseIntOccSignificanceBinaZero}"
-        r" & \multirow{2}{*}{3.2} \\" in table
+        r" & \multirow{2}{*}{2.5} & \multirow{2}{*}{3.2} \\" in table
     )
     assert (r"\multirow{2}{*}{$\text{[Fe/H]}$} & high & "
             r"$\McHighFeHPaperBoundsMedianMstar$ & "
@@ -849,9 +850,9 @@ def test_make_one_parameter_table_can_embed_values(tmp_path, monkeypatch):
         rf"\multirow{{2}}{{*}}{{Mass}} & high & $1.60$ & $0.30$ & 200 & 40.0 & "
         rf"0.75 & ${high}$ & "
         rf"\multirow{{2}}{{*}}{{${significance}$}} & "
-        r"\multirow{2}{*}{2.5} \\" in table
+        r"\multirow{2}{*}{2.5} & \multirow{2}{*}{3.2} \\" in table
     )
-    assert (f"\n & low & $0.65$ & $-0.20$ & 200 & 40.0 & 0.75 & ${low}$ &  &  "
+    assert (f"\n & low & $0.65$ & $-0.20$ & 200 & 40.0 & 0.75 & ${low}$ &  &  &  "
             "\\\\") in table
     assert "unused" not in table
 

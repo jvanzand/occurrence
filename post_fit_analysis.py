@@ -1873,7 +1873,7 @@ def _round_half_up(value, decimals):
 
 
 def _subset_medians(subsets, columns, catalog_path=None, cuts=None,
-                    mass_range=False):
+                    mass_range=False, raw=False):
     """Return each stellar subset's median properties and star count.
 
     ``subsets`` maps a key to ``{column: level}``, where ``column`` is
@@ -1882,7 +1882,7 @@ def _subset_medians(subsets, columns, catalog_path=None, cuts=None,
     each cut in ``cuts`` (defaults: 1 solar mass, zero dex, 5 Gyr), within
     ``Mstar_min``--``Mstar_max`` when ``mass_range`` is set, as for the fits.
     Returns ``{key: ({column: formatted median}, star count)}`` for the
-    requested ``columns``.
+    requested ``columns``; with ``raw``, the medians are unrounded floats.
     """
     import pandas as pd
 
@@ -1929,11 +1929,36 @@ def _subset_medians(subsets, columns, catalog_path=None, cuts=None,
                     f"no finite {column} values for subset {key} in "
                     f"{catalog_path}"
                 )
-            medians[column] = _round_half_up(
-                np.median(values), _MEDIAN_DECIMALS[column]
+            median = float(np.median(values))
+            medians[column] = median if raw else _round_half_up(
+                median, _MEDIAN_DECIMALS[column]
             )
         results[key] = (medians, int(mask.sum()))
     return results
+
+
+def _median_ratios(pairs, catalog_path=None, cuts=None, mass_range=False):
+    """Return high/low ratios of median stellar mass and metallicity.
+
+    ``pairs`` maps a key to ``(low levels, high levels)``, each in the
+    ``{column: level}`` form of :func:`_subset_medians`.  The [Fe/H] ratio
+    compares linear abundances, ``10**(high - low)`` of the dex medians.
+    Returns ``{key: (mass ratio, metallicity ratio)}``, rounded half up to
+    one decimal.
+    """
+    subsets = {}
+    for key, (low, high) in pairs.items():
+        subsets[key, "low"], subsets[key, "high"] = low, high
+    medians = _subset_medians(subsets, ("Mstar", "feh"), catalog_path, cuts,
+                              mass_range, raw=True)
+    ratios = {}
+    for key in pairs:
+        low, high = medians[key, "low"][0], medians[key, "high"][0]
+        ratios[key] = (
+            _round_half_up(high["Mstar"]/low["Mstar"], 1),
+            _round_half_up(10**(high["feh"] - low["feh"]), 1),
+        )
+    return ratios
 
 
 def _check_subset_counts(subset_medians, table_values, label):
@@ -2653,13 +2678,20 @@ def make_two_parameter_tables(
         raise ValueError(f"two-parameter subsets are incomplete; missing {missing}")
 
     significance_values = {}
-    dynamic_range_values = {}
     posterior_samples = {}
-    numerical_dynamic_ranges = None
+    # High/low ratios of the median stellar mass and metallicity between
+    # the two subsets of each comparison, from the stellar catalog
+    ratio_values = _median_ratios(
+        {
+            (varied, fixed): (
+                {"Mstar": low[0], "feh": low[1]},
+                {"Mstar": high[0], "feh": high[1]},
+            )
+            for varied, fixed, low, high in _two_parameter_comparisons()
+        },
+        stellar_catalog_path, two_parameter_cuts,
+    )
     if not use_latex_variables:
-        numerical_dynamic_ranges = _two_parameter_dynamic_ranges(
-            stellar_catalog_path, two_parameter_cuts
-        )
         for tier2_dir in tier2_dirs:
             levels = _two_parameter_levels(tier2_dir)
             posterior_samples[levels] = _three_parameter_occurrence_samples(
@@ -2671,12 +2703,8 @@ def make_two_parameter_tables(
         significance_name = _two_parameter_comparison_command_name(
             t1, t3, varied_parameter, fixed_level, "Significance"
         )
-        dynamic_range_name = _two_parameter_comparison_command_name(
-            t1, t3, varied_parameter, fixed_level, "DynamicRange"
-        )
         if use_latex_variables:
             significance_values[key] = rf"\{significance_name}"
-            dynamic_range_values[key] = rf"\{dynamic_range_name}"
         else:
             # Same rules as the variables: beyond what the draws resolve,
             # fall back to the quadrature significance.
@@ -2685,19 +2713,17 @@ def make_two_parameter_tables(
                 posterior_samples[low_levels],
             )
             significance_values[key] = f"${significance}$"
-            dynamic_range_values[key] = (
-                f"{numerical_dynamic_ranges[key]:.1f}"
-            )
 
     reordered_lines = [
-        r"\begin{deluxetable*}{ccccc}",
+        r"\begin{deluxetable*}{cccccc}",
         rf"\tablecaption{{{reordered_caption}}}",
         rf"\label{{{reordered_label}}}",
         r"\tablehead{",
-        r"\colhead{Fixed Parameter} &",
-        r"\multicolumn{2}{c}{Occurrence Rate} &",
-        r"\colhead{Significance} &",
-        r"\colhead{High/Low}",
+        r"\colhead{} & \multicolumn{2}{c}{} & \colhead{} & "
+        r"\colhead{High/Low} & \colhead{High/Low} \\",
+        r"\colhead{Fixed Parameter} & \multicolumn{2}{c}{Occurrence Rate} & "
+        r"\colhead{Significance} & \colhead{$M_{\star}$} & "
+        r"\colhead{$\text{[Fe/H]}$}",
         r"}",
         r"\startdata",
     ]
@@ -2706,13 +2732,13 @@ def make_two_parameter_tables(
         reordered_lines.append(
             rf"\textbf{{{fixed_parameter}}} & "
             rf"\textbf{{{low_heading}}} & \textbf{{{high_heading}}} & "
-            r" & \\"
+            r" &  & \\"
         )
         reordered_lines.append(r"\hline")
-        for fixed_level, low_value, high_value, significance, ratio in rows:
+        for fixed_level, low_value, high_value, significance, ratios in rows:
             reordered_lines.append(
                 rf"{fixed_level} & {low_value} & {high_value} & "
-                rf"{significance} & {ratio} \\"
+                rf"{significance} & {ratios[0]} & {ratios[1]} \\"
             )
         reordered_lines.append(r"\hline")
 
@@ -2723,7 +2749,7 @@ def make_two_parameter_tables(
              table_values[("low", metallicity)]["IntOcc"],
              table_values[("high", metallicity)]["IntOcc"],
              significance_values[("Mass", metallicity)],
-             dynamic_range_values[("Mass", metallicity)])
+             ratio_values[("Mass", metallicity)])
             for metallicity in ("high", "low")
         ],
     )
@@ -2734,7 +2760,7 @@ def make_two_parameter_tables(
              table_values[(mass, "low")]["IntOcc"],
              table_values[(mass, "high")]["IntOcc"],
              significance_values[("FeH", mass)],
-             dynamic_range_values[("FeH", mass)])
+             ratio_values[("FeH", mass)])
             for mass in ("high", "low")
         ],
     )
@@ -2836,55 +2862,6 @@ _ONE_PARAMETER_TYPES = {
 }
 
 
-def _one_parameter_dynamic_ranges(tier2_types, catalog_path=None, cuts=None):
-    """Return high/low median ratios of each parameter over the full catalog.
-
-    Metallicity medians are converted from dex to linear abundance first, as
-    in the two- and three-parameter tables.
-    """
-    import pandas as pd
-
-    if catalog_path is None:
-        catalog_path = (
-            Path(__file__).resolve().parent / "cls_files" /
-            "cls_all_stars_all_params.csv"
-        )
-    else:
-        catalog_path = Path(catalog_path)
-    parameter_cuts = {
-        "Mstar": _THREE_PARAMETER_DEFAULT_CUTS["Mstar"],
-        "feh": _THREE_PARAMETER_DEFAULT_CUTS["feh"],
-    }
-    if cuts is not None:
-        unknown = set(cuts) - set(parameter_cuts)
-        if unknown:
-            raise ValueError(
-                f"unknown one-parameter cut names: {sorted(unknown)}"
-            )
-        parameter_cuts.update(cuts)
-
-    catalog = pd.read_csv(catalog_path)
-    dynamic_ranges = {}
-    for tier2_type in tier2_types:
-        column = _ONE_PARAMETER_TYPES[tier2_type][1]
-        if column not in catalog.columns:
-            raise KeyError(f"{catalog_path} lacks column {column!r}")
-        values = pd.to_numeric(catalog[column], errors="coerce").dropna()
-        cut = parameter_cuts[column]
-        medians = [float(np.median(values[values <= cut])),
-                   float(np.median(values[values > cut]))]
-        if column == "feh":
-            medians = [10**value for value in medians]
-        lower, upper = medians
-        if lower <= 0:
-            raise ValueError(
-                f"dynamic-range medians must be positive; got {medians} for "
-                f"{tier2_type}"
-            )
-        dynamic_ranges[tier2_type] = upper/lower
-    return dynamic_ranges
-
-
 def make_one_parameter_table(
         results_dir, t1="mtrue", t3="paper_bounds",
         tier2_types=("Mstar", "FeH"), stack_dim="a", stack_bin=0,
@@ -2979,8 +2956,17 @@ def make_one_parameter_table(
                 samples["high"], samples["low"]
             )
             significance_values[tier2_type] = f"${significance}$"
-    dynamic_ranges = _one_parameter_dynamic_ranges(
-        tier2_types, stellar_catalog_path, one_parameter_cuts
+    # High/low ratios of the median stellar mass and metallicity of each
+    # pair, from the stellar catalog
+    ratios = _median_ratios(
+        {
+            tier2_type: tuple(
+                {_ONE_PARAMETER_TYPES[tier2_type][1]: level}
+                for level in ("low", "high")
+            )
+            for tier2_type in tier2_types
+        },
+        stellar_catalog_path, one_parameter_cuts,
     )
 
     median_columns = ("Mstar", "feh")
@@ -3002,7 +2988,7 @@ def make_one_parameter_table(
         )
         _check_subset_counts(subset_medians, table_values, "one-parameter")
     lines = [
-        r"\begin{deluxetable*}{lccccccccc}",
+        r"\begin{deluxetable*}{lcccccccccc}",
         rf"\tablecaption{{{caption}}}",
         rf"\label{{{label}}}",
         *_two_row_tablehead([
@@ -3010,7 +2996,8 @@ def make_one_parameter_table(
             *(_MEDIAN_COLUMN_HEADS[column] for column in median_columns),
             ("", r"$N_{\star}$"), ("", r"$N_{\mathrm{eff}}$"),
             ("Average", "Completeness"), ("", "Occurrence Rate"),
-            ("", "Significance"), ("", "High/Low"),
+            ("", "Significance"), ("High/Low", r"$M_{\star}$"),
+            ("High/Low", r"$\text{[Fe/H]}$"),
         ]),
         r"\startdata",
     ]
@@ -3023,14 +3010,14 @@ def make_one_parameter_table(
                     rf"\multirow{{2}}{{*}}"
                     rf"{{{_ONE_PARAMETER_TYPES[tier2_type][0]}}}"
                 )
-                pair_cells = (
-                    rf"\multirow{{2}}{{*}}{{{significance_values[tier2_type]}}}"
-                    rf" & \multirow{{2}}{{*}}"
-                    rf"{{{dynamic_ranges[tier2_type]:.1f}}}"
+                pair_cells = " & ".join(
+                    rf"\multirow{{2}}{{*}}{{{cell}}}"
+                    for cell in (significance_values[tier2_type],
+                                 *ratios[tier2_type])
                 )
             else:
                 parameter_cell = ""
-                pair_cells = " & "
+                pair_cells = " &  & "
             medians = subset_medians[(tier2_type, level)][0]
             lines.append(
                 f"{parameter_cell} & {level} & "
