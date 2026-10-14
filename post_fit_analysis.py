@@ -1510,7 +1510,8 @@ def make_appendix_parameter_table(
         stack_dim="a", caption="Fitted Model Parameters",
         label="tab:model_params_appendix", output_file=None, note=None,
         model_samples=None, omit_occurrence=(), tier1_labels=None,
-        sample_labels=None, model_tier3=None, model_order=None):
+        sample_labels=None, model_tier3=None, model_order=None,
+        tier1_page_breaks=False):
     """Create a hierarchical appendix table for all smooth fitted models.
 
     Each experiment contains one row for every smooth model whose requested
@@ -1540,6 +1541,9 @@ def make_appendix_parameter_table(
 
     ``model_order`` lists the models in the order their rows appear within
     each experiment; by default sigmoid, logG, log-linear, then escarpment.
+    With ``tier1_page_breaks``, each Tier 1 section after the first starts
+    on a new page (``\\tablebreak``), so a page break cannot split one of
+    its experiments' rows from the experiment's first row.
     """
     results_dir = Path(results_dir)
     tier1_dirs = list(tier1_dirs)
@@ -1596,8 +1600,10 @@ def make_appendix_parameter_table(
         r"\startdata",
     ]
 
-    for tier1_dir in tier1_dirs:
+    for tier1_index, tier1_dir in enumerate(tier1_dirs):
         tier1_name = Path(tier1_dir).name
+        if tier1_page_breaks and tier1_index > 0:
+            lines.append(r"\tablebreak")
         for tier2_type in tier2_types:
             for tier2_dir, _ in _tier2_directories(tier2_type):
                 prefix = _experiment_prefix(tier1_name, tier2_dir, t3)

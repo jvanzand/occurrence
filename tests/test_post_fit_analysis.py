@@ -2189,3 +2189,21 @@ def test_appendix_table_model_order_is_configurable(tmp_path):
     assert models() == ["sigmoid", "logG", "escarpment"]
     assert models(model_order=["escarpment", "sigmoid", "logG"]) == [
         "escarpment", "sigmoid", "logG"]
+
+
+def test_appendix_table_can_start_each_tier1_on_a_new_page(tmp_path):
+    for tier1 in ("mtrue", "qtrue"):
+        chain_dir = tmp_path / tier1 / "allstars" / "paper_bounds" / "saved_chains"
+        chain_dir.mkdir(parents=True)
+        (chain_dir / "chains_sigmoid_bin0.npz").touch()
+    text = post_fit_analysis.make_appendix_parameter_table(
+        tmp_path, ["mtrue", "qtrue"], ["allstars"], "paper_bounds",
+        tier1_page_breaks=True,
+    ).read_text()
+    assert text.count(r"\tablebreak") == 1
+    assert text.index(r"\tablebreak") < text.index("qtrue & allstars")
+    assert text.index("mtrue & allstars") < text.index(r"\tablebreak")
+    plain = post_fit_analysis.make_appendix_parameter_table(
+        tmp_path, ["mtrue", "qtrue"], ["allstars"], "paper_bounds",
+    ).read_text()
+    assert r"\tablebreak" not in plain
