@@ -2210,3 +2210,12 @@ def test_appendix_table_can_start_each_tier1_on_a_new_page(tmp_path):
         tmp_path, ["mtrue", "qtrue"], ["allstars"], "paper_bounds",
     ).read_text()
     assert r"\tablebreak" not in plain
+
+
+def test_three_parameter_tables_take_notes(tmp_path):
+    outputs = post_fit_analysis.make_three_parameter_tables(
+        tmp_path, reordered_note="Three-parameter note.",
+    )
+    assert ("\\textbf{Note.} Three-parameter note.\n}\n\\end{deluxetable*}"
+            in outputs["reordered"].read_text())
+    assert "tablenotetext" not in outputs["original"].read_text()

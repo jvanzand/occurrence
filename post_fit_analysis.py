@@ -2433,7 +2433,8 @@ def make_three_parameter_tables(
         reordered_output_file=None, original_output_file=None,
         use_latex_variables=True, stellar_catalog_path=None,
         three_parameter_cuts=None, occurrence_model="piecewise",
-        occurrence_stack_dim="a", occurrence_stack_bin=0):
+        occurrence_stack_dim="a", occurrence_stack_bin=0,
+        reordered_note=None, original_note=None):
     """Create reordered and legacy-form tables for three stellar parameters.
 
     The eight subsets vary stellar mass, metallicity, and activity.  Following
@@ -2449,7 +2450,9 @@ def make_three_parameter_tables(
     which fitted function supplies both the integrated occurrence rates and
     their comparison significances.  Parametric models use the chain selected
     by ``occurrence_stack_bin``; ``occurrence_stack_dim`` determines the
-    corresponding LaTeX command suffix.
+    corresponding LaTeX command suffix.  ``reordered_note`` and
+    ``original_note`` are LaTeX text for each table's note below the data;
+    a table has no note when its note is ``None``.
     """
     results_dir = Path(results_dir)
     if tier2_dirs is None:
@@ -2621,10 +2624,9 @@ def make_three_parameter_tables(
             for metallicity in ("high", "low")
         ],
     )
-    lines.extend([
-        r"\enddata",
-        r"\end{deluxetable*}",
-    ])
+    lines.append(r"\enddata")
+    lines.extend(_table_note_lines(reordered_note))
+    lines.append(r"\end{deluxetable*}")
 
     if reordered_output_file is None:
         reordered_output_path = (
@@ -2683,10 +2685,9 @@ def make_three_parameter_tables(
             + f"{values['Nstars']} & {values['Neff']} & "
             f"{values['AvgCompl']} & {values['IntOcc']} " + r"\\"
         )
-    original_lines.extend([
-        r"\enddata",
-        r"\end{deluxetable*}",
-    ])
+    original_lines.append(r"\enddata")
+    original_lines.extend(_table_note_lines(original_note))
+    original_lines.append(r"\end{deluxetable*}")
     if original_output_file is None:
         original_output_path = (
             results_dir / PAPER_TABLES_DIRNAME /
