@@ -1011,7 +1011,7 @@ def add_smooth_model_to_figures(
             density_function(sample, grid) for sample in samples
         ])
         label = model_name
-        label = 'Log-normal' if model_name == 'logG' else label
+        label = 'log-Gaussian' if model_name == 'logG' else label
         label = 'log-linear' if model_name == 'loglinear' else label
         label = 'Broken power law' if model_name == 'bpl' else label
         if len(loaded) > 1:
