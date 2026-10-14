@@ -2120,7 +2120,7 @@ def test_appendix_table_restricts_models_and_labels_samples(tmp_path):
     text = post_fit_analysis.make_appendix_parameter_table(
         tmp_path, ["mtrue", "qtrue"], ["allstars", "Mstar"], "paper_bounds",
         model_samples={"loglinear": [("mtrue", "allstars")]},
-        omit_occurrence=["loglinear"],
+        omit_occurrence=["loglinear"], omit_delta_bic=["loglinear"],
         tier1_labels={"mtrue": "$M_c$", "qtrue": "$q$"},
         sample_labels={"allstars": "All Stars", "highMstar": r"High $M_\star$"},
     ).read_text()
@@ -2131,6 +2131,9 @@ def test_appendix_table_restricts_models_and_labels_samples(tmp_path):
     assert models.count("log-linear") == 1
     loglinear_row = rows[models.index("log-linear")]
     assert loglinear_row.split(" & ")[6] == r"\nodata"
+    # Delta BIC omitted too (last cell)
+    assert loglinear_row.split(" & ")[-1].startswith(r"\nodata")
+    assert "LogLinearDbic" not in text
     assert rows[models.index("log-linear") - 1].startswith("$M_c$ & All Stars")
     assert "$q$ & High $M_\\star$" in text
     assert r"\shortstack{Mass\\Variable}" in text

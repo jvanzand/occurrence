@@ -1511,7 +1511,7 @@ def make_appendix_parameter_table(
         label="tab:model_params_appendix", output_file=None, note=None,
         model_samples=None, omit_occurrence=(), tier1_labels=None,
         sample_labels=None, model_tier3=None, model_order=None,
-        tier1_page_breaks=False):
+        tier1_page_breaks=False, omit_delta_bic=()):
     """Create a hierarchical appendix table for all smooth fitted models.
 
     Each experiment contains one row for every smooth model whose requested
@@ -1528,7 +1528,9 @@ def make_appendix_parameter_table(
     model name to ``(tier1, tier2)`` pairs (e.g. ``{"loglinear": [("mtrue",
     "allstars")]}``); models not named appear wherever they were fitted.
     Models in ``omit_occurrence`` show ``\\nodata`` for their integrated
-    occurrence.  ``tier1_labels`` and ``sample_labels`` map Tier 1 and Tier 2
+    occurrence, and models in ``omit_delta_bic`` for their Delta BIC (e.g. a
+    model fit over only part of the domain, whose Delta BIC is not
+    comparable with the others').  ``tier1_labels`` and ``sample_labels`` map Tier 1 and Tier 2
     directory names to the text shown in the first two columns (e.g.
     ``{"mtrue": "$M_c$"}``, ``{"lowAct": "Old"}``); unmapped names are shown
     as they are.
@@ -1560,7 +1562,7 @@ def make_appendix_parameter_table(
         for model, pairs in (model_samples or {}).items()
     }
     unknown = sorted(
-        (set(model_samples) | set(omit_occurrence)) -
+        (set(model_samples) | set(omit_occurrence) | set(omit_delta_bic)) -
         set(_MODEL_PARAMETER_MACROS)
     )
     if unknown:
@@ -1662,7 +1664,8 @@ def make_appendix_parameter_table(
                         r"\nodata" if model_name in omit_occurrence
                         else f"\\{occurrence}",
                         *parameter_cells,
-                        f"\\{delta_bic}",
+                        r"\nodata" if model_name in omit_delta_bic
+                        else f"\\{delta_bic}",
                     ]
                     lines.append(" & ".join(row) + r" \\")
                 if calculated_models:
