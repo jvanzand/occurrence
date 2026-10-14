@@ -2136,3 +2136,33 @@ def test_appendix_table_restricts_models_and_labels_samples(tmp_path):
         post_fit_analysis.make_appendix_parameter_table(
             tmp_path, ["mtrue"], ["allstars"], "paper_bounds",
             omit_occurrence=["linear"])
+
+
+def test_appendix_table_takes_a_model_from_another_run(tmp_path):
+    for tier1 in ("mtrue", "qtrue"):
+        for tier2 in ("allstars", "highMstar"):
+            main = tmp_path / tier1 / tier2 / "paper_bounds" / "saved_chains"
+            main.mkdir(parents=True)
+            (main / "chains_sigmoid_bin0.npz").touch()
+        other = tmp_path / tier1 / "allstars" / "paper_bounds_noGP" / "saved_chains"
+        other.mkdir(parents=True)
+        (other / "chains_escarpment_bin0.npz").touch()
+    text = post_fit_analysis.make_appendix_parameter_table(
+        tmp_path, ["mtrue", "qtrue"], ["allstars", "Mstar"], "paper_bounds",
+        model_tier3={"escarpment": "paper_bounds_noGP"},
+    ).read_text()
+    data = text.split("\\startdata")[1].split("\\enddata")[0]
+    rows = [line for line in data.splitlines() if " & " in line]
+    models = [row.split(" & ")[5] for row in rows]
+    # Escarpment only where the other run has a chain: both full samples,
+    # right after the sigmoid row of that block
+    assert models == ["sigmoid", "escarpment", "sigmoid", "sigmoid",
+                      "escarpment", "sigmoid"]
+    escarpment = rows[1].split(" & ")
+    assert escarpment[6] == r"\McAllstarsPaperBoundsNoGPEscarpmentIntOccBinaZero"
+    assert "McAllstarsPaperBoundsNoGPEscarpmentParamCOneBinaZero" in escarpment[7]
+    assert escarpment[-1].startswith(
+        r"\McAllstarsPaperBoundsNoGPEscarpmentDbicBinaZero")
+    # Experiment cells still describe the main run
+    assert rows[0].startswith(r"mtrue & allstars & \McAllstarsPaperBoundsNstars")
+    assert rows[4].split(" & ")[6].startswith(r"\QAllstarsPaperBoundsNoGP")

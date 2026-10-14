@@ -1509,7 +1509,7 @@ def make_appendix_parameter_table(
         stack_dim="a", caption="Fitted Model Parameters",
         label="tab:model_params_appendix", output_file=None, note=None,
         model_samples=None, omit_occurrence=(), tier1_labels=None,
-        sample_labels=None):
+        sample_labels=None, model_tier3=None):
     """Create a hierarchical appendix table for all smooth fitted models.
 
     Each experiment contains one row for every smooth model whose requested
@@ -1530,6 +1530,12 @@ def make_appendix_parameter_table(
     directory names to the text shown in the first two columns (e.g.
     ``{"mtrue": "$M_c$"}``, ``{"lowAct": "Old"}``); unmapped names are shown
     as they are.
+
+    ``model_tier3`` takes a model's fits from another Tier 3 run, mapping
+    the model name to that run's folder (e.g. ``{"escarpment":
+    "paper_bounds_noGP"}``).  The model's rows then appear in the matching
+    experiment's block wherever that run has a chain, citing that run's
+    commands, while the experiment-level cells still describe ``t3``.
     """
     results_dir = Path(results_dir)
     tier1_dirs = list(tier1_dirs)
@@ -1551,6 +1557,11 @@ def make_appendix_parameter_table(
     )
     if unknown:
         raise ValueError(f"unknown models {unknown}")
+    model_tier3 = {model: str(Path(run).name)
+                   for model, run in (model_tier3 or {}).items()}
+    unknown = sorted(set(model_tier3) - set(_MODEL_PARAMETER_MACROS))
+    if unknown:
+        raise ValueError(f"unknown models {unknown} in model_tier3")
     tier1_labels = dict(tier1_labels or {})
     sample_labels = dict(sample_labels or {})
     bin_word = _number_word(stack_bin)
@@ -1589,12 +1600,13 @@ def make_appendix_parameter_table(
                     f"\\{prefix}Neff{statistic_bin_suffix}",
                     f"\\{prefix}AvgCompl{statistic_bin_suffix}",
                 ]
-                chain_dir = (
-                    results_dir / tier1_dir / tier2_dir / t3 / "saved_chains"
-                )
+                def model_run(model_name):
+                    return model_tier3.get(model_name, t3)
+
                 calculated_models = [
                     model_name for model_name in _APPENDIX_MODEL_ORDER
-                    if (chain_dir /
+                    if (results_dir / tier1_dir / tier2_dir /
+                        model_run(model_name) / "saved_chains" /
                         f"chains_{model_name}_bin{stack_bin}.npz").is_file()
                     and (model_name not in model_samples or
                          (tier1_name, tier2_dir) in model_samples[model_name])
@@ -1603,13 +1615,17 @@ def make_appendix_parameter_table(
                     model_macro, parameter_macros = _MODEL_PARAMETER_MACROS[
                         model_name
                     ]
+                    # Commands of the run this model's fits come from
+                    model_prefix = _experiment_prefix(
+                        tier1_name, tier2_dir, model_run(model_name)
+                    )
                     parameter_labels = _MODEL_PARAMETER_LABELS[model_name]
                     parameter_cells = []
                     for parameter_label, parameter_macro in zip(
                             parameter_labels, parameter_macros):
                         command = (
-                            prefix + model_macro + "Param" + parameter_macro +
-                            parameter_bin_suffix
+                            model_prefix + model_macro + "Param" +
+                            parameter_macro + parameter_bin_suffix
                         )
                         parameter_cells.append(
                             rf"\shortstack{{{parameter_label}\\\{command}}}"
@@ -1618,11 +1634,11 @@ def make_appendix_parameter_table(
                         [r"\nodata"]*(4 - len(parameter_cells))
                     )
                     occurrence = (
-                        prefix + model_macro + "IntOcc" +
+                        model_prefix + model_macro + "IntOcc" +
                         parameter_bin_suffix
                     )
                     delta_bic = (
-                        prefix + model_macro + "Dbic" +
+                        model_prefix + model_macro + "Dbic" +
                         parameter_bin_suffix
                     )
                     row = (
