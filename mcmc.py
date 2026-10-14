@@ -1012,6 +1012,7 @@ def add_smooth_model_to_figures(
         ])
         label = model_name
         label = 'Log-normal' if model_name == 'logG' else label
+        label = 'log-linear' if model_name == 'loglinear' else label
         label = 'Broken power law' if model_name == 'bpl' else label
         if len(loaded) > 1:
             label += " (" + _stack_interval_label(

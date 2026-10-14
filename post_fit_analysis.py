@@ -49,6 +49,10 @@ _MODEL_PARAMETER_LABELS = {
     "loglinear": (r"$D_1$", r"$D_2$"),
 }
 
+# Model names as printed in the paper's tables, where they differ from the
+# code names.
+_TABLE_MODEL_NAMES = {"loglinear": "log-linear"}
+
 _APPENDIX_MODEL_ORDER = (
     "sigmoid", "escarpment", "logG", "loglinear",
 )
@@ -1465,7 +1469,8 @@ def make_parameter_table(
         model_macro, parameter_macros = _MODEL_PARAMETER_MACROS[model]
         labels = _MODEL_PARAMETER_LABELS[model]
         lines.append(
-            rf"\multicolumn{{2}}{{l}}{{{model}}} \\"
+            rf"\multicolumn{{2}}{{l}}"
+            rf"{{{_TABLE_MODEL_NAMES.get(model, model)}}} \\"
         )
         lines.append(r"\hline")
         for label, parameter_macro in zip(labels, parameter_macros):
@@ -1623,7 +1628,7 @@ def make_appendix_parameter_table(
                     row = (
                         experiment_cells if model_index == 0 else ["", "", "", "", ""]
                     ) + [
-                        model_name,
+                        _TABLE_MODEL_NAMES.get(model_name, model_name),
                         r"\nodata" if model_name in omit_occurrence
                         else f"\\{occurrence}",
                         *parameter_cells,

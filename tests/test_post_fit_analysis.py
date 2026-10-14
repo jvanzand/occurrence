@@ -397,7 +397,8 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
     assert len(all_data_rows) == 23
     first_block = all_data_rows[:4]
     expected_models = [
-        model  # model names are not bold
+        # plain names, as printed in the paper ("log-linear")
+        post_fit_analysis._TABLE_MODEL_NAMES.get(model, model)
         for model in post_fit_analysis._APPENDIX_MODEL_ORDER
     ]
     assert [row.split(" & ")[5] for row in first_block] == expected_models
@@ -2125,10 +2126,10 @@ def test_appendix_table_restricts_models_and_labels_samples(tmp_path):
     rows = [line for line in data.splitlines() if " & " in line]
     models = [row.split(" & ")[5] for row in rows]
     # loglinear only for mtrue/allstars, with no integrated occurrence
-    assert models.count("loglinear") == 1
-    loglinear_row = rows[models.index("loglinear")]
+    assert models.count("log-linear") == 1
+    loglinear_row = rows[models.index("log-linear")]
     assert loglinear_row.split(" & ")[6] == r"\nodata"
-    assert rows[models.index("loglinear") - 1].startswith("$M_c$ & All Stars")
+    assert rows[models.index("log-linear") - 1].startswith("$M_c$ & All Stars")
     assert "$q$ & High $M_\\star$" in text
     assert r"\shortstack{Mass\\Variable}" in text
     with pytest.raises(ValueError, match="unknown models"):
