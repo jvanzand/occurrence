@@ -409,7 +409,9 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
     assert r"\McAllstarsPaperBoundsEscarpmentParamBPOneBinaZero" in model_rows["escarpment"]
     assert r"\McAllstarsPaperBoundsLogLinearParamCHighBinaZero" in model_rows["loglinear"]
     assert r"\nodata" in model_rows["logG"]
-    assert r"\McLowMstarPaperBoundsLogLinearDbicBinaZero" in all_data_rows[11]
+    # Third block (mtrue/lowMstar): log-linear is third, escarpment last
+    assert r"\McLowMstarPaperBoundsLogLinearDbicBinaZero" in all_data_rows[10]
+    assert r"\McLowMstarPaperBoundsEscarpmentDbicBinaZero" in all_data_rows[11]
     assert r"\QAllstarsPaperBoundsLogLinearIntOccBinaZero" in text
     assert r"\QLowMstarPaperBoundsLogLinearIntOccBinaZero" not in text
     assert "tablecomments" not in text
@@ -2156,6 +2158,7 @@ def test_appendix_table_takes_a_model_from_another_run(tmp_path):
     models = [row.split(" & ")[5] for row in rows]
     # Escarpment only where the other run has a chain: both full samples,
     # right after the sigmoid row of that block
+    # Escarpment rows go at the bottom of their experiment's block
     assert models == ["sigmoid", "escarpment", "sigmoid", "sigmoid",
                       "escarpment", "sigmoid"]
     escarpment = rows[1].split(" & ")
@@ -2166,3 +2169,23 @@ def test_appendix_table_takes_a_model_from_another_run(tmp_path):
     # Experiment cells still describe the main run
     assert rows[0].startswith(r"mtrue & allstars & \McAllstarsPaperBoundsNstars")
     assert rows[4].split(" & ")[6].startswith(r"\QAllstarsPaperBoundsNoGP")
+
+
+
+def test_appendix_table_model_order_is_configurable(tmp_path):
+    chain_dir = tmp_path / "mtrue" / "allstars" / "paper_bounds" / "saved_chains"
+    chain_dir.mkdir(parents=True)
+    for model in ("sigmoid", "logG", "escarpment"):
+        (chain_dir / f"chains_{model}_bin0.npz").touch()
+
+    def models(**kwargs):
+        text = post_fit_analysis.make_appendix_parameter_table(
+            tmp_path, ["mtrue"], ["allstars"], "paper_bounds", **kwargs,
+        ).read_text()
+        data = text.split("\\startdata")[1].split("\\enddata")[0]
+        return [line.split(" & ")[5] for line in data.splitlines()
+                if " & " in line]
+
+    assert models() == ["sigmoid", "logG", "escarpment"]
+    assert models(model_order=["escarpment", "sigmoid", "logG"]) == [
+        "escarpment", "sigmoid", "logG"]

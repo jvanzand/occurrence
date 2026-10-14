@@ -53,8 +53,9 @@ _MODEL_PARAMETER_LABELS = {
 # code names.
 _TABLE_MODEL_NAMES = {"loglinear": "log-linear"}
 
+# Order of the model rows within each experiment of the appendix table
 _APPENDIX_MODEL_ORDER = (
-    "sigmoid", "escarpment", "logG", "loglinear",
+    "sigmoid", "logG", "loglinear", "escarpment",
 )
 
 _THREE_PARAMETER_TIER2_DIRS = (
@@ -1509,7 +1510,7 @@ def make_appendix_parameter_table(
         stack_dim="a", caption="Fitted Model Parameters",
         label="tab:model_params_appendix", output_file=None, note=None,
         model_samples=None, omit_occurrence=(), tier1_labels=None,
-        sample_labels=None, model_tier3=None):
+        sample_labels=None, model_tier3=None, model_order=None):
     """Create a hierarchical appendix table for all smooth fitted models.
 
     Each experiment contains one row for every smooth model whose requested
@@ -1536,6 +1537,9 @@ def make_appendix_parameter_table(
     "paper_bounds_noGP"}``).  The model's rows then appear in the matching
     experiment's block wherever that run has a chain, citing that run's
     commands, while the experiment-level cells still describe ``t3``.
+
+    ``model_order`` lists the models in the order their rows appear within
+    each experiment; by default sigmoid, logG, log-linear, then escarpment.
     """
     results_dir = Path(results_dir)
     tier1_dirs = list(tier1_dirs)
@@ -1562,6 +1566,10 @@ def make_appendix_parameter_table(
     unknown = sorted(set(model_tier3) - set(_MODEL_PARAMETER_MACROS))
     if unknown:
         raise ValueError(f"unknown models {unknown} in model_tier3")
+    model_order = tuple(model_order or _APPENDIX_MODEL_ORDER)
+    unknown = sorted(set(model_order) - set(_MODEL_PARAMETER_MACROS))
+    if unknown:
+        raise ValueError(f"unknown models {unknown} in model_order")
     tier1_labels = dict(tier1_labels or {})
     sample_labels = dict(sample_labels or {})
     bin_word = _number_word(stack_bin)
@@ -1604,7 +1612,7 @@ def make_appendix_parameter_table(
                     return model_tier3.get(model_name, t3)
 
                 calculated_models = [
-                    model_name for model_name in _APPENDIX_MODEL_ORDER
+                    model_name for model_name in model_order
                     if (results_dir / tier1_dir / tier2_dir /
                         model_run(model_name) / "saved_chains" /
                         f"chains_{model_name}_bin{stack_bin}.npz").is_file()
