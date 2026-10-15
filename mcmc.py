@@ -1176,6 +1176,19 @@ def save_model_figures(
             axes.set_ylabel(ylabel)
             axes.set_title(title)
         figure.tight_layout()
+        if name in {"density", "occurrence"}:
+            # Give the legend vertical room when uncertain fits reach it
+            expanded = [
+                pu.expand_ylim_for_legend(axis)
+                for axis in np.atleast_1d(axes)
+            ]
+            if any(expanded):
+                # Stacked panels keep a common y-range
+                stacked = np.atleast_1d(axes)
+                top = max(axis.get_ylim()[1] for axis in stacked)
+                for axis in stacked:
+                    axis.set_ylim(axis.get_ylim()[0], top)
+                figure.tight_layout()
         path = output_dir / filename
         figure.savefig(path, dpi=300)
         plt.close(figure)

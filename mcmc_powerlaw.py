@@ -23,7 +23,7 @@ MODEL_REGISTRY = {
         dl.sigmoid_density,
         4,
         (r"$B_1$", r"$B_2$", r"$\log(x_t)$", r"$W$"),
-        "green",
+        "RoyalBlue",
     ),
     "logG": ModelSpec(
         dl.log_gaussian_density,
@@ -41,7 +41,7 @@ MODEL_REGISTRY = {
         dl.escarpment_density,
         4,
         (r"$D_1$", r"$D_2$", r"$\log(x_{t,1})$", r"$\log(x_{t,2})$"),
-        "RoyalBlue",
+        "green",
     ),
     "bpl": ModelSpec(
         dl.broken_powerlaw_density,

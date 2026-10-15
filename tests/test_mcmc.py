@@ -794,8 +794,12 @@ def _write_restricted_loglinear_chain(path):
     )
 
 
-def test_credible_extrapolation_is_dashed_fainter_and_does_not_rescale(tmp_path):
+def test_credible_extrapolation_is_dashed_fainter_and_does_not_rescale(tmp_path, monkeypatch):
     import matplotlib.pyplot as plt
+    from occurrence import plotting_utils as pu
+
+    # Isolate the extrapolation from the legend's y-range adjustment
+    monkeypatch.setattr(pu, "expand_ylim_for_legend", lambda axis: 0)
 
     chain_path = tmp_path / "loglinear.npz"
     _write_restricted_loglinear_chain(chain_path)
@@ -822,8 +826,12 @@ def test_credible_extrapolation_is_dashed_fainter_and_does_not_rescale(tmp_path)
     np.testing.assert_allclose(axis.get_ylim(), supported_limits)
 
 
-def test_draw_extrapolation_keeps_draw_opacity_and_uses_dashes(tmp_path):
+def test_draw_extrapolation_keeps_draw_opacity_and_uses_dashes(tmp_path, monkeypatch):
     import matplotlib.pyplot as plt
+    from occurrence import plotting_utils as pu
+
+    # Isolate the extrapolation from the legend's y-range adjustment
+    monkeypatch.setattr(pu, "expand_ylim_for_legend", lambda axis: 0)
 
     chain_path = tmp_path / "loglinear.npz"
     _write_restricted_loglinear_chain(chain_path)

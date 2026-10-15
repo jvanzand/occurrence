@@ -131,6 +131,84 @@ def legend_with_label_last(axis, last_label, fontsize=None, loc=None):
         )
 
 
+def _artists_overlap_bbox(axis, bbox):
+    """Return whether any curve, band, or marker on ``axis`` enters ``bbox``.
+
+    ``bbox`` is in display coordinates. Lines are tested as open paths
+    (so a horizontal step crossing the box counts even with no vertex inside),
+    filled bands as closed paths, and scatter markers by their positions.
+    Invisible artists, such as fully transparent autoscaling helpers, and the
+    legend itself are skipped.
+    """
+    from matplotlib.collections import PathCollection
+
+    def visible(artist):
+        alpha = artist.get_alpha()
+        return artist.get_visible() and (alpha is None or alpha > 0)
+
+    def any_inside(points):
+        points = np.asarray(points, dtype=float).reshape(-1, 2)
+        return bool((
+            (points[:, 0] >= bbox.x0) & (points[:, 0] <= bbox.x1) &
+            (points[:, 1] >= bbox.y0) & (points[:, 1] <= bbox.y1)
+        ).any())
+
+    for line in axis.lines:
+        if not visible(line):
+            continue
+        path = line.get_transform().transform_path(line.get_path())
+        if len(path.vertices) and (
+                path.intersects_bbox(bbox, filled=False) or
+                any_inside(path.vertices)):
+            return True
+    for collection in axis.collections:
+        if not visible(collection):
+            continue
+        if isinstance(collection, PathCollection):
+            offsets = collection.get_offset_transform().transform(
+                collection.get_offsets()
+            )
+            if len(offsets) and any_inside(offsets):
+                return True
+            continue
+        transform = collection.get_transform()
+        filled = len(np.atleast_1d(collection.get_facecolor())) > 0 and (
+            np.asarray(collection.get_facecolor())[..., -1] > 0
+        ).any()
+        for path in collection.get_paths():
+            path = transform.transform_path(path)
+            if len(path.vertices) and path.intersects_bbox(
+                    bbox, filled=filled):
+                return True
+    return False
+
+
+def expand_ylim_for_legend(axis, step=1.08, max_steps=25):
+    """Raise the top of ``axis``'s y-range until no plotted data meets the legend.
+
+    The legend keeps its position in axes coordinates, so each increase of
+    the upper y-limit by ``step`` lowers the data relative to it. Stops after
+    ``max_steps`` increases (a factor of ``step**max_steps``) if the data
+    still overlap, e.g. a band spanning the full height. Returns the number of
+    increases applied.
+    """
+    legend = axis.get_legend()
+    if legend is None:
+        return 0
+    figure = axis.figure
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    for count in range(max_steps + 1):
+        bbox = legend.get_window_extent(renderer)
+        if not _artists_overlap_bbox(axis, bbox):
+            return count
+        if count == max_steps:
+            break
+        bottom, top = axis.get_ylim()
+        axis.set_ylim(bottom, bottom + step*(top - bottom))
+    return max_steps
+
+
 def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True, 
                          a_m_lims_pairs=None, summary_dict=None,
                          zoom=False,
