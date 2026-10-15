@@ -549,7 +549,8 @@ def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
             axis, values[finite], edges, color="gray", linestyle="--",
             linewidth=2, label=f"All ({int(finite.sum())})",
         )
-        axis.legend()
+        # Legend at the ORD plots' size
+        axis.legend(fontsize=1.6*plt.rcParams["font.size"])
     else:
         _histogram_outline(
             axis, values[finite], edges, color="k", linewidth=2.5,
