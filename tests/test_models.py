@@ -33,14 +33,14 @@ def test_unknown_model_has_clear_error():
 
 def test_sigmoid_parameter_names_describe_shape():
     assert mcmc_powerlaw.MODEL_REGISTRY["sigmoid"].parameter_names == (
-        "C1", "C2", "center", "width",
+        r"$B_1$", r"$B_2$", r"$\log(x_t)$", r"$W$",
     )
 
 
 def test_loglinear_is_purple_and_uses_endpoint_rates():
     spec = mcmc_powerlaw.MODEL_REGISTRY["loglinear"]
     assert spec.color == "purple"
-    assert spec.parameter_names == (r"$C_{\rm low}$", r"$C_{\rm high}$")
+    assert spec.parameter_names == (r"$C_1$", r"$C_2$")
 
 
 def test_corner_explicitly_marks_sigmoid_width_reference(tmp_path, monkeypatch):

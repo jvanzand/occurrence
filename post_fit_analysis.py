@@ -26,27 +26,30 @@ _TIER1_LATEX_PREFIXES = {
     "qsini": "Qsini",
 }
 
+# Models in the paper's order (Section 3.2, Table 1). Parameter macro names
+# spell out the paper's symbols: sigmoid B_1, B_2; log-linear C_1, C_2;
+# escarpment D_1, D_2.
 _MODEL_PARAMETER_MACROS = {
+    "sigmoid": ("Sigmoid", ("BOne", "BTwo", "Center", "Width")),
     "logG": ("LogG", ("A", "Mu", "Sigma")),
+    "loglinear": ("LogLinear", ("COne", "CTwo")),
     "escarpment": (
-        "Escarpment", ("COne", "CTwo", "BPOne", "BPTwo")
+        "Escarpment", ("DOne", "DTwo", "BPOne", "BPTwo")
     ),
-    "sigmoid": ("Sigmoid", ("COne", "CTwo", "Center", "Width")),
     "bpl": ("BPL", ("C", "LogBreak", "Beta", "Gamma")),
-    "loglinear": ("LogLinear", ("CLow", "CHigh")),
 }
 
 _MODEL_PARAMETER_LABELS = {
-    "logG": (r"$A$", r"$\mu$", r"$\sigma$"),
-    "escarpment": (
-        r"$C_1$", r"$C_2$", r"$\log(x_{t,1})$",
-        r"$\log(x_{t,2})$",
-    ),
     "sigmoid": (
         r"$B_1$", r"$B_2$", r"$\log(x_t)$", r"$W$"
     ),
+    "logG": (r"$A$", r"$\mu$", r"$\sigma$"),
+    "loglinear": (r"$C_1$", r"$C_2$"),
+    "escarpment": (
+        r"$D_1$", r"$D_2$", r"$\log(x_{t,1})$",
+        r"$\log(x_{t,2})$",
+    ),
     "bpl": (r"$C$", r"$\log(x_0)$", r"$\beta$", r"$\gamma$"),
-    "loglinear": (r"$D_1$", r"$D_2$"),
 }
 
 # Model names as printed in the paper's tables, where they differ from the
@@ -3251,7 +3254,7 @@ def _stack_statistics(summary, stack_dim, summary_path):
 # How each model parameter is compared between samples: rates by their ratio,
 # log10 locations by their difference in dex and the corresponding factor,
 # and everything else (widths, slopes) by its difference alone.
-_RATE_PARAMETERS = {"COne", "CTwo", "A", "C", "CLow", "CHigh"}
+_RATE_PARAMETERS = {"BOne", "BTwo", "COne", "CTwo", "DOne", "DTwo", "A", "C"}
 _LOCATION_PARAMETERS = {"Center", "Mu", "BPOne", "BPTwo", "LogBreak"}
 
 

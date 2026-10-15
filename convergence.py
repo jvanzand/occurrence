@@ -22,8 +22,8 @@ DEFAULT_TARGET = 50
 SMOOTH_PARAMETER_NAMES = {
     "sigmoid": ["ln B1", "ln B2", "log10 x_t", "ln W"],
     "logG": ["ln A", "mu", "ln sigma"],
-    "escarpment": ["ln C1", "ln C2", "log10 x_t1", "log10 x_t2"],
-    "loglinear": ["ln D1", "ln D2"],
+    "loglinear": ["ln C1", "ln C2"],
+    "escarpment": ["ln D1", "ln D2", "log10 x_t1", "log10 x_t2"],
     "bpl": ["ln C", "log10 x_break", "beta", "gamma"],
 }
 

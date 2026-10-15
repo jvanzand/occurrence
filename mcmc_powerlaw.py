@@ -16,36 +16,38 @@ class ModelSpec:
     color: str
 
 
+# Models are listed in the paper's order (Section 3.2, Table 1), and the
+# parameter labels match the paper's symbols.
 MODEL_REGISTRY = {
+    "sigmoid": ModelSpec(
+        dl.sigmoid_density,
+        4,
+        (r"$B_1$", r"$B_2$", r"$\log(x_t)$", r"$W$"),
+        "green",
+    ),
     "logG": ModelSpec(
         dl.log_gaussian_density,
         3,
         ("A", r"$\mu$", r"$\sigma$"),
         "tomato",
     ),
+    "loglinear": ModelSpec(
+        dl.log_linear_density,
+        2,
+        (r"$C_1$", r"$C_2$"),
+        "purple",
+    ),
     "escarpment": ModelSpec(
         dl.escarpment_density,
         4,
-        ("C1", "C2", r"$\log(x_{t,1})$", r"$\log(x_{t,2})$"),
+        (r"$D_1$", r"$D_2$", r"$\log(x_{t,1})$", r"$\log(x_{t,2})$"),
         "RoyalBlue",
-    ),
-    "sigmoid": ModelSpec(
-        dl.sigmoid_density,
-        4,
-        ("C1", "C2", "center", "width"),
-        "green",
     ),
     "bpl": ModelSpec(
         dl.broken_powerlaw_density,
         4,
         ("C", r"$\log(x_0)$", r"$\beta$", r"$\gamma$"),
         "deeppink",
-    ),
-    "loglinear": ModelSpec(
-        dl.log_linear_density,
-        2,
-        (r"$C_{\rm low}$", r"$C_{\rm high}$"),
-        "purple",
     ),
 }
 

@@ -310,13 +310,13 @@ def test_make_parameter_table_references_variables_commands(
         "McHighMstarPaperBoundsLogGParamMuBinaZero",
         "McHighMstarPaperBoundsLogGParamSigmaBinaZero",
         "McHighMstarPaperBoundsLogGIntOccBinaZero",
-        "McHighMstarPaperBoundsEscarpmentParamCOneBinaZero",
-        "McHighMstarPaperBoundsEscarpmentParamCTwoBinaZero",
+        "McHighMstarPaperBoundsEscarpmentParamDOneBinaZero",
+        "McHighMstarPaperBoundsEscarpmentParamDTwoBinaZero",
         "McHighMstarPaperBoundsEscarpmentParamBPOneBinaZero",
         "McHighMstarPaperBoundsEscarpmentParamBPTwoBinaZero",
         "McHighMstarPaperBoundsEscarpmentIntOccBinaZero",
-        "McHighMstarPaperBoundsSigmoidParamCOneBinaZero",
-        "McHighMstarPaperBoundsSigmoidParamCTwoBinaZero",
+        "McHighMstarPaperBoundsSigmoidParamBOneBinaZero",
+        "McHighMstarPaperBoundsSigmoidParamBTwoBinaZero",
         "McHighMstarPaperBoundsSigmoidParamCenterBinaZero",
         "McHighMstarPaperBoundsSigmoidParamWidthBinaZero",
         "McHighMstarPaperBoundsSigmoidIntOccBinaZero",
@@ -407,7 +407,7 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
     assert r"\McAllstarsPaperBoundsLogGParamABinaZero" in model_rows["logG"]
     assert r"\McAllstarsPaperBoundsSigmoidParamCenterBinaZero" in model_rows["sigmoid"]
     assert r"\McAllstarsPaperBoundsEscarpmentParamBPOneBinaZero" in model_rows["escarpment"]
-    assert r"\McAllstarsPaperBoundsLogLinearParamCHighBinaZero" in model_rows["loglinear"]
+    assert r"\McAllstarsPaperBoundsLogLinearParamCTwoBinaZero" in model_rows["loglinear"]
     assert r"\nodata" in model_rows["logG"]
     # Third block (mtrue/lowMstar): log-linear is third, escarpment last
     assert r"\McLowMstarPaperBoundsLogLinearDbicBinaZero" in all_data_rows[10]
@@ -1550,7 +1550,7 @@ def test_make_variables_compares_high_and_low_samples(tmp_path, monkeypatch):
     # Rates get a ratio; locations a difference and factor; widths a difference.
     assert values[prefix + "PiecewiseIntOccRatioBinaZero"] == "3"
     assert prefix + "PiecewiseIntOccRatioBinaOne" in values
-    assert prefix + "SigmoidParamCOneRatioBinaZero" in values
+    assert prefix + "SigmoidParamBOneRatioBinaZero" in values
     assert values[prefix + "SigmoidParamCenterDiffBinaZero"] == "0.50"
     assert values[prefix + "SigmoidParamCenterFactorBinaZero"] == "3.2"
     assert prefix + "SigmoidParamWidthDiffBinaZero" in values
@@ -2166,7 +2166,7 @@ def test_appendix_table_takes_a_model_from_another_run(tmp_path):
                       "escarpment", "sigmoid"]
     escarpment = rows[1].split(" & ")
     assert escarpment[6] == r"\McAllstarsPaperBoundsNoGPEscarpmentIntOccBinaZero"
-    assert "McAllstarsPaperBoundsNoGPEscarpmentParamCOneBinaZero" in escarpment[7]
+    assert "McAllstarsPaperBoundsNoGPEscarpmentParamDOneBinaZero" in escarpment[7]
     assert escarpment[-1].startswith(
         r"\McAllstarsPaperBoundsNoGPEscarpmentDbicBinaZero")
     # Experiment cells still describe the main run

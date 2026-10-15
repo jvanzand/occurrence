@@ -58,11 +58,11 @@ def sigmoid_density(theta, x):
     Parameters
     ----------
     theta : sequence of float
-        ``(C1, C2, center, width)``, where ``C1`` is the low-x
-        occurrence-rate-density plateau, ``C2`` is the high-x plateau,
+        ``(B1, B2, center, width)``, where ``B1`` is the low-x
+        occurrence-rate-density plateau, ``B2`` is the high-x plateau,
         ``center`` is the transition midpoint in ``log10(x)``, and positive
         ``width`` is the transition width in dex. The density equals
-        ``(C1 + C2)/2`` at ``x = 10**center``.
+        ``(B1 + B2)/2`` at ``x = 10**center``.
     x : array-like
         Positive physical coordinate values at which to evaluate the model.
 
@@ -71,10 +71,10 @@ def sigmoid_density(theta, x):
     numpy.ndarray
         Occurrence-rate density at each supplied coordinate.
     """
-    c1, c2, center, width = np.asarray(theta, dtype=float)
+    b1, b2, center, width = np.asarray(theta, dtype=float)
     scaled = (np.log10(np.asarray(x, dtype=float)) - center)/width
     transition = 1.0/(1.0 + np.exp(-np.clip(scaled, -700.0, 700.0)))
-    return c1 + (c2 - c1)*transition
+    return b1 + (b2 - b1)*transition
 
 
 def broken_powerlaw_density(theta, x):
