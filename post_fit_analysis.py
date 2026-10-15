@@ -18,6 +18,8 @@ from occurrence import mcmc_powerlaw
 SUMMARY_FILENAME = "summary_dict_piecewise.npz"
 DELTA_BIC_FILENAME = "delta_bics.json"
 PAPER_TABLES_DIRNAME = "paper_tables"
+# Figures of the whole sample, not tied to any fit, saved beside the tables
+PAPER_FIGURES_DIRNAME = "paper_figures"
 
 _TIER1_LATEX_PREFIXES = {
     "mtrue": "Mc",
@@ -490,13 +492,28 @@ _HISTOGRAM_PARAMETERS = {
 }
 
 
-def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
-    """Save a histogram of one stellar parameter for one sample of stars.
+def _histogram_outline(axis, values, edges, **line_style):
+    """Draw a histogram as one outline, in the style of the ORD plots."""
+    from occurrence import plotting_utils as pu
 
-    A dashed line marks the value that divides the high and low samples.
-    For age, the filled histogram shows only stars in the mass range where
-    the activity-age relation holds, and an outline shows every star with
-    an age.
+    counts, _ = np.histogram(values, bins=edges)
+    x_values, y_values = pu.make_bar_vals(
+        np.column_stack((edges[:-1], edges[1:])), counts
+    )
+    # Close the outline down to zero at both ends
+    x_values = np.concatenate(([edges[0]], x_values, [edges[-1]]))
+    y_values = np.concatenate(([0], y_values, [0]))
+    return axis.plot(x_values, y_values, **line_style)
+
+
+def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
+    """Save a histogram of one stellar parameter of ``stars``.
+
+    The histogram is drawn as a single outline, as on the ORD plots, and a
+    dotted line marks the value that divides the high and low samples. For
+    age, the solid outline shows only stars in the mass range where the
+    activity-age relation holds, and a dashed gray outline shows every star
+    with an age.
     """
     from matplotlib import pyplot as plt
 
@@ -510,34 +527,35 @@ def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
     values = np.asarray(stars[column], dtype=float)
     finite = np.isfinite(values)
     if not finite.any():
-        raise ValueError(f"no stars in this sample have a finite {column}")
+        raise ValueError(f"no stars have a finite {column}")
     edges = np.histogram_bin_edges(values[finite], bins=bins)
 
     figure, axis = plt.subplots(figsize=(6, 4))
     if parameter_key == "age":
         masses = np.asarray(stars["Mstar"], dtype=float)
-        in_mass_range = (
+        in_mass_range = finite & (
             (masses >= _THREE_PARAMETER_DEFAULT_CUTS["Mstar_min"]) &
             (masses <= _THREE_PARAMETER_DEFAULT_CUTS["Mstar_max"])
         )
-        axis.hist(
-            values[finite & in_mass_range], bins=edges, color="gray",
-            alpha=0.6,
+        _histogram_outline(
+            axis, values[in_mass_range], edges, color="k", linewidth=2.5,
             label=(
                 rf"${_THREE_PARAMETER_DEFAULT_CUTS['Mstar_min']:g}-"
                 rf"{_THREE_PARAMETER_DEFAULT_CUTS['Mstar_max']:g}~"
-                rf"M_{{\odot}}$ ({int((finite & in_mass_range).sum())})"
+                rf"M_{{\odot}}$ ({int(in_mass_range.sum())})"
             ),
         )
-        axis.hist(
-            values[finite], bins=edges, histtype="step", color="k",
-            linewidth=1.5, label=f"All ({int(finite.sum())})",
+        _histogram_outline(
+            axis, values[finite], edges, color="gray", linestyle="--",
+            linewidth=2, label=f"All ({int(finite.sum())})",
         )
         axis.legend()
     else:
-        axis.hist(values[finite], bins=edges, color="gray", alpha=0.6,
-                  edgecolor="k")
-    axis.axvline(divider, color="k", linestyle="--", linewidth=1.5)
+        _histogram_outline(
+            axis, values[finite], edges, color="k", linewidth=2.5,
+        )
+    axis.axvline(divider, color="k", linestyle=":", linewidth=1.5)
+    axis.set_ylim(bottom=0)
     axis.set_xlabel(label)
     axis.set_ylabel("Number of stars")
     figure.tight_layout()
@@ -549,78 +567,34 @@ def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
 
 
 def plot_stellar_parameter_histograms(
-        results_dir, tier1_dirs, tier2_types, tier3_dirs,
-        stellar_parameters, sample_catalog, sample_queries, bins=20):
-    """Plot histograms of stellar parameters for requested result folders.
+        results_dir, stellar_parameters, sample_catalog, bins=20):
+    """Plot histograms of the full sample's stellar parameters.
 
-    The directory arguments follow :func:`plot_companions_by_stellar_parameter`.
-    Each sample's stars are selected from ``sample_catalog`` (a DataFrame)
-    with its query in ``sample_queries`` (``None`` keeps every star), the way
-    the fits selected them, and the count must match the fit's ``nstars``.
-    Every requested parameter (``"Mstar"``, ``"FeH"``, or ``"Age"``) gets
-    ``stellar_hist_<parameter>.png`` in the experiment's ``plots``
-    directory.
+    ``sample_catalog`` is the DataFrame of every star in the sample. Each
+    requested parameter (``"Mstar"``, ``"FeH"``, or ``"Age"``) is saved as
+    ``stellar_hist_<parameter>.png`` in ``results_dir/paper_figures``, beside
+    the paper tables, since the figures belong to the sample rather than to
+    any one fit.
 
     Returns
     -------
     dict
-        ``tier1/tier2/tier3/parameter`` keys mapped to generated plot paths.
+        Requested parameter names mapped to generated plot paths.
     """
-    results_dir = Path(results_dir)
     if isinstance(stellar_parameters, str):
         stellar_parameters = [stellar_parameters]
     else:
         stellar_parameters = list(stellar_parameters)
-    tier1_dirs, tier2_types, tier3_dirs = (
-        list(tier1_dirs), list(tier2_types), list(tier3_dirs)
-    )
-    if (not tier1_dirs or not tier2_types or not tier3_dirs or
-            not stellar_parameters):
-        raise ValueError(
-            "tier1_dirs, tier2_types, tier3_dirs, and stellar_parameters "
-            "cannot be empty"
-        )
-
+    if not stellar_parameters:
+        raise ValueError("stellar_parameters cannot be empty")
+    output_dir = Path(results_dir) / PAPER_FIGURES_DIRNAME
     outputs = {}
-    for tier1_dir in tier1_dirs:
-        for tier2_type in tier2_types:
-            for tier2_dir, _ in _tier2_directories(tier2_type):
-                if tier2_dir not in sample_queries:
-                    raise KeyError(f"no sample query for {tier2_dir!r}")
-                query = sample_queries[tier2_dir]
-                stars = (
-                    sample_catalog if query is None
-                    else sample_catalog.query(query)
-                )
-                for tier3_dir in tier3_dirs:
-                    experiment_dir = (
-                        results_dir / tier1_dir / tier2_dir / tier3_dir
-                    )
-                    summary_path = (
-                        experiment_dir / "saved_dicts" / SUMMARY_FILENAME
-                    )
-                    with np.load(summary_path) as summary:
-                        nstars = _scalar(summary, "nstars", summary_path)
-                    if len(stars) != int(nstars):
-                        raise ValueError(
-                            f"sample {tier2_dir!r} selects {len(stars)} "
-                            f"catalog stars, but its fit used {int(nstars)}"
-                        )
-                    result_key = _result_key(
-                        tier1_dir, tier2_dir, tier3_dir
-                    )
-                    for stellar_parameter in stellar_parameters:
-                        name = re.sub(
-                            r"[^a-z]", "", str(stellar_parameter).lower()
-                        )
-                        outputs[f"{result_key}/{stellar_parameter}"] = (
-                            _plot_stellar_histogram(
-                                stars, stellar_parameter,
-                                experiment_dir / "plots" /
-                                f"stellar_hist_{name}.png",
-                                bins=bins,
-                            )
-                        )
+    for stellar_parameter in stellar_parameters:
+        name = re.sub(r"[^a-z]", "", str(stellar_parameter).lower())
+        outputs[stellar_parameter] = _plot_stellar_histogram(
+            sample_catalog, stellar_parameter,
+            output_dir / f"stellar_hist_{name}.png", bins=bins,
+        )
     return outputs
 
 

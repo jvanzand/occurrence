@@ -2222,31 +2222,26 @@ def test_three_parameter_tables_take_notes(tmp_path):
 
 
 def test_plot_stellar_parameter_histograms_writes_each_parameter(tmp_path):
-    results = tmp_path / "mtrue"
-    _write_summary(results, "highMstar", "run", nstars=2)
-    _write_summary(results, "lowMstar", "run", nstars=2)
     catalog = pd.DataFrame({
         "Mstar": [0.5, 0.9, 1.1, 1.3],
         "feh": [-0.2, 0.0, 0.1, 0.3],
         "age": [2.0, np.nan, 6.0, 8.0],
     })
     outputs = post_fit_analysis.plot_stellar_parameter_histograms(
-        tmp_path, ["mtrue"], ["Mstar"], ["run"], ["FeH", "Age"],
-        catalog, {"highMstar": "Mstar > 1", "lowMstar": "Mstar <= 1"},
+        tmp_path, ["FeH", "Age"], catalog,
     )
-    assert sorted(outputs) == [
-        "mtrue/highMstar/run/Age", "mtrue/highMstar/run/FeH",
-        "mtrue/lowMstar/run/Age", "mtrue/lowMstar/run/FeH",
-    ]
-    assert outputs["mtrue/lowMstar/run/FeH"].name == "stellar_hist_feh.png"
+    assert sorted(outputs) == ["Age", "FeH"]
+    assert outputs["FeH"] == (
+        tmp_path / post_fit_analysis.PAPER_FIGURES_DIRNAME /
+        "stellar_hist_feh.png"
+    )
     assert all(path.is_file() for path in outputs.values())
 
 
-def test_plot_stellar_parameter_histograms_checks_star_count(tmp_path):
-    _write_summary(tmp_path / "mtrue", "allstars", "run", nstars=5)
+def test_plot_stellar_parameter_histograms_rejects_unknown_parameter(
+        tmp_path):
     catalog = pd.DataFrame({"Mstar": [1.0], "feh": [0.0], "age": [5.0]})
-    with pytest.raises(ValueError, match="its fit used 5"):
+    with pytest.raises(ValueError, match="stellar_parameter must be one of"):
         post_fit_analysis.plot_stellar_parameter_histograms(
-            tmp_path, ["mtrue"], ["allstars"], ["run"], "Mstar",
-            catalog, {"allstars": None},
+            tmp_path, "logg", catalog,
         )
