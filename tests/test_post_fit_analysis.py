@@ -2245,3 +2245,24 @@ def test_plot_stellar_parameter_histograms_rejects_unknown_parameter(
         post_fit_analysis.plot_stellar_parameter_histograms(
             tmp_path, "logg", catalog,
         )
+
+
+def test_variables_changes_reports_new_removed_and_largest_changes():
+    old = "\n".join([
+        r"\newcommand{\McA}{\ensuremath{0.30^{+0.04}_{-0.03}}}",
+        r"\newcommand{\McB}{\ensuremath{2.4\,\sigma}}",
+        r"\newcommand{\McGone}{\ensuremath{1}}",
+        r"\newcommand{\McSame}{\ensuremath{719}}",
+    ])
+    new = "\n".join([
+        r"\newcommand{\McA}{\ensuremath{0.31^{+0.04}_{-0.03}}}",
+        r"\newcommand{\McB}{\ensuremath{3.6\,\sigma}}",
+        r"\newcommand{\McNew}{\ensuremath{5}}",
+        r"\newcommand{\McSame}{\ensuremath{719}}",
+    ])
+    changes = post_fit_analysis.variables_changes(old, new)
+    assert changes["commands"] == 4
+    assert changes["added"] == ["McNew"] and changes["removed"] == ["McGone"]
+    assert [item[0] for item in changes["changed"]] == ["McA", "McB"]
+    assert changes["largest"][0] == ("McB", r"2.4\,\sigma", r"3.6\,\sigma")
+    assert post_fit_analysis.read_variable_commands(new)["McSame"] == "719"

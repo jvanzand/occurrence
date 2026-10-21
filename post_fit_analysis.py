@@ -3683,6 +3683,61 @@ def _two_parameter_variable_blocks(
     return blocks, missing_results, missing_comparisons
 
 
+_VARIABLE_COMMAND = re.compile(
+    r"^\\newcommand\{\\([A-Za-z]+)\}\{(.*)\}\s*$", re.MULTILINE
+)
+
+
+def read_variable_commands(text):
+    """Return ``{command name: value}`` for every command in variables.tex text.
+
+    Values are the LaTeX inside ``\ensuremath{...}`` when present.
+    """
+    values = {}
+    for name, body in _VARIABLE_COMMAND.findall(text):
+        match = re.fullmatch(r"\\ensuremath\{(.*)\}", body)
+        values[name] = match.group(1) if match else body
+    return values
+
+
+def _leading_number(value):
+    match = re.match(r"\s*(-?\d+(?:\.\d+)?)", value)
+    return float(match.group(1)) if match else None
+
+
+def variables_changes(old_text, new_text, n_largest=5):
+    """Compare two versions of variables.tex.
+
+    Returns a dict with the number of ``commands`` in the new version, the
+    ``added`` and ``removed`` command names, every ``changed`` command as
+    ``(name, old value, new value)``, and the ``largest`` ``n_largest``
+    changes by the relative change of their leading (central) value.
+    Changes without a leading number on both sides sort last.
+    """
+    old = read_variable_commands(old_text)
+    new = read_variable_commands(new_text)
+    changed = [
+        (name, old[name], new[name])
+        for name in sorted(set(old) & set(new)) if old[name] != new[name]
+    ]
+
+    def relative_change(item):
+        before, after = _leading_number(item[1]), _leading_number(item[2])
+        if before is None or after is None:
+            return -1.0
+        scale = max(abs(before), abs(after))
+        return abs(after - before)/scale if scale else 0.0
+
+    return {
+        "commands": len(new),
+        "added": sorted(set(new) - set(old)),
+        "removed": sorted(set(old) - set(new)),
+        "changed": changed,
+        "largest": sorted(changed, key=relative_change,
+                          reverse=True)[:n_largest],
+    }
+
+
 def make_variables(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim="a",
         three_parameter_t3="stellar3params", stellar_catalog_path=None,
