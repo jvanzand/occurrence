@@ -855,7 +855,8 @@ def plot_model_cdf_comparison(
     left edge.  ``xticks`` lists the x-axis tick values; by default they are the
     bin edges of the first curve's piecewise fit, as on the occurrence plots,
     and matplotlib's ticks are used if that fit is missing.  ``xlabel``
-    defaults to companion mass or mass ratio, following the Tier 1 folders.
+    defaults to semi-major axis for fits along separation, and otherwise to
+    companion mass or mass ratio, following the Tier 1 folders.
 
     Each panel is drawn in its model's color from the occurrence plots
     (``mcmc_powerlaw.MODEL_REGISTRY``), which ``model_colors`` may override
@@ -981,11 +982,12 @@ def plot_model_cdf_comparison(
     if legend_fontsize is None:
         legend_fontsize = 1.6*plt.rcParams["font.size"]
     if xlabel is None:
-        xlabel = (
-            r"Mass Ratio [$M_c/M_{\star}$]"
-            if tier1_names <= {"qtrue", "qsini"}
-            else r"Companion mass [$M_{Jup}$]"
-        )
+        if coordinate == "sma":
+            xlabel = "Semi-major axis [AU]"
+        elif tier1_names <= {"qtrue", "qsini"}:
+            xlabel = r"Mass Ratio [$M_c/M_{\star}$]"
+        else:
+            xlabel = r"Companion mass [$M_{Jup}$]"
     n_rows, n_columns = len(rows), len(models)
     significance_axes = None
     if significance_panel:
