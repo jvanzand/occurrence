@@ -65,7 +65,6 @@ class Completeness(object):
         self.grid = None
         self.interpolator = None
         
-        #self.trends_count = trends_count
 
     @classmethod
     def from_csv(cls, recovery_file, *args, **kwargs):
@@ -100,7 +99,6 @@ class Completeness(object):
 
         # If trends_count, then ONLY trends count. Treat resolved as non-detections.
         if trends_count:
-            #good = self.recoveries[['recovered', 'trend_pref']].any(axis=1) # Is either one True?
             good = self.recoveries['trend_pref']
         else:
             good = self.recoveries['recovered']
@@ -125,8 +123,6 @@ class Completeness(object):
                 boxgood = np.where((xinj[good] <= xhigh) &
                                    (xinj[good] >= xlow) & (yinj[good] <= yhigh) &
                                    (yinj[good] >= ylow))[0]
-                # print(x, y, xlow, xhigh, ylow, yhigh, len(boxgood), len(boxall))
-                #print("{:.2f}, {:.2f}, {:.2f}, {:.2f}".format(xlow, xhigh, ylow, yhigh))
                 if len(boxall) > 5:
                     z[j, i] = float(len(boxgood))/len(boxall)
                     last = float(len(boxgood))/len(boxall)
@@ -142,7 +138,6 @@ class Completeness(object):
             z_fill_both = cu.fill_completeness_nans(z_fill_high, direction='low-mass')
             z = z_fill_both
             
-            # import matplotlib.pyplot as plt
 
         return (xgrid, ygrid, z)
 
@@ -228,13 +223,6 @@ class CompletenessPlots(object):
         and interpolation
         """
         
-        ## FOR NOW: ignore all trend sensitivity. Will need to fix path details when I have trend maps
-        # if self.trends_count:
-        #     np.save(os.path.join(save_dir, 'xgrid_trend'), self.xgrid)
-        #     np.save(os.path.join(save_dir, 'ygrid_trend'), self.ygrid)
-        #     np.save(os.path.join(save_dir, 'comp_array_trend'), self.comp_array)
-        #
-        # else:
         np.save(os.path.join(save_dir, 'xgrid'), self.xgrid)
         np.save(os.path.join(save_dir, 'ygrid'), self.ygrid)
         np.save(os.path.join(save_dir, 'zgrid'), self.comp_array)
@@ -258,31 +246,18 @@ class CompletenessPlots(object):
         if self.trends_count==True:
             good_cond = 'recovered == False & trend_pref == True'
             bad_cond = '(recovered == True) or (recovered == False & trend_pref == False)'
-            #trend_only_cond = 'recovered == False & trend_pref == True'
             good_color = "g."
 
-            # if save_grids:
-            #     ## Save completeness map
-            #     np.save('xgrid_trend', self.xgrid)
-            #     np.save('ygrid_trend', self.ygrid)
-            #     np.save('comp_array_trend', self.comp_array)
             
         else:
             good_cond = 'recovered == True'
             bad_cond = 'recovered == False'
-            #trend_only_cond = 'recovered == False & recovered == True' # Empty
             good_color = "b."
 
 
-            # if save_grids:
-            #     ## Save completeness map
-            #     np.save('xgrid_resolved', self.xgrid)
-            #     np.save('ygrid_resolved', self.ygrid)
-            #     np.save('comp_array_resolved', self.comp_array)
             
         good = self.comp.recoveries.query(good_cond)
         bad = self.comp.recoveries.query(bad_cond)
-        #trend_only = self.comp.recoveries.query(trend_only_cond)
 
         fig = pl.figure(figsize=(7.5, 5.25))
         pl.subplots_adjust(bottom=0.18, left=0.22, right=0.95)
@@ -295,43 +270,10 @@ class CompletenessPlots(object):
         if not hide_points:
             pl.plot(good[self.comp.xcol], good[self.comp.ycol], good_color, alpha=0.3, label='recovered')
             pl.plot(bad[self.comp.xcol], bad[self.comp.ycol], 'r.', alpha=0.3, label='missed')
-            #pl.plot(trend_only[self.comp.xcol], trend_only[self.comp.ycol], 'g.', alpha=0.3, label='trend')
         ax = pl.gca()
         ax.set_xscale('log')
         ax.set_yscale('log')
 
-
-        ### IRRELEVANT for general occurrence work. Not interested in single system detections.
-        # ## Code for plotting real detected planets as black dots
-        # if self.comp.xcol == 'inj_au' and self.comp.ycol == 'inj_msini' and self.searches[0] is not None:
-        #     for search in self.searches:
-        #         post = search.post
-        #         synthparams = post.params.basis.to_synth(post.params)
-        #         for i in range(search.num_planets):
-        #             p = i + 1
-        #             if search.mcmc:
-        #                 msini = post.medparams['mpsini{:d}'.format(p)]
-        #                 msini_err1 = -post.uparams['mpsini{:d}_err1'.format(p)]
-        #                 msini_err2 = post.uparams['mpsini{:d}_err2'.format(p)]
-        #                 a = post.medparams['a{:d}'.format(p)]
-        #                 a_err1 = -post.uparams['a{:d}_err1'.format(p)]
-        #                 a_err2 = post.uparams['a{:d}_err2'.format(p)]
-        #
-        #                 a_err = np.array([[a_err1, a_err2]]).transpose()
-        #                 msini_err = np.array([[msini_err1, msini_err2]]).transpose()
-        #
-        #                 ax.errorbar([a], [msini], xerr=a_err, yerr=msini_err, fmt='ko', ms=10)
-        #             else:
-        #                 per = synthparams['per{:d}'.format(p)].value
-        #                 k = synthparams['k{:d}'.format(p)].value
-        #                 e = synthparams['e{:d}'.format(p)].value
-        #                 msini = radvel.utils.Msini(k, per, search.mstar, e)
-        #                 a = radvel.utils.semi_major_axis(per, search.mstar)
-        #
-        #                 ax.plot(a, msini, 'ko', ms=10)
-
-        # else:
-        #     warnings.warn('Overplotting detections not implemented for the current axis selection: x={}, y={}'.format(self.comp.xcol, self.comp.ycol))
 
         labelsize=18
         ticksize=14

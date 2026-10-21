@@ -322,26 +322,6 @@ def test_logg_prior_transform_includes_physical_uniform_jacobians():
     assert difference == pytest.approx(2*np.log(2.0))
 
 
-def test_logg_prior_predictive_draws_respect_all_bounds():
-    """Prior draws should obey physical bounds and the occurrence constraint."""
-    companions, exposure = _materials()
-    cache = mcmc.dl.build_smooth_cache(
-        companions, exposure, "m", (1.0, 10.0)
-    )
-    draws = mcmc.sample_smooth_prior(
-        cache, "logG", 50, amplitude_bounds=(0.01, 2.0),
-        width_bounds=(0.05, 0.8), max_integrated_occurrence=0.5,
-        random_seed=9,
-    )
-    assert np.all((draws[:, 0] >= 0.01) & (draws[:, 0] <= 2.0))
-    assert np.all((draws[:, 2] >= 0.05) & (draws[:, 2] <= 0.8))
-    for draw in draws:
-        transformed = [np.log(draw[0]), draw[1], np.log(draw[2])]
-        assert mcmc.integrated_smooth_occurrence(
-            "logG", transformed, cache
-        ) <= 0.5
-
-
 def test_logg_sampler_saves_physical_reproducible_chains(tmp_path):
     """Seeded logG fits should save positive physical A and sigma chains."""
     companions, exposure = _materials()

@@ -214,21 +214,11 @@ def prep_post_draws(tier1_dir, tier2_dir,
                              that samples posteriors
     """
     
-    #if avg_map_only:
-    #    Mstar = star_df.Mstar.mean()
-    #    cols = star_df.columns
-    #    avg_df = pd.DataFrame([['average', Mstar, [], 0]], columns=cols)
-    #    star_df_compl = avg_df
-    #else:
-    #    star_df_compl=star_df
-        
     #### CUSTOMIZE your own sampler to match the posterior format ####
     ## The output of custom sampler should be a dict whose keys are companion names
     ## and whose values are 2xN arrays, where the first/second sub-array is SMA/mass samples
     post_sample_dict = sampling_func(comp_post_dir, star_df, num_samples=500, m_unit=m_unit) # First sample posteriors
-    #from copy import deepcopy; pp_test = deepcopy(post_sample_dict)
     ## If using mass ratio, convert masses to q
-    #if "qtrue" in saved_maps_dir or "qsini" in saved_maps_dir:
     tier1_label = tier1_kind or os.path.basename(os.path.normpath(tier1_dir))
     if saved_maps_dir is None:
         saved_maps_dir = os.path.join(
@@ -245,7 +235,6 @@ def prep_post_draws(tier1_dir, tier2_dir,
             post_sample_dict[comp_name] = new_samples
                 
     post_prior_sample_dict = su.interim_prior(post_sample_dict, prior_type='loguniform') # Then calculate prior at each draw. Each value is a 3xN array of SMA samples, mass samples, and prior values
-    #qq_test = deepcopy(post_prior_sample_dict)
     # Now add on completeness values
     sampled_post_with_compls = su.include_post_completeness(post_prior_sample_dict,
                                                             star_df,
@@ -253,7 +242,6 @@ def prep_post_draws(tier1_dir, tier2_dir,
                                                             saved_maps_dir=saved_maps_dir,
                                                             avg_map_only=avg_map_only,
                                                             fill_single_nan_with_average=fill_single_nan_with_average)
-    #rr_test = deepcopy(sampled_post_with_compls)                                                  
     ## Saves dict with companion names as key names
     ## Each value is a 7xN array, with prior densities defined relative to
     ## dlog10(a) dlog10(m), of:

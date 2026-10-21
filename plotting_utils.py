@@ -347,8 +347,6 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
             f"unsupported ycol {ycol!r}; expected one of "
             "'inj_msini', 'inj_mtrue', 'inj_qsini', 'inj_qtrue'"
         )
-    #xlabel = '$P$ [days]'
-    #ylabel = 'K (m/s)'
     if summary_dict is not None:
         
         ## Collect full interval info.
@@ -359,7 +357,6 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
         compl_single = summary_dict['cell_compl_single'] # This is originally calculated in ou.cell_values()
         err_single = 0.5 * ((mode_single - hdi_low_single) + (hdi_high_single - mode_single))
         
-        #title = title + f"(N$_{{\\rm eff }}$={neff_total:.1f})"
         title = (
                  f"{title} "
                  f"(OR={mode_single:.3f}$\\pm${err_single:.3f}, "
@@ -372,7 +369,6 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
     plt.ylabel(ylabel, size=label_size)
 
     plt.tick_params(axis='both', which='major', labelsize=tick_size)
-    #plt.legend()
 
     plt.grid(True)
     fig.tight_layout(pad=0.1) # Minimize white space around border
@@ -451,8 +447,6 @@ def plot_catalog(tier1_dir, tier2_dir,
             cps_ident = cn.split('_')[0] # remove '_0', '_1', etc.
             star_row = star_df.query(f"cps_identifier==@cps_ident")[star_param].values
         
-        #post = pd.read_csv(f'planet_posts/{cn}_post.csv')
-        # ax.scatter(post.sma_au, post.mass_mearth, s=2)
         ax.scatter(a_m_samples[0], a_m_samples[1], s=2)
         
     if star_df is not None:
@@ -536,13 +530,11 @@ def plot_catalog(tier1_dir, tier2_dir,
         
     parent_dir = Path(fig_savepath).parent.absolute()
     os.makedirs(parent_dir, exist_ok=True)
-    #comp_fig.tight_layout(rect=[0,0,1,0.92])
     
     comp_fig.savefig(fig_savepath, dpi=300)
     plt.close()
         
     return
-
 
 
 def plot_corner_from_file(
@@ -657,8 +649,6 @@ def plot_corner_from_file(
     return
 
 
-
-
 def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                          rate_type='OR', title='', return_fig_ax=False,
                          savepath='occurrence.png', figsize=(6, 4),
@@ -765,9 +755,6 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
             y_edges = a_edges
             y = mode[:, 0]
             err = get_err(mode[:, 0], low[:, 0], high[:, 0])
-            #xparam_label = mtype_label
-            #xunit_label = f'[{m_unit_label}]'
-            #xlabel = xparam_label+' '+xunit_label
             xlabel = mlabel
             
             ## For labeling stack dimension
@@ -986,7 +973,6 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 )
                 ax_i.xaxis.set_major_formatter(FuncFormatter(tick_label_fmt_fn))
                 ax_i.xaxis.set_minor_locator(NullLocator())
-                #ax_i.yaxis.set_minor_locator(NullLocator())
                 ax_i.tick_params(axis='both', which='major', labelsize=tick_size)
                 if (mtype in ['mtrue', 'msini'] and
                         tick_label_fmt_fn.rotate_labels):
@@ -1022,7 +1008,6 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         ax[0].set_xlabel(f"{mlabel}", fontsize=label_size)
 
         ax[-1].set_title(title, fontsize=label_size) # Set title on top figure (suptitle is too high)
-        #fig.suptitle(title, fontsize=label_size)
 
         ## Find and set the widest y lims to apply for all subplots
         min_y_allstack = np.min([ax[i].get_ylim()[0] for i in range(len(ax))])
@@ -1101,7 +1086,6 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         return
 
 
-
 def make_bar_vals(x_pairs, y_vals):
     """
     Helper function to make bar
@@ -1137,29 +1121,4 @@ def make_bar_vals(x_pairs, y_vals):
     return all_x_flat, all_y_flat
 
 
-
-def sci_no_leading_zero(x, pos):
-    if x == 0:
-        return "0"
-
-    s = f"{x:.1e}"          # e.g. '2.0e-03'
-    mant, exp = s.split('e')
-
-    # remove trailing .0 if present
-    if mant.endswith('.0'):
-        mant = mant[:-2]
-
-    exp = int(exp)          # removes leading zero ? -3
-
-    return f"{mant}e{exp}"
-
-def int_or_one_decimal(x, pos):
-    if x == 0:
-        return "0"
-
-    # check if effectively an integer (robust to float precision)
-    if float(x).is_integer():
-        return str(int(x))
-    else:
-        return f"{x:.1f}"
         

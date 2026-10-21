@@ -137,11 +137,6 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
     else:
         star_df_compl = star_df
     
-    #if t2.t1_true_or_sini=='true':
-    #    comp_post_dir='/data/user/judahvz/planet_bd/orvara/judah/burned_chains_am_only/'
-    #elif t2.t1_true_or_sini=='sini':
-    #    comp_post_dir='/data/user/judahvz/planet_bd/orvara/judah/burned_chains_amsini_only/'
-
     y_param = f"{t2.t1_m_or_q}{t2.t1_true_or_sini}"
     saved_maps_dir = os.path.join(t2.t1_dir, f"saved_maps_{y_param}")
     ycol = f"inj_{y_param}"

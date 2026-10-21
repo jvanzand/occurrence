@@ -12,30 +12,6 @@ Mj2Me = (c.M_jup/c.M_earth).value
 Ms2Me = (c.M_sun/c.M_earth).value
 Ms2Mj = (c.M_sun/c.M_jup).value
 
-def post_sampler1(companion_post_dir, star_df, num_samples=1000, m_unit='earth'):
-    """
-    Customizable function to sample from a set of companion posteriors.
-    """
-    post_sample_dict = {}
-
-    for i in range(len(star_df)):
-        comp_name_list = star_df.iloc[i]['comp_list']
-        
-        for comp_name in comp_name_list:
-            post_file = os.path.join(companion_post_dir, f"{comp_name}_post.csv")
-            post = pd.read_csv(post_file)
-
-            sampled_a = np.array(post.sma_au.sample(num_samples, replace=True))
-            sampled_m = np.array(post.mass_mearth.sample(num_samples, replace=True))
-            
-            
-            if m_unit=='jupiter':
-                sampled_m = sampled_m/Mj2Me # Convert M_earth to M_jupiter
-
-            post_sample_dict[comp_name] = np.array([sampled_a, sampled_m])
-        
-    
-    return post_sample_dict
     
     
 def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth'):

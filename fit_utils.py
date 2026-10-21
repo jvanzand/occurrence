@@ -331,13 +331,12 @@ def load_fit_data(path):
         for index, name in enumerate(names):
             prefix = f"companion_{index}"
             y_key = f"{prefix}_y_samples"
-            legacy_stack_key = f"{prefix}_stack_samples"
-            if y_key not in data and legacy_stack_key not in data:
+            if y_key not in data:
                 raise KeyError(f"missing y samples for {name}")
             companions[name] = CompanionSamples(
                 name=name,
                 x_samples=data[f"{prefix}_x_samples"],
-                y_samples=data[y_key if y_key in data else legacy_stack_key],
+                y_samples=data[y_key],
                 completeness=data[f"{prefix}_completeness"],
                 interim_prior=data[f"{prefix}_interim_prior"],
                 completeness_over_prior=data[f"{prefix}_completeness_over_prior"],
