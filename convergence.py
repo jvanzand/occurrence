@@ -218,9 +218,14 @@ def convergence_table(results):
             for index, (cell, width) in enumerate(zip(row, widths))
         ).rstrip()
 
+    # Name each experiment only on its first row
+    shown = [
+        ("",) + row[1:] if index and row[0] == rows[index - 1][0] else row
+        for index, row in enumerate(rows)
+    ]
     return "\n".join(
         [f"Convergence (target: {target} autocorrelation times)", line(header)]
-        + [line(row) for row in rows]
+        + [line(row) for row in shown]
     )
 
 

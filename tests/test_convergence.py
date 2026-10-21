@@ -93,6 +93,10 @@ def test_summary_file_and_report_name_unconverged_fits(tmp_path):
                     if "logG bin 0" in line)
     assert "mtrue/allstars/run" in logg_row
     assert logg_row.split()[-1] == "SHORT" and "1500" in logg_row
+    rows = table.splitlines()[2:]
+    assert rows[0].startswith("mtrue/allstars/run")
+    # Later rows of the same experiment leave its name blank
+    assert rows[1].startswith(" ") and "mtrue/allstars/run" not in rows[1]
     assert convergence.report(results[:0]) == ""
 
 

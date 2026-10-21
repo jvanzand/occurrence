@@ -822,6 +822,11 @@ def _run_configuration(configuration):
             ),
             configuration["convergence_target"],
         )
+        # List fits in the order they ran (stack bins keep file order)
+        result["convergence"].sort(key=lambda chain: (
+            run_models.index(chain["model"])
+            if chain["model"] in run_models else len(run_models)
+        ))
         for chain in result["convergence"]:
             chain["fit_seconds"] = fit_seconds.get(chain["model"])
 
