@@ -724,4 +724,9 @@ def test_run_multiple_writes_convergence_summaries(tmp_path, monkeypatch,
     assert (summary / "convergence.txt").is_file()
     assert results[0]["convergence"][0]["model"] == "piecewise"
     assert not results[0]["convergence"][0]["converged"]
-    assert "WARNING: 1 of 1 fits span fewer than 50" in capsys.readouterr().out
+    assert results[0]["convergence"][0]["fit_seconds"] >= 0
+    assert results[0]["seconds"] >= 0
+    output = capsys.readouterr().out
+    assert output.startswith("[1/1] mtrue/allstars/fit: piecewise SHORT")
+    assert "set piecewise_nsteps >= " in output
+    assert "Finished 1 experiments in" in output

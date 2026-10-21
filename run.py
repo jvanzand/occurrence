@@ -1,5 +1,6 @@
 ## Module to run the mass ratio occurrence calculation
 import os
+import time
 import multiprocessing as mp
 import numpy as np
 import pandas as pd
@@ -576,36 +577,31 @@ def run_multiple(
             f"required Tier 3 directories are missing: {missing_paths}"
         )
 
-    if parallel_fits and len(configurations) > 1:
+    start = time.perf_counter()
+    total = len(configurations)
+    results = [None]*total
+    if parallel_fits and total > 1:
         with ProcessPoolExecutor() as executor:
             futures = {
                 executor.submit(_run_configuration, configuration): index
                 for index, configuration in enumerate(configurations)
             }
-            results = [None]*len(configurations)
-            for future in as_completed(futures):
+            for finished, future in enumerate(as_completed(futures), 1):
                 index = futures[future]
                 results[index] = future.result()
-                configuration = configurations[index]
-                print(
-                    "Finished fit "
-                    f"{configuration['tier1_dir']}/"
-                    f"{configuration['tier2_dir']}/"
-                    f"{configuration['tier3_dir']}"
-                )
+                print(_progress_line(finished, total, results[index]),
+                      flush=True)
     else:
-        results = [
-            _run_configuration(configuration)
-            for configuration in configurations
-        ]
+        for index, configuration in enumerate(configurations):
+            results[index] = _run_configuration(configuration)
+            print(_progress_line(index + 1, total, results[index]),
+                  flush=True)
     fitted = [chain for result in results
               for chain in result.get("convergence", [])]
-    warning = convergence.convergence_warning(fitted)
-    if warning:
-        print(warning)
-    elif fitted:
-        print(f"All {len(fitted)} fits span at least {convergence_target} "
-              "autocorrelation times.")
+    if fitted:
+        print(convergence.report(fitted))
+    print(f"Finished {total} experiments in "
+          f"{convergence.format_duration(time.perf_counter() - start)}.")
     return results
 
 
@@ -632,6 +628,8 @@ def _run_futures_in_parallel(function, configurations, shared_args, label):
 
 def _run_configuration(configuration):
     """Execute one configuration produced by :func:`run_multiple`."""
+    start = time.perf_counter()
+    fit_seconds = {}
     result = {
         "tier1": configuration.get("tier1_label", configuration["tier1_dir"]),
         "tier2": configuration["tier2_dir"],
@@ -686,6 +684,7 @@ def _run_configuration(configuration):
                 )
             )
         for model_index, model_name in enumerate(run_models):
+            fit_start = time.perf_counter()
             if model_name == "piecewise":
                 chain_path = os.path.join(
                     configuration["tier1_dir"], configuration["tier2_dir"],
@@ -815,6 +814,7 @@ def _run_configuration(configuration):
                         plot_executor = None
                     raise
                 result["chains"][model_name] = chain_paths
+            fit_seconds[model_name] = time.perf_counter() - fit_start
         result["convergence"] = convergence.write_convergence_summary(
             os.path.join(
                 configuration["tier1_dir"], configuration["tier2_dir"],
@@ -822,6 +822,8 @@ def _run_configuration(configuration):
             ),
             configuration["convergence_target"],
         )
+        for chain in result["convergence"]:
+            chain["fit_seconds"] = fit_seconds.get(chain["model"])
 
     if roi_occurrence_future is not None:
         try:
@@ -871,4 +873,21 @@ def _run_configuration(configuration):
                 result["plots"].setdefault("piecewise", {}).update(
                     early_plot_paths
                 )
+    result["seconds"] = time.perf_counter() - start
     return result
+
+
+def _progress_line(index, total, result):
+    """Return a one-line summary of one finished experiment."""
+    experiment = f"{result['tier1']}/{result['tier2']}/{result['tier3']}"
+    fits = [
+        f"{chain['model']} {'ok' if chain['converged'] else 'SHORT'} "
+        f"{chain['steps_per_tau']:.0f} tau"
+        + ("" if chain["converged"]
+           else f" (needs {chain['required_steps']})")
+        for chain in result.get("convergence", [])
+    ]
+    summary = ", ".join(fits) if fits else "plots only"
+    width = len(str(total))
+    return (f"[{index:>{width}}/{total}] {experiment}: {summary} -- "
+            f"{convergence.format_duration(result.get('seconds'))}")

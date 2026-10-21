@@ -69,7 +69,7 @@ def test_piecewise_chains_use_the_sampled_parameters(tmp_path):
         "bin 0 height", "bin 1 height", "bin 2 height"]
 
 
-def test_summary_file_and_warning_name_unconverged_fits(tmp_path):
+def test_summary_file_and_report_name_unconverged_fits(tmp_path):
     chain_dir = tmp_path / "mtrue" / "allstars" / "run" / "saved_chains"
     chain_dir.mkdir(parents=True)
     _write_smooth(chain_dir / "chains_sigmoid_bin0.npz",
@@ -84,10 +84,28 @@ def test_summary_file_and_warning_name_unconverged_fits(tmp_path):
     assert "Result: 1 of 2 fits converged: logG did not" in text
     assert "NOT converged: spans 17 autocorrelation times" in text
     assert "TOO SHORT" in text and "Verdict: converged" in text
-    warning = convergence.convergence_warning(results)
-    assert warning.startswith("WARNING: 1 of 2 fits span fewer than 50")
-    assert "mtrue/allstars/run (logG, 17 tau; needs >= 1500 steps)" in warning
-    assert convergence.convergence_warning(results[:0]) is None
+    assert convergence.step_recommendations(results) == [
+        "run: 1 of 2 smooth-model fits span fewer than 50 autocorrelation "
+        "times; set nsteps >= 1500."
+    ]
+    table = convergence.convergence_table(results)
+    logg_row = next(line for line in table.splitlines()
+                    if "logG bin 0" in line)
+    assert "mtrue/allstars/run" in logg_row
+    assert logg_row.split()[-1] == "SHORT" and "1500" in logg_row
+    assert convergence.report(results[:0]) == ""
+
+
+def test_recommendations_group_histogram_and_smooth_fits(tmp_path):
+    chain_dir = tmp_path / "mtrue" / "allstars" / "run" / "saved_chains"
+    chain_dir.mkdir(parents=True)
+    _write_smooth(chain_dir / "chains_logG_bin0.npz",
+                  _ar1_chain(500, 10, 3, 0.0), tau=[30.0, 30.0, 30.0])
+    results = convergence.write_convergence_summary(chain_dir)
+    results[0]["fit_seconds"] = 750.0
+    assert "12.5 min" in convergence.convergence_table(results)
+    assert convergence.format_duration(30) == "30 s"
+    assert convergence.format_duration(7200) == "2.0 h"
 
 
 def test_summarize_skips_linked_chain_folders(tmp_path, capsys):
