@@ -281,7 +281,7 @@ def _write_hd219134(path, semimajor_axes):
 
 
 def test_literature_eccentricities_follow_the_files_semimajor_axes(tmp_path):
-    # The file orders companions inner first: b, c, f, d, e
+    # The file orders companions inner first, like the table
     _write_hd219134(tmp_path, [0.0384, 0.0647, 0.145, 0.235, 2.97])
     samples = su.post_sampler2(tmp_path, pd.DataFrame({"star_name": ["219134"]}),
                                num_samples=4000, include_ecc=True)
@@ -293,7 +293,7 @@ def test_literature_eccentricities_follow_the_files_semimajor_axes(tmp_path):
 
 def test_literature_eccentricity_for_the_wrong_planet_raises(tmp_path):
     _write_hd219134(tmp_path, [2.97, 0.235, 0.145, 0.0647, 0.0384])
-    with pytest.raises(ValueError, match="HD 219134 b"):
+    with pytest.raises(ValueError, match="HD 219134_0"):
         su.post_sampler2(tmp_path, pd.DataFrame({"star_name": ["219134"]}),
                          num_samples=5, include_ecc=True)
 

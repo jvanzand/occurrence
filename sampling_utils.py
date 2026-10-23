@@ -19,7 +19,9 @@ Ms2Mj = (c.M_sun/c.M_jup).value
 # (posterior file stem, companion index). The files order companions by
 # semi-major axis (inner first), not by planet letter, so each entry also
 # gives the planet's literature semi-major axis: post_sampler2 checks it
-# against the file's samples and raises if they disagree. Values are
+# against the file's samples and raises if they disagree. The GL 876 and
+# HD 28185 b semi-major axes are standard literature values, not taken from
+# the CLS table. Values are
 # (median e, minus error, plus error, literature a [AU] or None, source).
 LITERATURE_ECCENTRICITIES = {
     ("GL876", 0): (0.273, 0.098, 0.093, 0.0208, "GL 876 d, CLS I table"),
@@ -27,16 +29,19 @@ LITERATURE_ECCENTRICITIES = {
                    "GL 876 c, Marcy et al. (2001)"),
     ("GL876", 2): (0.0019, 0.0013, 0.0022, 0.208,
                    "GL 876 b, Marcy et al. (1998)"),
-    ("HD219134", 0): (0.025, 0.018, 0.027, 0.0382,
-                      "HD 219134 b, Vogt et al. (2015)"),
-    ("HD219134", 1): (0.077, 0.050, 0.055, 0.0653,
-                      "HD 219134 c, Vogt et al. (2015)"),
-    ("HD219134", 2): (0.16, 0.11, 0.12, 0.146,
-                      "HD 219134 f, Vogt et al. (2015)"),
-    ("HD219134", 3): (0.063, 0.045, 0.070, 0.237,
-                      "HD 219134 d, Vogt et al. (2015)"),
-    ("HD219134", 4): (0.072, 0.051, 0.078, 3.11,
-                      "HD 219134 e, Vogt et al. (2015)"),
+    # HD 219134: index 0 is the innermost companion. a and e are from the
+    # CLS table, which cites Vogt et al. (2015); planet letters differ
+    # between sources, so only a is used to match.
+    ("HD219134", 0): (0.063, 0.045, 0.070, 0.03838,
+                      "HD 219134_0, Vogt et al. (2015)"),
+    ("HD219134", 1): (0.16, 0.11, 0.12, 0.06466,
+                      "HD 219134_1, Vogt et al. (2015)"),
+    ("HD219134", 2): (0.072, 0.051, 0.078, 0.1453,
+                      "HD 219134_2, Vogt et al. (2015)"),
+    ("HD219134", 3): (0.077, 0.050, 0.055, 0.2346,
+                      "HD 219134_3, Vogt et al. (2015)"),
+    ("HD219134", 4): (0.025, 0.018, 0.027, 2.968,
+                      "HD 219134_4, Vogt et al. (2015)"),
     ("HD28185", 0): (0.063, 0.004, 0.004, 1.03,
                      "HD 28185 b, joint RV-astrometry fit (Model 1)"),
     # Semi-major axis not yet recorded; the file's outer companion (8.5 AU)
