@@ -43,6 +43,25 @@ MODEL_REGISTRY = {
         (r"$D_1$", r"$D_2$", r"$\log(x_{t,1})$", r"$\log(x_{t,2})$"),
         "green",
     ),
+    # Eccentricity models: A f(e), with f normalized over the fitted e range
+    "beta": ModelSpec(
+        dl.beta_ecc_density,
+        3,
+        ("A", r"$\alpha$", r"$\beta$"),
+        "#D55E00",
+    ),
+    "rayleigh": ModelSpec(
+        dl.rayleigh_ecc_density,
+        2,
+        ("A", r"$\sigma_e$"),
+        "#009E73",
+    ),
+    "ecc_mixture": ModelSpec(
+        dl.ecc_mixture_density,
+        4,
+        ("A", r"$f_1$", r"$\sigma_1$", r"$\sigma_2$"),
+        "#CC79A7",
+    ),
     "bpl": ModelSpec(
         dl.broken_powerlaw_density,
         4,
@@ -63,6 +82,10 @@ def get_model_spec(model_name):
 def evaluate_density(model_name, theta, x, model_bounds):
     """Evaluate a registered model, supplying bounds when it requires them."""
     function = get_model_spec(model_name).function
-    if model_name == "loglinear":
+    if model_name in BOUNDED_MODELS:
         return function(theta, x, model_bounds=model_bounds)
     return function(theta, x)
+
+
+# Models whose density depends on the fitted range (passed as model_bounds)
+BOUNDED_MODELS = {"loglinear", "beta", "rayleigh", "ecc_mixture"}

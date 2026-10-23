@@ -13,6 +13,13 @@ import warnings
 import numpy as np
 
 
+# Catalog keys "<companion>::<field>" hold auxiliary per-draw arrays (the
+# marginal factor and the physical a, m, e samples) next to the main array;
+# "__dimensions__" holds the dimension record.
+AUXILIARY_SEPARATOR = "::"
+DIMENSIONS_KEY = "__dimensions__"
+
+
 @dataclass(frozen=True)
 class CompanionSamples:
     """Unbinned samples and weights for one detected companion.
@@ -70,12 +77,19 @@ def prepare_companion_samples(
         completeness,
         interim_prior,
         x_bounds,
-        y_bounds):
+        y_bounds,
+        marginal_factor=None):
     """Validate and package the posterior draws for one companion.
 
     ROI membership uses lower-open and upper-closed bounds so adjacent regions
     upper bounds are closed. Invalid values outside the ROI are retained but
     excluded by ``roi_mask``; invalid values inside the ROI raise an error.
+
+    ``marginal_factor`` (one value per draw) multiplies each draw's
+    completeness-over-prior weight. It carries the population distributions
+    of the dimensions a run marginalizes over (see ``dimensions``), which
+    assumes those dimensions are independent of the fitted ones; draws where
+    it is zero (outside a marginalized range) leave the ROI.
     """
     x_bounds = _validate_bounds(x_bounds, "x_bounds")
     y_bounds = _validate_bounds(y_bounds, "y_bounds")
@@ -118,6 +132,15 @@ def prepare_companion_samples(
         completeness[valid_weight] / interim_prior[valid_weight]
     )
     roi_mask &= finite
+    if marginal_factor is not None:
+        marginal_factor = np.asarray(marginal_factor, dtype=float)
+        if marginal_factor.shape != x.shape:
+            raise ValueError("marginal_factor must have one value per draw")
+        if np.any(roi_mask & ~np.isfinite(marginal_factor)):
+            raise ValueError(f"{name} has a nonfinite marginal factor inside "
+                             "the ROI")
+        roi_mask &= marginal_factor > 0
+        completeness_over_prior = completeness_over_prior*marginal_factor
 
     return CompanionSamples(
         name=str(name),
@@ -154,6 +177,8 @@ def prepare_catalog(
     prepared = {}
     outside_roi = []
     for name, values in catalog.items():
+        if name.startswith("__") or AUXILIARY_SEPARATOR in name:
+            continue  # Auxiliary arrays, e.g. "<companion>::marginal_factor"
         values = np.asarray(values, dtype=float)
         if values.ndim != 2 or values.shape[0] < 6:
             raise ValueError(
@@ -179,6 +204,7 @@ def prepare_catalog(
             )
         if interim_prior.shape != x_samples.shape:
             raise ValueError("interim_prior_fn must return one value per posterior draw")
+        factor_key = name + AUXILIARY_SEPARATOR + "marginal_factor"
         record = prepare_companion_samples(
             name=name,
             x_samples=x_samples,
@@ -187,6 +213,7 @@ def prepare_catalog(
             interim_prior=interim_prior,
             x_bounds=x_bounds,
             y_bounds=y_bounds,
+            marginal_factor=catalog.get(factor_key),
         )
         if not np.any(record.roi_mask):
             outside_roi.append(name)
@@ -297,8 +324,12 @@ def build_exposure_grid(
     )
 
 
-def save_fit_data(path, companions, exposure):
-    """Save prepared direct-fit inputs to a compressed, pickle-free NPZ file."""
+def save_fit_data(path, companions, exposure, dimensions_json=None):
+    """Save prepared direct-fit inputs to a compressed, pickle-free NPZ file.
+
+    ``dimensions_json`` (from ``DimensionSpec.to_json``) records the run's
+    dimension roles; legacy runs leave it out.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     names = sorted(companions)
@@ -320,7 +351,18 @@ def save_fit_data(path, companions, exposure):
         arrays[f"{prefix}_interim_prior"] = record.interim_prior
         arrays[f"{prefix}_completeness_over_prior"] = record.completeness_over_prior
         arrays[f"{prefix}_roi_mask"] = record.roi_mask
+    if dimensions_json is not None:
+        arrays["dimensions"] = np.asarray(dimensions_json)
     np.savez_compressed(path, **arrays)
+
+
+def load_fit_dimensions(path):
+    """Return the dimension spec saved in ``fit_data.npz``, or None (legacy)."""
+    from occurrence import dimensions as dm
+    with np.load(path, allow_pickle=False) as data:
+        if "dimensions" not in data:
+            return None
+        return dm.spec_from_json(str(data["dimensions"]))
 
 
 def load_fit_data(path):

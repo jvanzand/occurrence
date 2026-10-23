@@ -501,10 +501,48 @@ def fit_piecewise_file(fit_path, x_edges, y_edges, **mcmc_options):
     )
 
 
+# Eccentricity models (densities in ``likelihood``). Parameter 0 is the
+# amplitude A, the occurrence integrated over the fitted e range per unit of
+# the stacked coordinate (see the note in ``likelihood``). Every
+# parameter has a uniform prior on its physical value within ``bounds``
+# (the amplitude uses the run's amplitude bounds); those listed in
+# ``log_indices`` are sampled as natural logarithms, with the matching
+# Jacobian. ``start`` gives the initial shape parameters and ``scales`` the
+# initial walker spread in sampled units. For the mixture, ``ordered``
+# requires sigma1 < sigma2, so the narrow and broad components cannot swap.
+ECC_MODEL_SETTINGS = {
+    "beta": {   # (A, alpha, beta)
+        "log_indices": (0, 1, 2),
+        "bounds": (None, (0.1, 20.0), (0.1, 20.0)),
+        "start": (None, 1.0, 3.0),
+        "scales": (0.05, 0.05, 0.05),
+    },
+    "rayleigh": {   # (A, sigma)
+        "log_indices": (0, 1),
+        "bounds": (None, (0.005, 1.0)),
+        "start": (None, 0.3),
+        "scales": (0.05, 0.05),
+    },
+    "ecc_mixture": {   # (A, fraction with sigma1, sigma1, sigma2)
+        "log_indices": (0, 2, 3),
+        "bounds": (None, (0.0, 1.0), (0.005, 1.0), (0.005, 1.0)),
+        "start": (None, 0.5, 0.05, 0.3),
+        "scales": (0.05, 0.02, 0.05, 0.05),
+        "ordered": (2, 3),
+    },
+}
+SMOOTH_MODELS = {"logG", "escarpment", "sigmoid", "bpl", "loglinear"} | set(
+    ECC_MODEL_SETTINGS
+)
+
+
 def physical_smooth_parameters(model_name, transformed_theta):
     """Convert a smooth model's sampled parameters to physical coordinates."""
     parameters = np.asarray(transformed_theta, dtype=float).copy()
-    if model_name == "logG":
+    if model_name in ECC_MODEL_SETTINGS:
+        indices = list(ECC_MODEL_SETTINGS[model_name]["log_indices"])
+        parameters[..., indices] = np.exp(parameters[..., indices])
+    elif model_name == "logG":
         parameters[..., 0] = np.exp(parameters[..., 0])
         parameters[..., 2] = np.exp(parameters[..., 2])
     elif model_name == "escarpment":
@@ -540,7 +578,17 @@ def log_prior_smooth(
     """Evaluate a smooth model's physical priors in sampled coordinates."""
     physical = physical_smooth_parameters(model_name, transformed_theta)
     log_min, log_max = np.log10(cache.model_bounds)
-    if model_name == "logG":
+    if model_name in ECC_MODEL_SETTINGS:
+        settings = ECC_MODEL_SETTINGS[model_name]
+        bounds = (tuple(amplitude_bounds),) + settings["bounds"][1:]
+        valid = all(low <= value <= high
+                    for value, (low, high) in zip(physical, bounds))
+        if "ordered" in settings:
+            first, second = settings["ordered"]
+            valid = valid and physical[first] < physical[second]
+        jacobian = sum(transformed_theta[index]
+                       for index in settings["log_indices"])
+    elif model_name == "logG":
         amplitude, mu, sigma = physical
         if width_bounds is None:
             width_bounds = _default_width_bounds(cache)
@@ -630,6 +678,13 @@ def initialize_smooth(
     constant_exposure = np.sum(cache.exposure_weights)
     amplitude = np.sum(cache.companion_weights)/constant_exposure
     amplitude = np.clip(amplitude, amplitude_bounds[0]*10, amplitude_bounds[1]/10)
+    if model_name in ECC_MODEL_SETTINGS:
+        settings = ECC_MODEL_SETTINGS[model_name]
+        # A is integrated over the e range, so scale the constant density
+        physical = np.array((amplitude*span,) + settings["start"][1:])
+        indices = list(settings["log_indices"])
+        physical[indices] = np.log(physical[indices])
+        return physical
     if model_name == "logG":
         if width_bounds is None:
             width_bounds = _default_width_bounds(cache)
@@ -686,8 +741,7 @@ def mcmc_smooth(
         max_integrated_occurrence=1.0, display_model_bounds=None,
         display_stack_index=None):
     """Fit one registered direct smooth model in one stack interval."""
-    if model_name not in {
-            "logG", "escarpment", "sigmoid", "bpl", "loglinear"}:
+    if model_name not in SMOOTH_MODELS:
         raise ValueError(f"unsupported smooth model {model_name!r}")
     ndim = mcmc_powerlaw.MODEL_REGISTRY[model_name].ndim
     if nwalkers < 2*ndim:
@@ -703,7 +757,9 @@ def mcmc_smooth(
             center[0] += adjustment
             if model_name in {"escarpment", "sigmoid", "loglinear"}:
                 center[1] += adjustment
-    if model_name == "logG":
+    if model_name in ECC_MODEL_SETTINGS:
+        scales = np.array(ECC_MODEL_SETTINGS[model_name]["scales"])
+    elif model_name == "logG":
         scales = np.array([0.05, 0.02, 0.05])
     elif model_name == "escarpment":
         scales = np.array([0.05, 0.05, 0.02, 0.02])
@@ -948,6 +1004,7 @@ def add_smooth_model_to_figures(
         label = 'log-Gaussian' if model_name == 'logG' else label
         label = 'log-linear' if model_name == 'loglinear' else label
         label = 'Broken power law' if model_name == 'bpl' else label
+        label = 'two-Rayleigh' if model_name == 'ecc_mixture' else label
         if len(loaded) > 1:
             label += " (" + _stack_interval_label(
                 item["stack_coordinate"], item["stack_bounds"], m_unit
@@ -1053,10 +1110,13 @@ def save_model_figures(
             "Companion mass [$M_{Jup}$]" if m_unit == "jupiter"
             else "Companion mass [$M_{Earth}$]"
         )
+    # Runs that model eccentricity override the labels (plotting_utils.axis_style)
+    x_label = pu.styled("x_label", x_label)
     plot_specs = {
         "density": (
-            "Occurrence rate density" "\n"
-            r"[Planets/star/$\Delta \log(\omega)$]",
+            pu.styled("density_label",
+                      "Occurrence rate density" "\n"
+                      r"[Planets/star/$\Delta \log(\omega)$]"),
             "occurrence_ORD.png",
         ),
         "occurrence": (
@@ -1090,6 +1150,9 @@ def save_model_figures(
                 formatter = pu.sma_tick_formatter(model_edges)
             else:
                 formatter = lambda value, position: f"{value:g}"
+            formatter = pu.styled(
+                "x_tick_formatter", lambda edges: formatter
+            )(model_edges)
             axis.xaxis.set_major_formatter(FuncFormatter(formatter))
             axis.xaxis.set_minor_locator(NullLocator())
             if ((coordinate == "sma" or
@@ -1277,6 +1340,9 @@ def _draw_queued_extrapolations(axis):
 
 def _physical_log_jacobian(model_name, samples):
     """Return the sampling-transform Jacobian for saved physical samples."""
+    if model_name in ECC_MODEL_SETTINGS:
+        return sum(np.log(samples[:, index]) for index in
+                   ECC_MODEL_SETTINGS[model_name]["log_indices"])
     if model_name == "logG":
         return np.log(samples[:, 0]) + np.log(samples[:, 2])
     if model_name == "escarpment":
@@ -1337,6 +1403,7 @@ def piecewise_cumulative_figure(
         chain_path, stack_dim, title="", m_unit="earth"):
     """Plot the cumulative piecewise posterior for every stack interval."""
     import matplotlib.pyplot as plt
+    from occurrence import plotting_utils as pu
 
     with np.load(chain_path) as data:
         samples = np.asarray(data["flat_chains"])[::10]
@@ -1385,7 +1452,8 @@ def piecewise_cumulative_figure(
         )
         axis.set_xscale("log")
         axis.set_ylabel("Cumulative OR\n[Planets/star]")
-    axes[0].set_xlabel(coordinate_label)
+    # Runs that model eccentricity override the label (plotting_utils.axis_style)
+    axes[0].set_xlabel(pu.styled("x_label", coordinate_label))
     axes[-1].set_title(title)
     return figure, axes
 

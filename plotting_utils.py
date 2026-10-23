@@ -1,5 +1,6 @@
 ## Utility functions for making plots related to occurrence
 import os
+from contextlib import contextmanager
 import numpy as np
 import corner
 
@@ -101,6 +102,71 @@ def _adaptive_decimal_tick_formatter(tick_values, value_name):
     format_tick.decimal_places = required_precision
     format_tick.rotate_labels = required_precision >= 2 or values.size > 8
 
+    return format_tick
+
+
+# ---------------------------------------------------------------------------
+# Axis style overrides
+#
+# Plots read their labels and tick formats from the Tier 1 folder and the
+# stack setting, which assumes x is semi-major axis and y is mass. Runs with
+# explicit dimension roles (see ``dimensions``) may model eccentricity, whose
+# engine axis is u = 10**e: on the usual log scale it is linear in e, but its
+# ticks and labels must show e. ``axis_style`` overrides them for every plot
+# made inside the block. Keys:
+#   x_label          label of the modeled (unstacked) axis
+#   x_tick_formatter tick values -> formatter, like mass_tick_formatter
+#   density_label    y label of occurrence-rate-density plots
+#   stack_label      (low, high) engine values of a stack bin -> its label
+# ---------------------------------------------------------------------------
+_AXIS_STYLE = {}
+
+
+@contextmanager
+def axis_style(**style):
+    """Apply axis overrides to plots made inside the ``with`` block."""
+    unknown = set(style) - {"x_label", "x_tick_formatter", "density_label",
+                            "stack_label"}
+    if unknown:
+        raise ValueError(f"unknown axis style keys: {sorted(unknown)}")
+    previous = dict(_AXIS_STYLE)
+    _AXIS_STYLE.update({key: value for key, value in style.items()
+                        if value is not None})
+    try:
+        yield
+    finally:
+        _AXIS_STYLE.clear()
+        _AXIS_STYLE.update(previous)
+
+
+def styled(key, default):
+    """Return the active override for ``key``, or ``default``."""
+    return _AXIS_STYLE.get(key, default)
+
+
+def eccentricity_tick_formatter(tick_values):
+    """Label engine ticks u = 10**e with their eccentricity, e = log10(u).
+
+    Eccentricity ticks are bin edges such as 0.25, so labels use the fewest
+    decimals (up to four) that show every tick exactly, rather than the
+    fewest that merely tell ticks apart.
+    """
+    values = np.log10(np.asarray(tick_values, dtype=float).reshape(-1))
+    if values.size == 0 or not np.isfinite(values).all():
+        raise ValueError("eccentricity tick values must be nonempty and finite")
+    for precision in range(5):
+        if np.allclose(np.round(values, precision), values, atol=1e-9):
+            break
+
+    def format_tick(value, position=None):
+        e = float(np.log10(value))
+        label = f"{0.0 if abs(e) < 1e-12 else e:.{precision}f}"
+        if "." in label:
+            label = label.rstrip("0").rstrip(".")
+        return "0" if label in {"-0", ""} else label
+
+    format_tick.decimal_places = precision
+    format_tick.rotate_labels = precision >= 2 or values.size > 8
     return format_tick
 
 
@@ -800,6 +866,12 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
             else mass_ratio_tick_formatter(x_edges)
             if mtype in ['qtrue', 'qsini'] else None
         )
+        tick_label_fmt_fn = styled(
+            "x_tick_formatter", lambda edges: tick_label_fmt_fn
+        )(x_edges)
+        xlabel = styled("x_label", xlabel)
+        plot_ylabel = (styled("density_label", plot_ylabel)
+                       if rate_type == 'ORD' else plot_ylabel)
 
         ax.xaxis.set_major_locator(FixedLocator(x_edges))
         ax.xaxis.set_major_formatter(FuncFormatter(tick_label_fmt_fn))
@@ -827,6 +899,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         
 
         lbl = rf"{yparam_label}={twin_axis_formatter(y_lo)}-{twin_axis_formatter(y_hi)} {yunit_label}"
+        lbl = styled("stack_label", lambda low, high: lbl)(y_lo, y_hi)
         ax2 = ax.twinx()
         ax2.set_ylabel(lbl, size=label_size-6, rotation=90)
         ax2.set_yticks([])
@@ -842,7 +915,9 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         if stack_dim == 'm':
             # One subplot per mass bin (rows)
             x_edges = a_edges
-            tick_label_fmt_fn = sma_tick_formatter(x_edges)
+            tick_label_fmt_fn = styled(
+                "x_tick_formatter", sma_tick_formatter
+            )(x_edges)
             centers = np.sqrt(x_edges[:-1] * x_edges[1:])
             widths = np.diff(x_edges)
 
@@ -898,6 +973,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 m_lo = m_edges[i]
                 m_hi = m_edges[i+1]
                 lbl = rf"{mlabel}={twin_axis_formatter(m_lo)}-{twin_axis_formatter(m_hi)} [{m_unit_label}]"
+                lbl = styled("stack_label", lambda low, high: lbl)(m_lo, m_hi)
                 ax2 = ax_i.twinx()
                 ax2.set_ylabel(lbl, size=label_size-6, rotation=90)
                 ax2.set_yticks([])
@@ -913,9 +989,11 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                     ax_i.set_ylim(0, max(ax_i.get_ylim()[1], ytop))
 
             # Set the common y-label for the whole figure
-            fig.supylabel(plot_ylabel, fontsize=label_size)
+            fig.supylabel(
+                styled("density_label", plot_ylabel) if rate_type == 'ORD'
+                else plot_ylabel, fontsize=label_size)
             # Set x-label on bottom-most axis (after reversing it's index 0)
-            ax[0].set_xlabel('SMA [AU]', fontsize=label_size)
+            ax[0].set_xlabel(styled("x_label", 'SMA [AU]'), fontsize=label_size)
             if tick_label_fmt_fn.rotate_labels:
                 plt.setp(ax[0].get_xticklabels(), rotation=45, ha='right')
 
@@ -971,6 +1049,9 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                     if mtype in ['qtrue', 'qsini']
                     else mass_tick_formatter(x_edges)
                 )
+                tick_label_fmt_fn = styled(
+                    "x_tick_formatter", lambda edges: tick_label_fmt_fn
+                )(x_edges)
                 ax_i.xaxis.set_major_formatter(FuncFormatter(tick_label_fmt_fn))
                 ax_i.xaxis.set_minor_locator(NullLocator())
                 ax_i.tick_params(axis='both', which='major', labelsize=tick_size)
@@ -984,6 +1065,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 a_lo = a_edges[i]
                 a_hi = a_edges[i+1]
                 lbl = rf"SMA={twin_axis_formatter(a_lo)}-{twin_axis_formatter(a_hi)} AU"
+                lbl = styled("stack_label", lambda low, high: lbl)(a_lo, a_hi)
                 ax2 = ax_i.twinx()
                 ax2.set_ylabel(lbl, size=label_size-6, rotation=90)
                 ax2.set_yticks([])
@@ -1003,9 +1085,11 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 ax_i.set_ylim(0, max(ax_i.get_ylim()[1], ytop))
 
         # Set the common y-label for the whole figure
-        fig.supylabel(plot_ylabel, fontsize=label_size)
+        fig.supylabel(
+            styled("density_label", plot_ylabel) if rate_type == 'ORD'
+            else plot_ylabel, fontsize=label_size)
         # Set x-label on bottom-most axis (after reversing it's index 0)
-        ax[0].set_xlabel(f"{mlabel}", fontsize=label_size)
+        ax[0].set_xlabel(styled("x_label", f"{mlabel}"), fontsize=label_size)
 
         ax[-1].set_title(title, fontsize=label_size) # Set title on top figure (suptitle is too high)
 

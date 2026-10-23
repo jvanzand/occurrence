@@ -11,6 +11,7 @@ from pathlib import Path
 
 from occurrence import plotting_utils as pu
 from occurrence import convergence
+from occurrence import dimensions as dm
 from occurrence import main
 from occurrence import mcmc
 from occurrence import sampling_utils as su
@@ -65,9 +66,17 @@ def _format_subsample_title(title):
     return title.replace("$Age", "Age").replace(">=", r" $\geq$ ")
 
 
-def _occurrence_function_title(stack_dim, subsample_title=""):
+_FUNCTION_NAMES = {"a": "SMA Function", "m": "Mass Function",
+                   "e": "Eccentricity Function"}
+
+
+def _occurrence_function_title(stack_dim, subsample_title="", spec=None):
     """Return the title for the coordinate left unstacked in the plot."""
-    function_name = "SMA Function" if stack_dim == "m" else "Mass Function"
+    if spec is not None and not spec.legacy:
+        fitted = spec.x if stack_dim == "m" else spec.y
+        function_name = _FUNCTION_NAMES[fitted]
+    else:
+        function_name = "SMA Function" if stack_dim == "m" else "Mass Function"
     if subsample_title:
         function_name += f" ({subsample_title})"
     return function_name
@@ -124,6 +133,7 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
     """
     
     t2 = SimpleNamespace(**tier2_config)
+    spec = tier2_config.get("spec")
                         
                         
     if t2.star_df_query is not None:
@@ -141,7 +151,23 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
     y_param = f"{t2.t1_m_or_q}{t2.t1_true_or_sini}"
     saved_maps_dir = os.path.join(t2.t1_dir, f"saved_maps_{y_param}")
     ycol = f"inj_{y_param}"
-    
+
+    if spec is not None and not spec.legacy:
+        if avg_map_only:
+            raise NotImplementedError(
+                "avg_map_only is not supported with explicit dimension roles"
+            )
+        if _dimension_tier2_exists(t2.t1_dir, t2.t2_dir, spec):
+            return
+        main.make_dimension_average_maps(t2.t1_dir, t2.t2_dir, spec, star_df,
+                                         y_param)
+        main.prep_dimension_post_draws(
+            t2.t1_dir, t2.t2_dir, spec, star_df, comp_post_dir,
+            sampling_func, y_param, m_unit=t2.t1_mass_unit,
+            fill_single_nan_with_average=fill_single_nan_with_average,
+        )
+        return
+
     t2_exists = _tier2_artifacts_exist(t2.t1_dir, t2.t2_dir)
     print("Checking if exists: ", t2.t1_dir, t2.t2_dir, t2_exists)
     if not t2_exists:
@@ -175,9 +201,22 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
     return
 
 
-def _tier2_artifacts_exist(tier1_dir, tier2_dir):
-    """Return whether the Tier 2 output directory already exists."""
+def _tier2_artifacts_exist(tier1_dir, tier2_dir, spec=None):
+    """Return whether the Tier 2 products for this run already exist."""
+    if spec is not None and not spec.legacy:
+        return _dimension_tier2_exists(tier1_dir, tier2_dir, spec)
     return os.path.isdir(os.path.join(tier1_dir, tier2_dir))
+
+
+def _dimension_tier2_exists(tier1_dir, tier2_dir, spec):
+    """Whether a spec's Tier 2 products exist; raise if their record differs."""
+    paths = main.dimension_tier2_paths(tier1_dir, tier2_dir, spec)
+    if not os.path.isfile(paths["catalog"]):
+        return False
+    with np.load(paths["catalog"]) as data:
+        saved = dm.spec_from_json(str(data[main.dfu.DIMENSIONS_KEY]))
+    dm.check_matching(spec, saved, paths["catalog"], include_fit_edges=False)
+    return True
 
 
 def _y_edges_for_tier(m_edges, m_or_q, m_unit):
@@ -203,10 +242,10 @@ def run_multiple(
         tier1_list,
         tier2_list,
         tier3_list,
-        a_edges,
-        m_edges,
-        star_df,
-        tier2_df_cuts_dict,
+        a_edges=None,
+        m_edges=None,
+        star_df=None,
+        tier2_df_cuts_dict=None,
         output_dir=".",
         tier1_definitions=None,
         recoveries_dir=None,
@@ -247,6 +286,7 @@ def run_multiple(
         bpl_amplitude_bounds=(1e-6, 10.0),
         bpl_slope_bounds=(-4.0, 4.0),
         loglinear_amplitude_bounds=(1e-6, 10.0),
+        ecc_amplitude_bounds=(1e-6, 10.0),
         model_fit_bounds=None,
         max_integrated_occurrence=1.0,
         piecewise_parameterization="independent",
@@ -264,8 +304,20 @@ def run_multiple(
         prepare_missing=True,
         avg_map_only=False,
         plot_tier1_maps=False,
-        fill_single_nan_with_average=True):
+        fill_single_nan_with_average=True,
+        dimensions=None):
     """Run and plot direct occurrence fits for multiple tier combinations.
+
+    ``dimensions`` optionally sets which of a, m, and e are fit and which are
+    marginalized (see ``occurrence.dimensions.parse_dimensions``). It then
+    replaces ``a_edges``, ``m_edges`` (which may then be omitted), and (for
+    a 1D fit) ``stack_dim``:
+    the engine's x slot holds the first fitted dimension and its y slot the
+    second, or a marginalized dimension as one bin. ``model_fit_bounds``
+    keys ``"a"``/``"m"`` then refer to the x/y slots, in engine coordinates.
+    Marginalizing assumes the marginalized dimensions are independent of
+    the fitted ones (see ``occurrence.marginal_distributions``). Without it,
+    the original roles and file layout are used unchanged.
 
     Registered models are ``piecewise``, ``logG``, ``escarpment``, ``sigmoid``,
     ``bpl``, and ``loglinear``. ``model_fit_bounds`` optionally maps any smooth
@@ -306,6 +358,21 @@ def run_multiple(
             )
     output_dir = os.fspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
+    if star_df is None or tier2_df_cuts_dict is None:
+        raise ValueError("star_df and tier2_df_cuts_dict are required")
+    if dimensions is None and (a_edges is None or m_edges is None):
+        raise ValueError("give a_edges and m_edges, or dimensions")
+    spec = (dm.legacy_spec(a_edges, m_edges) if dimensions is None
+            else dm.parse_dimensions(dimensions))
+    if not spec.legacy:
+        if m_unit != "jupiter":
+            raise ValueError("explicit dimension roles need m_unit='jupiter', "
+                             "the unit of the marginal distributions")
+        a_edges = spec.engine_edges("x")
+        m_edges = spec.engine_edges("y")
+        if spec.stack_dim is not None:
+            stack_dim = spec.stack_dim
+        print(f"Dimensions: {spec.describe()}")
     tier1_definitions = {
         **DEFAULT_TIER1_DEFINITIONS,
         **({} if tier1_definitions is None else tier1_definitions),
@@ -325,9 +392,15 @@ def run_multiple(
             ].astype(str)
         )
         raise ValueError(f"star_df contains duplicate star names: {duplicates}")
-    supported_models = {
-        "piecewise", "logG", "escarpment", "sigmoid", "bpl", "loglinear"
-    }
+    supported_models = {"piecewise"} | mcmc.SMOOTH_MODELS
+    ecc_models = set(mcmc.ECC_MODEL_SETTINGS)
+    modeled_dimension = spec.x if stack_dim == "m" else spec.y
+    if ecc_models & (set(run_models_list) | set(plot_models_list)) and (
+            spec.legacy or modeled_dimension != "e"):
+        raise ValueError(
+            f"{sorted(ecc_models)} describe eccentricity; use them only when "
+            "the fitted (unstacked) dimension is e"
+        )
     run_models = list(run_models_list)
     plot_models = list(plot_models_list)
     unknown = (set(run_models) | set(plot_models)) - supported_models
@@ -371,6 +444,11 @@ def run_multiple(
             tier1_label if output_dir in {"", "."} else
             os.path.join(output_dir, tier1_label)
         )
+        if not spec.legacy and m_or_q != "m":
+            raise NotImplementedError(
+                f"{tier1_label}: explicit dimension roles support mass "
+                "(mtrue, msini) Tier 1 folders, not mass ratio, so far"
+            )
         tier1_configurations.append({
             "mass_unit": mass_unit,
             "m_or_q": m_or_q,
@@ -404,6 +482,18 @@ def run_multiple(
         else:
             for configuration in missing_tier1:
                 make_tier1(configuration, *preparation_arguments)
+    if not spec.legacy:
+        # Eccentricity-sliced maps, made from the Tier 1 recoveries
+        for configuration in tier1_configurations:
+            label = configuration["t1_label"]
+            if not os.path.isdir(main.sliced_maps_dir(configuration["t1_dir"],
+                                                      label)):
+                main.prep_sliced_maps(
+                    configuration["t1_dir"], star_df,
+                    os.path.join(configuration["t1_dir"],
+                                 f"{label}_recoveries"),
+                    label, m_unit=m_unit,
+                )
 
     configurations = []
     tier2_configurations = []
@@ -450,6 +540,7 @@ def run_multiple(
                 "t1_mass_unit": mass_unit,
                 "t1_true_or_sini": true_or_sini,
                 "t1_m_or_q": m_or_q,
+                "spec": spec,
             })
             for tier3_dir in tier3_labels:
                 tier3_path = os.path.join(
@@ -462,6 +553,7 @@ def run_multiple(
                     "tier2_dir": tier2_dir,
                     "tier3_dir": tier3_dir,
                     "tier3_exists": os.path.isdir(tier3_path),
+                    "spec": spec,
                     "a_edges": np.asarray(a_edges, dtype=float),
                     "m_edges": y_edges,
                     "star_df": selected_stars,
@@ -501,6 +593,7 @@ def run_multiple(
                     "bpl_amplitude_bounds": bpl_amplitude_bounds,
                     "bpl_slope_bounds": bpl_slope_bounds,
                     "loglinear_amplitude_bounds": loglinear_amplitude_bounds,
+                    "ecc_amplitude_bounds": ecc_amplitude_bounds,
                     "model_fit_bounds": (
                         tier_model_fit_bounds
                     ),
@@ -535,6 +628,7 @@ def run_multiple(
         configuration for configuration in tier2_configurations
         if not _tier2_artifacts_exist(
             configuration["t1_dir"], configuration["t2_dir"],
+            configuration["spec"],
         )
     ]
     if missing_tier2 and not prepare_missing:
@@ -640,7 +734,7 @@ def _run_configuration(configuration):
     }
     subsample_title = _format_subsample_title(configuration["title"]).strip()
     title = _occurrence_function_title(
-        configuration["stack_dim"], subsample_title
+        configuration["stack_dim"], subsample_title, configuration["spec"]
     )
     early_plot_paths = {}
     roi_occurrence_future = None
@@ -665,6 +759,7 @@ def _run_configuration(configuration):
             integration_resolution=configuration["integration_resolution"],
             use_average_completeness=configuration["use_average_completeness"],
             tier1_kind=configuration["tier1_kind"],
+            spec=configuration["spec"],
         )
         result["materials"] = material_path
         if (can_overlap_supplementary_plots and
@@ -766,15 +861,14 @@ def _run_configuration(configuration):
                         configuration["m_unit"],
                         title,
                     )
-            elif model_name in {
-                    "logG", "escarpment", "sigmoid", "bpl", "loglinear"}:
+            elif model_name in mcmc.SMOOTH_MODELS:
                 amplitude_key = {
                     "logG": "logg_amplitude_bounds",
                     "escarpment": "escarpment_amplitude_bounds",
                     "sigmoid": "sigmoid_amplitude_bounds",
                     "bpl": "bpl_amplitude_bounds",
                     "loglinear": "loglinear_amplitude_bounds",
-                }[model_name]
+                }.get(model_name, "ecc_amplitude_bounds")
                 width_bounds = (
                     configuration["sigmoid_width_bounds"]
                     if model_name == "sigmoid" else
@@ -840,37 +934,10 @@ def _run_configuration(configuration):
             plot_executor.shutdown(wait=True)
 
     if configuration["make_plots"] and configuration["plot_models"]:
-        result["plots"] = main.plot_models(
-            tier1_dir=configuration["tier1_dir"],
-            tier2_dir=configuration["tier2_dir"],
-            tier3_dir=configuration["tier3_dir"],
-            nstars=len(configuration["star_df"]),
-            stack_dim=configuration["stack_dim"],
-            a_edges=configuration["a_edges"],
-            m_edges=configuration["m_edges"],
-            plot_models=configuration["plot_models"],
-            m_unit=configuration["m_unit"],
-            title=title,
-            plot_occurrence=configuration["plot_occurrence"],
-            plot_cumulative=configuration["plot_cumulative"],
-            plot_density=configuration["plot_density"],
-            plot_corner=configuration["plot_corner"],
-            plot_catalog_roi=(
-                configuration["plot_catalog_roi"] and
-                "catalog_roi" not in early_plot_paths
-            ),
-            plot_roi_occurrence=(
-                configuration["plot_roi_occurrence"] and
-                "roi_occurrence" not in early_plot_paths
-            ),
-            plot_uncorrected_occurrence_mle=configuration[
-                "plot_uncorrected_occurrence_mle"
-            ],
-            occurrence_legend_loc=configuration["occurrence_legend_loc"],
-            model_plot_style=configuration["model_plot_style"],
-            n_posterior_draws=configuration["n_posterior_draws"],
-            plot_random_seed=configuration["plot_random_seed"],
-        )
+        with pu.axis_style(**_axis_style(configuration["spec"],
+                                         configuration["stack_dim"])):
+            result["plots"] = _plot_models(configuration, title,
+                                           early_plot_paths)
         if early_plot_paths:
             if len(configuration["plot_models"]) == 1:
                 result["plots"].update(early_plot_paths)
@@ -880,6 +947,80 @@ def _run_configuration(configuration):
                 )
     result["seconds"] = time.perf_counter() - start
     return result
+
+
+def _plot_models(configuration, title, early_plot_paths):
+    """Plot one experiment's selected models (see ``main.plot_models``)."""
+    return main.plot_models(
+        tier1_dir=configuration["tier1_dir"],
+        tier2_dir=configuration["tier2_dir"],
+        tier3_dir=configuration["tier3_dir"],
+        nstars=len(configuration["star_df"]),
+        stack_dim=configuration["stack_dim"],
+        a_edges=configuration["a_edges"],
+        m_edges=configuration["m_edges"],
+        plot_models=configuration["plot_models"],
+        m_unit=configuration["m_unit"],
+        title=title,
+        plot_occurrence=configuration["plot_occurrence"],
+        plot_cumulative=configuration["plot_cumulative"],
+        plot_density=configuration["plot_density"],
+        plot_corner=configuration["plot_corner"],
+        plot_catalog_roi=(
+            configuration["plot_catalog_roi"] and
+            "catalog_roi" not in early_plot_paths
+        ),
+        plot_roi_occurrence=(
+            configuration["plot_roi_occurrence"] and
+            "roi_occurrence" not in early_plot_paths
+        ),
+        plot_uncorrected_occurrence_mle=configuration[
+            "plot_uncorrected_occurrence_mle"
+        ],
+        occurrence_legend_loc=configuration["occurrence_legend_loc"],
+        model_plot_style=configuration["model_plot_style"],
+        n_posterior_draws=configuration["n_posterior_draws"],
+        plot_random_seed=configuration["plot_random_seed"],
+    )
+
+
+# Axis labels for runs with explicit dimension roles
+_AXIS_LABELS = {"a": "Semi-major axis [AU]",
+                "m": r"Companion mass [$M_{Jup}$]", "e": "Eccentricity"}
+_DENSITY_UNITS = {"a": r"\Delta \log a", "m": r"\Delta \log M_c",
+                  "e": r"\Delta e"}
+_STACK_NAMES = {"a": ("a", "AU"), "m": ("M_c", r"M_{Jup}"), "e": ("e", "")}
+
+
+def _axis_style(spec, stack_dim):
+    """Plot overrides for a run's spec (empty for legacy runs).
+
+    Names the modeled and stacked dimensions, writes the density units, and
+    labels eccentricity ticks with e rather than the engine's u = 10**e.
+    """
+    if spec is None or spec.legacy:
+        return {}
+    modeled = spec.x if stack_dim == "m" else spec.y
+    stacked = spec.y if stack_dim == "m" else spec.x
+    style = {
+        "x_label": _AXIS_LABELS[modeled],
+        "density_label": (
+            "Occurrence rate density\n[Planets/star/$"
+            f"{_DENSITY_UNITS[modeled]}/{_DENSITY_UNITS[stacked]}$]"
+        ),
+    }
+    if modeled == "e":
+        style["x_tick_formatter"] = pu.eccentricity_tick_formatter
+
+    def stack_label(low, high):
+        low, high = spec.from_engine(stacked, [low, high])
+        symbol, unit = _STACK_NAMES[stacked]
+        role = spec.dimensions[stacked].role
+        text = rf"${symbol}$={low:g}-{high:g}" + (f" ${unit}$" if unit else "")
+        return text + (" (marginalized)" if role == "marginalize" else "")
+
+    style["stack_label"] = stack_label
+    return style
 
 
 def _progress_line(index, total, result):

@@ -87,47 +87,19 @@ class Completeness(object):
             ylogwin (float): (optional) y width of moving average
 
         """
-        xgrid = np.logspace(np.log10(xlim[0]),
-                            np.log10(xlim[1]),
-                            resolution)
-        ygrid = np.logspace(np.log10(ylim[0]),
-                            np.log10(ylim[1]),
-                            resolution)
-
-        xinj = self.recoveries[self.xcol]
-        yinj = self.recoveries[self.ycol]
-
         # If trends_count, then ONLY trends count. Treat resolved as non-detections.
         if trends_count:
             good = self.recoveries['trend_pref']
         else:
             good = self.recoveries['recovered']
 
-
-        z = np.zeros((len(ygrid), len(xgrid)))
-        last = 0
-        for i,x in enumerate(xgrid):
-            for j,y in enumerate(ygrid):
-                xlow = 10**(np.log10(x) - xlogwin/2)
-                xhigh = 10**(np.log10(x) + xlogwin/2)
-                ylow = 10**(np.log10(y) - ylogwin/2)
-                yhigh = 10**(np.log10(y) + ylogwin/2)
-
-                xbox = yinj[np.where((xinj <= xhigh) & (xinj >= xlow))[0]]
-                if len(xbox) == 0 or y > max(xbox) or y < min(xbox):
-                    z[j, i] = np.nan
-                    continue
-
-                boxall = np.where((xinj <= xhigh) & (xinj >= xlow) &
-                                  (yinj <= yhigh) & (yinj >= ylow))[0]
-                boxgood = np.where((xinj[good] <= xhigh) &
-                                   (xinj[good] >= xlow) & (yinj[good] <= yhigh) &
-                                   (yinj[good] >= ylow))[0]
-                if len(boxall) > 5:
-                    z[j, i] = float(len(boxgood))/len(boxall)
-                    last = float(len(boxgood))/len(boxall)
-                else:
-                    z[j, i] = np.nan
+        # Vectorized estimator; identical results to the original loop over
+        # grid points (kept in tests/test_eccentricity.py as the reference)
+        xgrid, ygrid, z = cu.moving_average_grid(
+            self.recoveries[self.xcol], self.recoveries[self.ycol], good,
+            xlim, ylim, resolution=resolution, xlogwin=xlogwin,
+            ylogwin=ylogwin, fill_nans=False,
+        )
 
         self.grid = (xgrid, ygrid, z)
         

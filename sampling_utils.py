@@ -14,11 +14,60 @@ Ms2Mj = (c.M_sun/c.M_jup).value
 
     
     
-def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth'):
+# Eccentricities for companions whose orvara posterior files store only
+# semi-major axis and mass (no sqrt(e) sin/cos omega). Keys are
+# (posterior file stem, companion index); the index-to-planet match was made
+# by semi-major axis. Values are (median, minus error, plus error, source).
+LITERATURE_ECCENTRICITIES = {
+    ("GL876", 0): (0.273, 0.098, 0.093, "GL 876 d, CLS I table"),
+    ("GL876", 1): (0.0055, 0.0040, 0.0064, "GL 876 c, Marcy et al. (2001)"),
+    ("GL876", 2): (0.0019, 0.0013, 0.0022, "GL 876 b, Marcy et al. (1998)"),
+    ("HD219134", 0): (0.063, 0.045, 0.070, "HD 219134 d, Vogt et al. (2015)"),
+    ("HD219134", 1): (0.16, 0.11, 0.12, "HD 219134 f, Vogt et al. (2015)"),
+    ("HD219134", 2): (0.072, 0.051, 0.078, "HD 219134 e, Vogt et al. (2015)"),
+    ("HD219134", 3): (0.077, 0.050, 0.055, "HD 219134 c, Vogt et al. (2015)"),
+    ("HD219134", 4): (0.025, 0.018, 0.027, "HD 219134 b, Vogt et al. (2015)"),
+    ("HD28185", 0): (0.063, 0.004, 0.004,
+                     "HD 28185 b, joint RV-astrometry fit (Model 1)"),
+    ("HD28185", 1): (0.15, 0.04, 0.04,
+                     "HD 28185 c, joint RV-astrometry fit (Model 1)"),
+}
+
+
+def split_normal_draws(median, minus, plus, size, low=0.0, high=1.0,
+                       rng=None):
+    """Draw from a split normal (different widths below and above the
+    median), truncated to ``low <= x < high`` by redrawing.
+
+    Used for literature eccentricities, which come as asymmetric 1-sigma
+    intervals rather than posterior samples. The draws are independent of
+    the companion's semi-major axis and mass samples, so any correlation
+    between e and those is lost. ``rng`` defaults to NumPy's global
+    generator.
+    """
+    rng = np.random if rng is None else rng
+    draws = np.empty(0)
+    while draws.size < size:
+        z = rng.standard_normal(2*size)
+        values = median + z*np.where(z > 0, plus, minus)
+        draws = np.concatenate([draws, values[(values >= low) &
+                                              (values < high)]])
+    return draws[:size]
+
+
+def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth',
+                  include_ecc=False):
     """
     Function to sample from orvara posteriors in particular
     Note that chains for individual companions are saved under
     the host system, so we need the system names.
+
+    Each companion gets ``[a, m]`` samples, or ``[a, m, e]`` with
+    ``include_ecc=True``. Eccentricity is e = (sqrt(e) sin w)^2 +
+    (sqrt(e) cos w)^2 from the same draws as a and m, so their correlations
+    are kept. Companions whose files lack those parameters use
+    ``LITERATURE_ECCENTRICITIES`` (drawn independently of a and m); any other
+    missing eccentricity raises.
     """
 
     # If using q instead of m, use m_conversion=1 (ie, leave m_samples in M_sun)
@@ -72,7 +121,33 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth')
                 #if '8765' in sys_name_lowercase:
 
                 comp_name = sys_name_lowercase+'_'+str(comp_ind)
-                post_sample_dict[comp_name] = [a_chain, m_chain]
+                if not include_ecc:
+                    post_sample_dict[comp_name] = [a_chain, m_chain]
+                    continue
+                esino = chain_dict.get(f'esino{comp_ind}')
+                ecoso = chain_dict.get(f'ecoso{comp_ind}')
+                if esino is not None and ecoso is not None:
+                    e_chain = esino[rand_inds]**2 + ecoso[rand_inds]**2
+                elif (sys_name, comp_ind) in LITERATURE_ECCENTRICITIES:
+                    median, minus, plus, _ = LITERATURE_ECCENTRICITIES[
+                        (sys_name, comp_ind)
+                    ]
+                    # A generator seeded by the companion, so these draws
+                    # do not shift the global random stream that the other
+                    # companions' a and m draws come from
+                    seed = int.from_bytes(
+                        f"{sys_name}_{comp_ind}".encode(), "little"
+                    ) % 2**32
+                    e_chain = split_normal_draws(
+                        median, minus, plus, num_samples,
+                        rng=np.random.RandomState(seed),
+                    )
+                else:
+                    raise KeyError(
+                        f"{chain_file} has no eccentricity for companion "
+                        f"{comp_ind}; add it to LITERATURE_ECCENTRICITIES"
+                    )
+                post_sample_dict[comp_name] = [a_chain, m_chain, e_chain]
     #unchecked = [sysname for sysname in burned_files if sysname not in burned_and_checked]
     return post_sample_dict
 

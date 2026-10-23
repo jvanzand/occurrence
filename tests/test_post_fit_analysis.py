@@ -396,13 +396,16 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
     ]
     assert len(all_data_rows) == 23
     first_block = all_data_rows[:4]
+    # The default order, keeping only models that have chains here
+    fitted_order = [model for model in post_fit_analysis._APPENDIX_MODEL_ORDER
+                    if model in models]
     expected_models = [
         # plain names, as printed in the paper ("log-linear")
         post_fit_analysis._TABLE_MODEL_NAMES.get(model, model)
-        for model in post_fit_analysis._APPENDIX_MODEL_ORDER
+        for model in fitted_order
     ]
     assert [row.split(" & ")[5] for row in first_block] == expected_models
-    model_rows = dict(zip(post_fit_analysis._APPENDIX_MODEL_ORDER, first_block))
+    model_rows = dict(zip(fitted_order, first_block))
     assert r"\McAllstarsPaperBoundsLogGIntOccBinaZero" in model_rows["logG"]
     assert r"\McAllstarsPaperBoundsLogGParamABinaZero" in model_rows["logG"]
     assert r"\McAllstarsPaperBoundsSigmoidParamCenterBinaZero" in model_rows["sigmoid"]

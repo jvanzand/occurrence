@@ -266,8 +266,14 @@ def prep_fit_materials(
         integration_resolution=(100, 100),
         use_average_completeness=True,
         interim_prior_fn=None,
-        tier1_kind=None):
+        tier1_kind=None,
+        spec=None):
     """Prepare unbinned samples and survey exposure for a direct fit.
+
+    ``spec`` is the run's ``DimensionSpec``; for a non-legacy spec the
+    catalog and average map are its own Tier 2 products (checked against
+    its record), the bounds are in engine coordinates, and the record is
+    saved in ``fit_data.npz``.
 
     This Stage 2 entry point supports the current ``(a, mass)`` catalog order
     and one rectangular x-y region. It writes ``fit_data.npz`` but
@@ -275,9 +281,23 @@ def prep_fit_materials(
     the default because some individual maps may contain NaNs in the ROI;
     individual-map summation remains available with strict validation.
     """
-    catalog_path = os.path.join(
-        tier1_dir, tier2_dir, 'sampled_post_prior_compl.npz'
-    )
+    explicit = spec is not None and not spec.legacy
+    if explicit:
+        from occurrence import dimensions as dm
+        paths = dimension_tier2_paths(tier1_dir, tier2_dir, spec)
+        catalog_path = paths["catalog"]
+        with np.load(catalog_path) as data:
+            saved = dm.spec_from_json(str(data[dfu.DIMENSIONS_KEY]))
+        dm.check_matching(spec, saved, catalog_path, include_fit_edges=False)
+        if not use_average_completeness:
+            raise NotImplementedError(
+                "runs with explicit dimension roles use the sample-average "
+                "completeness for the expected number of detections"
+            )
+    else:
+        catalog_path = os.path.join(
+            tier1_dir, tier2_dir, 'sampled_post_prior_compl.npz'
+        )
     companions = dfu.load_catalog(
         catalog_path=catalog_path,
         x_bounds=x_bounds,
@@ -287,8 +307,10 @@ def prep_fit_materials(
     )
 
     if use_average_completeness:
-        average_path = os.path.join(
-            tier1_dir, tier2_dir, 'avg_map', 'interp_fn.pkl'
+        average_path = (
+            os.path.join(paths["engine_average"], 'interp_fn.pkl')
+            if explicit else
+            os.path.join(tier1_dir, tier2_dir, 'avg_map', 'interp_fn.pkl')
         )
         with open(average_path, 'rb') as stream:
             average_completeness = pickle.load(stream)
@@ -317,7 +339,8 @@ def prep_fit_materials(
     save_path = os.path.join(
         tier1_dir, tier2_dir, tier3_dir, 'saved_dicts', 'fit_data.npz'
     )
-    dfu.save_fit_data(save_path, companions, exposure)
+    dfu.save_fit_data(save_path, companions, exposure,
+                      dimensions_json=spec.to_json() if explicit else None)
     return save_path
 
 
@@ -467,9 +490,7 @@ def plot_models(
         occurrence_legend_loc="upper right"):
     """Plot selected direct models together while retaining separate corners."""
     selected = list(plot_models)
-    supported = {
-        'piecewise', 'logG', 'escarpment', 'sigmoid', 'bpl', 'loglinear'
-    }
+    supported = {'piecewise'} | mcmc.SMOOTH_MODELS
     unknown = set(selected) - supported
     if unknown:
         raise ValueError(f"unsupported plot models: {sorted(unknown)}")
@@ -585,3 +606,182 @@ def plot_models(
         occurrence_legend_loc=occurrence_legend_loc,
     )
     return paths
+
+
+# ---------------------------------------------------------------------------
+# Runs with explicit dimension roles (see ``dimensions``)
+#
+# These steps replace ``prep_maps``/``make_average_map``/``prep_post_draws``
+# for runs whose ``dimensions`` setting fits or marginalizes eccentricity.
+# Legacy runs never call them, so their products are unchanged.
+#
+# Independence assumption: marginalized dimensions are averaged over fixed
+# population distributions, assuming they are independent of the fitted
+# dimensions (see ``marginal_distributions``).
+# ---------------------------------------------------------------------------
+
+def sliced_maps_dir(tier1_dir, tier1_label):
+    """Folder of the stars' eccentricity-sliced maps."""
+    return os.path.join(
+        tier1_dir, f"saved_maps_{tier1_label}{cu.SLICED_MAPS_SUFFIX}"
+    )
+
+
+def prep_sliced_maps(tier1_dir, star_df, path_to_recoveries, tier1_label,
+                     m_unit='jupiter', e_edges=cu.ECC_SLICE_EDGES):
+    """Make every star's eccentricity-sliced completeness map (Tier 1).
+
+    Uses the inclination-marginalized recoveries already written for the
+    original maps. Returns {star: injections per slice}.
+    """
+    save_path = sliced_maps_dir(tier1_dir, tier1_label)
+    os.makedirs(save_path, exist_ok=True)
+    ycol = f"inj_{tier1_label}"
+    args_list = [
+        (star, path_to_recoveries, save_path, ycol, m_unit, tuple(e_edges))
+        for star in star_df.star_name
+    ]
+    ncores = 30 if mp.cpu_count() > 100 else max(1, int(mp.cpu_count()/2))
+    with mp.Pool(ncores) as pool:
+        counts = dict(pool.map(cu._process_single_star_sliced, args_list))
+    np.savez(os.path.join(save_path, "slice_counts.npz"),
+             stars=np.asarray(list(counts)),
+             counts=np.asarray(list(counts.values())),
+             e_edges=np.asarray(e_edges))
+    return counts
+
+
+def dimension_tier2_paths(tier1_dir, tier2_dir, spec):
+    """Paths of the Tier 2 products for one dimension spec."""
+    base = os.path.join(tier1_dir, tier2_dir)
+    return {
+        "sliced_average": os.path.join(base, "avg_map" + cu.SLICED_MAPS_SUFFIX),
+        "engine_average": os.path.join(base, f"avg_map_{spec.token}"),
+        "catalog": os.path.join(
+            base, f"sampled_post_prior_compl_{spec.token}.npz"
+        ),
+    }
+
+
+def make_dimension_average_maps(tier1_dir, tier2_dir, spec, star_df,
+                                tier1_label):
+    """Average the sliced maps over a sample and marginalize them per spec.
+
+    Writes the sliced average (shared by every spec) and the engine map for
+    this spec, with its dimension record. Returns the engine interpolator.
+    """
+    paths = dimension_tier2_paths(tier1_dir, tier2_dir, spec)
+    maps_dir = sliced_maps_dir(tier1_dir, tier1_label)
+    if os.path.exists(os.path.join(paths["sliced_average"],
+                                   cu.SLICED_INTERP_FILE)):
+        sliced_average = cu.load_sliced(paths["sliced_average"])
+    else:
+        sliced_average, filled = cu.sliced_average_map(
+            maps_dir, paths["sliced_average"], star_df.star_name.to_list()
+        )
+        if filled.any():
+            print(f"{tier2_dir}: filled {int(filled.sum())} sliced-average "
+                  "points with no estimate from the next lower e slice "
+                  f"(per slice: {filled.tolist()})")
+    engine_map = cu.engine_completeness(spec, sliced_average)
+    os.makedirs(paths["engine_average"], exist_ok=True)
+    with open(os.path.join(paths["engine_average"], "interp_fn.pkl"),
+              "wb") as stream:
+        pickle.dump(engine_map, stream)
+    with open(os.path.join(paths["engine_average"], "dimensions.json"),
+              "w") as stream:
+        stream.write(spec.to_json())
+    return engine_map
+
+
+def prep_dimension_post_draws(tier1_dir, tier2_dir, spec, star_df,
+                              comp_post_dir, sampling_func, tier1_label,
+                              m_unit='jupiter', num_samples=500,
+                              fill_single_nan_with_average=True):
+    """Sample companion posteriors in a, m, and e and weight them per spec.
+
+    Draws ``num_samples`` (a, m, e) samples per companion with
+    ``sampling_func(..., include_ecc=True)``, weights them with
+    :func:`weigh_dimension_samples`, and saves the catalog. Returns its path.
+    """
+    samples = sampling_func(comp_post_dir, star_df, num_samples=num_samples,
+                            m_unit=m_unit, include_ecc=True)
+    paths = dimension_tier2_paths(tier1_dir, tier2_dir, spec)
+    output, fallback_total = weigh_dimension_samples(
+        spec, samples, star_df, sliced_maps_dir(tier1_dir, tier1_label),
+        cu.load_sliced(paths["sliced_average"]),
+        fill_single_nan_with_average=fill_single_nan_with_average,
+    )
+    if fallback_total:
+        print(f"{tier2_dir}: {fallback_total} posterior draws used the sample-"
+              "average completeness where the host's sliced map is undefined "
+              "or zero")
+    np.savez(paths["catalog"], **output)
+    return paths["catalog"]
+
+
+def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
+                            fill_single_nan_with_average=True):
+    """Turn (a, m, e) posterior samples into a catalog for one spec.
+
+    ``samples`` maps companion names to ``[a, m, e]`` arrays (M_Jup, AU);
+    ``host_maps_dir`` holds the stars' sliced maps and ``average`` is the
+    sample's sliced average. For each draw, records:
+      * the engine coordinates of the x and y slots (e as 10**e);
+      * completeness at the draw's (a, m, e) from the host's own sliced map
+        and from the sample average. Host values that are undefined (NaN)
+        or exactly zero fall back to the average. NaN fallback is the
+        original code's rule; zeros are added because slicing by e leaves
+        each moving-average box only a few injections, so "0 of N
+        recovered" is common where the true completeness is small but
+        positive, and a detected companion cannot have zero completeness;
+      * the marginal factor: the product, over marginalized dimensions, of
+        the population density at the draw divided by the posterior's
+        interim prior there. Both are densities in the dimension's own
+        coordinate (log10 for a and m, linear for e), where the orvara
+        interim priors are flat, so the factor is the density itself up to a
+        constant. It is zero outside a marginalized range. This assumes the
+        marginalized dimensions are independent of the fitted ones.
+    The main array keeps the original seven-row layout (x, y, average and
+    host completeness, their ratios to the prior, and the prior), so the
+    fit code reads it unchanged. Returns (catalog dict, number of draws that
+    fell back to the average completeness, whether undefined or zero).
+    """
+    output = {dfu.DIMENSIONS_KEY: np.asarray(spec.to_json())}
+    fallback_total = 0
+    for star_name, comp_list in zip(star_df.star_name, star_df.comp_list):
+        present = [name for name in comp_list if name in samples]
+        if not present:
+            continue
+        host = cu.load_sliced(os.path.join(host_maps_dir, star_name))
+        for comp_name in present:
+            a, m, e = (np.asarray(values, dtype=float)
+                       for values in samples[comp_name])
+            average_completeness = average((a, m, e))
+            host_completeness = host((a, m, e))
+            if fill_single_nan_with_average:
+                undefined = ~np.isfinite(host_completeness) | (
+                    host_completeness <= 0
+                )
+                fallback = undefined & np.isfinite(average_completeness)
+                host_completeness[fallback] = average_completeness[fallback]
+                fallback_total += int(fallback.sum())
+            physical = {"a": a, "m": m, "e": e}
+            factor = np.ones_like(a)
+            for name in spec.marginalized:
+                distribution = spec.dimensions[name].distribution
+                with np.errstate(invalid="ignore"):
+                    factor = factor*distribution.density(physical[name])
+            factor[~np.isfinite(factor)] = 0.0
+            prior = np.ones_like(a)
+            x = spec.to_engine(spec.x, physical[spec.x])
+            y = spec.to_engine(spec.y, physical[spec.y])
+            output[comp_name] = np.vstack([
+                x, y, average_completeness, host_completeness,
+                average_completeness/prior, host_completeness/prior, prior,
+            ])
+            separator = dfu.AUXILIARY_SEPARATOR
+            output[comp_name + separator + "marginal_factor"] = factor
+            for name, values in physical.items():
+                output[comp_name + separator + name] = values
+    return output, fallback_total

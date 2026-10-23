@@ -25,6 +25,9 @@ SMOOTH_PARAMETER_NAMES = {
     "loglinear": ["ln C1", "ln C2"],
     "escarpment": ["ln D1", "ln D2", "log10 x_t1", "log10 x_t2"],
     "bpl": ["ln C", "log10 x_break", "beta", "gamma"],
+    "beta": ["ln A", "ln alpha", "ln beta"],
+    "rayleigh": ["ln A", "ln sigma_e"],
+    "ecc_mixture": ["ln A", "f1", "ln sigma1", "ln sigma2"],
 }
 
 

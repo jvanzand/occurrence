@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import special, stats
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,76 @@ def broken_powerlaw_density(theta, x):
     turnover = -np.expm1(-turnover_power)
     powerlaw = np.exp(np.clip(beta*np.log(x), -700, 700))
     return amplitude*powerlaw*turnover
+
+
+# ---------------------------------------------------------------------------
+# Eccentricity models
+#
+# The engine sees eccentricity as u = 10**e (see ``dimensions``), so these
+# densities take engine values x = u and evaluate at e = log10(x). Each is
+# ``A f(e)`` with f a probability density normalized over the fitted e range
+# (``model_bounds``, in engine units), so the density is per unit e (= per
+# unit log10 u). As for every model, it is also per unit of the stacked
+# coordinate (e.g. per dex of mass when mass is marginalized as one bin), so
+# A is the occurrence over the e range per unit stacked coordinate; the
+# integrated occurrence the fits report multiplies by the stack width. Draws with
+# e below ``ECC_FLOOR`` are evaluated at the floor, which keeps the Beta
+# density finite at e = 0 when alpha < 1 (an integrable singularity).
+# ---------------------------------------------------------------------------
+
+ECC_FLOOR = 1e-4
+
+
+def _eccentricity_and_range(x, model_bounds, model_name):
+    if model_bounds is None:
+        raise ValueError(f"model_bounds are required for the {model_name} model")
+    low, high = np.log10(np.asarray(model_bounds, dtype=float))
+    e = np.log10(np.asarray(x, dtype=float))
+    inside = (e >= low - 1e-12) & (e <= high + 1e-12)
+    return np.clip(e, max(low, ECC_FLOOR), high), max(low, 0.0), high, inside
+
+
+def beta_ecc_density(theta, x, model_bounds=None):
+    """``A`` times a Beta(alpha, beta) density in e, normalized over the range.
+
+    Written with ``scipy.special`` rather than ``scipy.stats.beta``, which is
+    several times slower; the MCMC evaluates it at every posterior draw for
+    every walker and step.
+    """
+    amplitude, alpha, beta = np.asarray(theta, dtype=float)
+    e, low, high, inside = _eccentricity_and_range(x, model_bounds, "beta")
+    norm = special.betainc(alpha, beta, high) - special.betainc(alpha, beta, low)
+    log_pdf = ((alpha - 1)*np.log(e) + (beta - 1)*np.log1p(-e) -
+               special.betaln(alpha, beta))
+    density = amplitude*np.exp(log_pdf)/norm
+    return np.where(inside, density, 0.0)
+
+
+def _rayleigh_pdf(e, sigma, low, high):
+    """Rayleigh density in e, normalized over ``low <= e <= high``."""
+    norm = np.exp(-low**2/(2*sigma**2)) - np.exp(-high**2/(2*sigma**2))
+    return e/sigma**2*np.exp(-e**2/(2*sigma**2))/norm
+
+
+def rayleigh_ecc_density(theta, x, model_bounds=None):
+    """``A`` times a Rayleigh(sigma) density in e, normalized over the range."""
+    amplitude, sigma = np.asarray(theta, dtype=float)
+    e, low, high, inside = _eccentricity_and_range(x, model_bounds, "rayleigh")
+    return np.where(inside, amplitude*_rayleigh_pdf(e, sigma, low, high), 0.0)
+
+
+def ecc_mixture_density(theta, x, model_bounds=None):
+    """``A`` times a mix of two Rayleigh densities (fraction f has sigma1).
+
+    A narrow component (sigma1 < sigma2) for dynamically cold, near-circular
+    orbits and a broad one for dynamically hot orbits.
+    """
+    amplitude, fraction, sigma1, sigma2 = np.asarray(theta, dtype=float)
+    e, low, high, inside = _eccentricity_and_range(x, model_bounds,
+                                                   "ecc_mixture")
+    mixed = (fraction*_rayleigh_pdf(e, sigma1, low, high) +
+             (1 - fraction)*_rayleigh_pdf(e, sigma2, low, high))
+    return np.where(inside, amplitude*mixed, 0.0)
 
 
 def log_linear_density(theta, x, model_bounds=None):

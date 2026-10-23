@@ -39,6 +39,11 @@ _MODEL_PARAMETER_MACROS = {
         "Escarpment", ("DOne", "DTwo", "BPOne", "BPTwo")
     ),
     "bpl": ("BPL", ("C", "LogBreak", "Beta", "Gamma")),
+    # Eccentricity models: A is the occurrence over the fitted e range
+    "beta": ("Beta", ("A", "Alpha", "BetaShape")),
+    "rayleigh": ("Rayleigh", ("A", "Sigma")),
+    "ecc_mixture": ("EccMixture", ("A", "FractionOne", "SigmaOne",
+                                   "SigmaTwo")),
 }
 
 _MODEL_PARAMETER_LABELS = {
@@ -52,15 +57,20 @@ _MODEL_PARAMETER_LABELS = {
         r"$\log(x_{t,2})$",
     ),
     "bpl": (r"$C$", r"$\log(x_0)$", r"$\beta$", r"$\gamma$"),
+    "beta": (r"$A$", r"$\alpha$", r"$\beta$"),
+    "rayleigh": (r"$A$", r"$\sigma_e$"),
+    "ecc_mixture": (r"$A$", r"$f_1$", r"$\sigma_1$", r"$\sigma_2$"),
 }
 
 # Model names as printed in the paper's tables, where they differ from the
 # code names.
-_TABLE_MODEL_NAMES = {"loglinear": "log-linear"}
+_TABLE_MODEL_NAMES = {"loglinear": "log-linear",
+                      "ecc_mixture": "two-Rayleigh"}
 
 # Order of the model rows within each experiment of the appendix table
 _APPENDIX_MODEL_ORDER = (
     "sigmoid", "logG", "loglinear", "escarpment",
+    "beta", "rayleigh", "ecc_mixture",
 )
 
 _THREE_PARAMETER_TIER2_DIRS = (
@@ -319,20 +329,14 @@ def _plot_companions_for_result(
             "Mtrue_post_med points can only be overlaid consistently on an "
             "mtrue completeness map"
         )
-    average_map_dir = experiment_dir.parent / "avg_map"
-    grid_paths = {
-        name: average_map_dir / f"parent_{name}grid.npy"
-        for name in ("x", "y", "z")
-    }
-    missing_grids = [str(path) for path in grid_paths.values()
-                     if not path.is_file()]
-    if missing_grids:
-        raise FileNotFoundError(
-            f"average completeness grids are missing: {missing_grids}"
-        )
-    xgrid = np.load(grid_paths["x"])
-    ygrid = np.load(grid_paths["y"])
-    zgrid = np.load(grid_paths["z"])
+    spec = dfu.load_fit_dimensions(fit_path)
+    if spec is not None and not spec.legacy:
+        # Saved bounds are in engine coordinates; draw the a-m region instead
+        x_bounds = spec.dimensions["a"].bounds
+        y_bounds = spec.dimensions["m"].bounds
+    xgrid, ygrid, zgrid = _companion_plot_completeness(
+        experiment_dir.parent, spec
+    )
     roi_pairs = (
         [(x_bounds, y_bounds)]
         if x_bounds is not None and y_bounds is not None else None
@@ -426,6 +430,51 @@ def _plot_companions_for_result(
     figure.savefig(output_path, dpi=300)
     plt.close(figure)
     return output_path
+
+
+def _companion_plot_completeness(tier2_dir, spec):
+    """Return the (a, m) average completeness drawn under companion plots.
+
+    Runs with the original roles use the Tier 2 average map. Runs with
+    explicit dimension roles have only the eccentricity-sliced average,
+    whose slices are averaged with the e distribution's slice
+    probabilities: the run's marginal when e is marginalized, otherwise the
+    default one (Kipping 2013). That weighting only sets the background of
+    the figure; no fit uses it.
+    """
+    from occurrence import completeness_utils as cu
+    from occurrence import marginal_distributions as md
+
+    tier2_dir = Path(tier2_dir)
+    if spec is not None and not spec.legacy:
+        sliced_dir = tier2_dir / ("avg_map" + cu.SLICED_MAPS_SUFFIX)
+        if not (sliced_dir / cu.SLICED_MAP_FILE).is_file():
+            raise FileNotFoundError(
+                f"eccentricity-sliced average map is missing: {sliced_dir}"
+            )
+        sliced = cu.load_sliced(sliced_dir)
+        e_dimension = spec.dimensions["e"]
+        distribution = (e_dimension.distribution
+                        if e_dimension.distribution is not None
+                        else md.default_marginal("e"))
+        weights = distribution.cell_probabilities(sliced.e_edges)
+        weights = weights/weights.sum()
+        zgrid = np.tensordot(weights, sliced.zgrids, axes=1)
+        return sliced.xgrid, sliced.ygrid, zgrid
+
+    average_map_dir = tier2_dir / "avg_map"
+    grid_paths = {
+        name: average_map_dir / f"parent_{name}grid.npy"
+        for name in ("x", "y", "z")
+    }
+    missing_grids = [str(path) for path in grid_paths.values()
+                     if not path.is_file()]
+    if missing_grids:
+        raise FileNotFoundError(
+            f"average completeness grids are missing: {missing_grids}"
+        )
+    return (np.load(grid_paths["x"]), np.load(grid_paths["y"]),
+            np.load(grid_paths["z"]))
 
 
 def plot_companions_by_stellar_parameter(
@@ -603,6 +652,7 @@ MODEL_TITLES = {
     "piecewise": "Piecewise", "logG": "Log-Gaussian", "sigmoid": "Sigmoid",
     "escarpment": "Escarpment", "bpl": "Broken Power Law",
     "loglinear": "Log-Linear",
+    "beta": "Beta", "rayleigh": "Rayleigh", "ecc_mixture": "Two-Rayleigh Mixture",
 }
 
 
@@ -661,6 +711,22 @@ def _cdf_tick_values(curve, coordinate):
     key = "x_edges" if coordinate == "sma" else "y_edges"
     with np.load(path) as data:
         return np.asarray(data[key], dtype=float) if key in data else None
+
+
+def _cdf_modeled_dimension(curve, results_dir, coordinate):
+    """Return the dimension ('a', 'm', or 'e') a CDF curve's models describe.
+
+    Legacy fits model a when the chain's coordinate is "sma" and m
+    otherwise; fits with explicit dimension roles say which dimension fills
+    each engine slot in their ``fit_data.npz`` record.
+    """
+    from occurrence import fit_utils
+    path = (Path(results_dir) / curve["t1"] / curve["t2"] / curve["t3"] /
+            "saved_dicts" / "fit_data.npz")
+    spec = fit_utils.load_fit_dimensions(path) if path.is_file() else None
+    if spec is None or spec.legacy:
+        return "a" if coordinate == "sma" else "m"
+    return spec.x if coordinate == "sma" else spec.y
 
 
 def _cdf_tick_formatter(tick_values, coordinate, tier1_names):
@@ -976,13 +1042,24 @@ def plot_model_cdf_comparison(
         xticks = _cdf_tick_values(
             dict(rows[0][0], results_dir=results_dir), coordinate
         )
+    # Runs with explicit dimension roles may model eccentricity, which the
+    # chain files call by its engine slot ("sma" for x); read the fit's
+    # dimension record to label it
+    modeled = _cdf_modeled_dimension(rows[0][0], results_dir, coordinate)
     if xticks is not None:
         xticks = np.asarray(xticks, dtype=float)
-        tick_formatter = _cdf_tick_formatter(xticks, coordinate, tier1_names)
+        if modeled == "e":
+            from occurrence import plotting_utils as pu
+            tick_formatter = pu.eccentricity_tick_formatter(xticks)
+        else:
+            tick_formatter = _cdf_tick_formatter(xticks, coordinate,
+                                                 tier1_names)
     if legend_fontsize is None:
         legend_fontsize = 1.6*plt.rcParams["font.size"]
     if xlabel is None:
-        if coordinate == "sma":
+        if modeled == "e":
+            xlabel = "Eccentricity"
+        elif coordinate == "sma":
             xlabel = "Semi-major axis [AU]"
         elif tier1_names <= {"qtrue", "qsini"}:
             xlabel = r"Mass Ratio [$M_c/M_{\star}$]"

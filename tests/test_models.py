@@ -16,6 +16,9 @@ def test_model_registry_is_complete_and_consistent():
         "sigmoid": (dl.sigmoid_density, 4),
         "bpl": (dl.broken_powerlaw_density, 4),
         "loglinear": (dl.log_linear_density, 2),
+        "beta": (dl.beta_ecc_density, 3),
+        "rayleigh": (dl.rayleigh_ecc_density, 2),
+        "ecc_mixture": (dl.ecc_mixture_density, 4),
     }
     assert set(mcmc_powerlaw.MODEL_REGISTRY) == set(expected)
     for name, (function, ndim) in expected.items():
