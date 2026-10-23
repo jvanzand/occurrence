@@ -16,22 +16,37 @@ Ms2Mj = (c.M_sun/c.M_jup).value
     
 # Eccentricities for companions whose orvara posterior files store only
 # semi-major axis and mass (no sqrt(e) sin/cos omega). Keys are
-# (posterior file stem, companion index); the index-to-planet match was made
-# by semi-major axis. Values are (median, minus error, plus error, source).
+# (posterior file stem, companion index). The files order companions by
+# semi-major axis (inner first), not by planet letter, so each entry also
+# gives the planet's literature semi-major axis: post_sampler2 checks it
+# against the file's samples and raises if they disagree. Values are
+# (median e, minus error, plus error, literature a [AU] or None, source).
 LITERATURE_ECCENTRICITIES = {
-    ("GL876", 0): (0.273, 0.098, 0.093, "GL 876 d, CLS I table"),
-    ("GL876", 1): (0.0055, 0.0040, 0.0064, "GL 876 c, Marcy et al. (2001)"),
-    ("GL876", 2): (0.0019, 0.0013, 0.0022, "GL 876 b, Marcy et al. (1998)"),
-    ("HD219134", 0): (0.063, 0.045, 0.070, "HD 219134 d, Vogt et al. (2015)"),
-    ("HD219134", 1): (0.16, 0.11, 0.12, "HD 219134 f, Vogt et al. (2015)"),
-    ("HD219134", 2): (0.072, 0.051, 0.078, "HD 219134 e, Vogt et al. (2015)"),
-    ("HD219134", 3): (0.077, 0.050, 0.055, "HD 219134 c, Vogt et al. (2015)"),
-    ("HD219134", 4): (0.025, 0.018, 0.027, "HD 219134 b, Vogt et al. (2015)"),
-    ("HD28185", 0): (0.063, 0.004, 0.004,
+    ("GL876", 0): (0.273, 0.098, 0.093, 0.0208, "GL 876 d, CLS I table"),
+    ("GL876", 1): (0.0055, 0.0040, 0.0064, 0.130,
+                   "GL 876 c, Marcy et al. (2001)"),
+    ("GL876", 2): (0.0019, 0.0013, 0.0022, 0.208,
+                   "GL 876 b, Marcy et al. (1998)"),
+    ("HD219134", 0): (0.025, 0.018, 0.027, 0.0382,
+                      "HD 219134 b, Vogt et al. (2015)"),
+    ("HD219134", 1): (0.077, 0.050, 0.055, 0.0653,
+                      "HD 219134 c, Vogt et al. (2015)"),
+    ("HD219134", 2): (0.16, 0.11, 0.12, 0.146,
+                      "HD 219134 f, Vogt et al. (2015)"),
+    ("HD219134", 3): (0.063, 0.045, 0.070, 0.237,
+                      "HD 219134 d, Vogt et al. (2015)"),
+    ("HD219134", 4): (0.072, 0.051, 0.078, 3.11,
+                      "HD 219134 e, Vogt et al. (2015)"),
+    ("HD28185", 0): (0.063, 0.004, 0.004, 1.03,
                      "HD 28185 b, joint RV-astrometry fit (Model 1)"),
-    ("HD28185", 1): (0.15, 0.04, 0.04,
+    # Semi-major axis not yet recorded; the file's outer companion (8.5 AU)
+    ("HD28185", 1): (0.15, 0.04, 0.04, None,
                      "HD 28185 c, joint RV-astrometry fit (Model 1)"),
 }
+# Largest ratio between a posterior file's median semi-major axis and the
+# literature value of the planet it is matched to. Neighboring planets in
+# these systems differ by factors of at least 1.6.
+LITERATURE_A_TOLERANCE = 1.25
 
 
 def split_normal_draws(median, minus, plus, size, low=0.0, high=1.0,
@@ -129,9 +144,20 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth',
                 if esino is not None and ecoso is not None:
                     e_chain = esino[rand_inds]**2 + ecoso[rand_inds]**2
                 elif (sys_name, comp_ind) in LITERATURE_ECCENTRICITIES:
-                    median, minus, plus, _ = LITERATURE_ECCENTRICITIES[
-                        (sys_name, comp_ind)
-                    ]
+                    median, minus, plus, literature_a, source = (
+                        LITERATURE_ECCENTRICITIES[(sys_name, comp_ind)]
+                    )
+                    sample_a = np.median(chain_dict[f'sau{comp_ind}'])
+                    if literature_a is not None and not (
+                            1/LITERATURE_A_TOLERANCE
+                            <= sample_a/literature_a
+                            <= LITERATURE_A_TOLERANCE):
+                        raise ValueError(
+                            f"{chain_file} companion {comp_ind} has median "
+                            f"a = {sample_a:.3g} AU, but its literature "
+                            f"eccentricity is for {source} at "
+                            f"{literature_a:g} AU"
+                        )
                     # A generator seeded by the companion, so these draws
                     # do not shift the global random stream that the other
                     # companions' a and m draws come from

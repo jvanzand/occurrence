@@ -271,6 +271,32 @@ def test_missing_eccentricity_raises_unless_listed(tmp_path):
                          num_samples=5, include_ecc=True)
 
 
+
+def _write_hd219134(path, semimajor_axes):
+    names, values = [], []
+    for index, a in enumerate(semimajor_axes):
+        names += [f"msec{index}", f"sau{index}"]
+        values += [[1e-4]*10, [a]*10]
+    _write_orvara_file(path / "HD219134.h5", names, values)
+
+
+def test_literature_eccentricities_follow_the_files_semimajor_axes(tmp_path):
+    # The file orders companions inner first: b, c, f, d, e
+    _write_hd219134(tmp_path, [0.0384, 0.0647, 0.145, 0.235, 2.97])
+    samples = su.post_sampler2(tmp_path, pd.DataFrame({"star_name": ["219134"]}),
+                               num_samples=4000, include_ecc=True)
+    medians = [np.median(samples[f"219134_{i}"][2]) for i in range(5)]
+    expected = [su.LITERATURE_ECCENTRICITIES[("HD219134", i)][0]
+                for i in range(5)]
+    assert np.allclose(medians, expected, rtol=0.15)
+
+
+def test_literature_eccentricity_for_the_wrong_planet_raises(tmp_path):
+    _write_hd219134(tmp_path, [2.97, 0.235, 0.145, 0.0647, 0.0384])
+    with pytest.raises(ValueError, match="HD 219134 b"):
+        su.post_sampler2(tmp_path, pd.DataFrame({"star_name": ["219134"]}),
+                         num_samples=5, include_ecc=True)
+
 # -- fit inputs -------------------------------------------------------------
 
 def test_marginal_factor_weights_draws_and_drops_zero_weight_draws():
