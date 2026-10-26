@@ -26,7 +26,14 @@ _TIER1_LATEX_PREFIXES = {
     "msini": "Msini",
     "qtrue": "Q",
     "qsini": "Qsini",
+    # Tier 1s whose x coordinate is orbital period
+    "mtrue_P": "McP",
+    "msini_P": "MsiniP",
+    "qtrue_P": "QP",
+    "qsini_P": "QsiniP",
 }
+_MASS_RATIO_TIER1S = {"qtrue", "qsini", "qtrue_P", "qsini_P"}
+_PERIOD_TIER1S = {"mtrue_P", "msini_P", "qtrue_P", "qsini_P"}
 
 # Models in the paper's order (Section 3.2, Table 1). Parameter macro names
 # spell out the paper's symbols: sigmoid B_1, B_2; log-linear C_1, C_2;
@@ -734,7 +741,7 @@ def _cdf_tick_formatter(tick_values, coordinate, tier1_names):
 
     if coordinate == "sma":
         return pu.sma_tick_formatter(tick_values)
-    if tier1_names <= {"qtrue", "qsini"}:
+    if tier1_names <= _MASS_RATIO_TIER1S:
         return pu.mass_ratio_tick_formatter(tick_values)
     return pu.mass_tick_formatter(tick_values)
 
@@ -1059,9 +1066,11 @@ def plot_model_cdf_comparison(
     if xlabel is None:
         if modeled == "e":
             xlabel = "Eccentricity"
+        elif coordinate == "sma" and tier1_names <= _PERIOD_TIER1S:
+            xlabel = "Orbital period [days]"
         elif coordinate == "sma":
             xlabel = "Semi-major axis [AU]"
-        elif tier1_names <= {"qtrue", "qsini"}:
+        elif tier1_names <= _MASS_RATIO_TIER1S:
             xlabel = r"Mass Ratio [$M_c/M_{\star}$]"
         else:
             xlabel = r"Companion mass [$M_{Jup}$]"

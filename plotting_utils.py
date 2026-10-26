@@ -100,7 +100,11 @@ def _adaptive_decimal_tick_formatter(tick_values, value_name):
         return decimal_label(value, required_precision)
 
     format_tick.decimal_places = required_precision
-    format_tick.rotate_labels = required_precision >= 2 or values.size > 8
+    # Rotate precise labels, many ticks, or long labels (e.g. periods of
+    # 10^4-10^5 days), which would otherwise run into each other
+    longest = max(len(label) for label in labels)
+    format_tick.rotate_labels = (required_precision >= 2 or values.size > 8
+                                 or longest*values.size > 30)
 
     return format_tick
 
@@ -275,10 +279,14 @@ def expand_ylim_for_legend(axis, step=1.08, max_steps=25):
     return max_steps
 
 
+# Axis label for each injection x column (see completeness_utils.X_COLUMNS)
+X_LABELS = {"inj_au": "$a$ [AU]", "inj_period": "$P$ [days]"}
+
+
 def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True, 
                          a_m_lims_pairs=None, summary_dict=None,
                          zoom=False,
-                         ycol='inj_msini', m_unit='earth'):
+                         ycol='inj_msini', m_unit='earth', xcol='inj_au'):
     """
     Adapted from RVSearch. Plot a completeness map using loaded
     xgrid, ygrid, and zgrid arrays.
@@ -396,7 +404,7 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
     cbar.set_label('probability of detection', size=16)
     cbar.ax.tick_params(labelsize=tick_size)
 
-    xlabel = '$a$ [AU]'
+    xlabel = X_LABELS[xcol]
 
     m_label = '[M$_\oplus$]' if m_unit=='earth' else '[M$_{Jup}$]' if m_unit=='jupiter' else None
     
@@ -457,7 +465,7 @@ def plot_catalog(tier1_dir, tier2_dir,
                  star_df=None, star_param=None,
                  fig_title='Average Completeness',
                  fig_savepath='catalog_and_completeness.png',
-                 ycol=None):
+                 ycol=None, xcol='inj_au'):
     """
     Plot the planet catalog over the avg. completeness map
     
@@ -467,6 +475,8 @@ def plot_catalog(tier1_dir, tier2_dir,
         catalog_path (str): Path to file holding companion samples
         ycol (str): Injection column for the y-axis, e.g. 'inj_mtrue'.
                     Defaults to 'inj_' + the last component of tier1_dir.
+        xcol (str): Injection column for the x-axis ('inj_au' or
+                    'inj_period'), which the catalog's x samples share.
     """
     
     ## Plot the completeness map first
@@ -498,7 +508,8 @@ def plot_catalog(tier1_dir, tier2_dir,
                             a_m_lims_pairs=a_m_lims_pairs,
                             zoom=zoom,
                             ycol=ycol,
-                            m_unit=m_unit)
+                            m_unit=m_unit,
+                            xcol=xcol)
     
 
     sampled_post_prior_compl_dict = dict(np.load(catalog_path))

@@ -1509,8 +1509,12 @@ def summarize_piecewise_file(
 
 def plot_catalog_roi_completeness(
         tier1_dir, tier2_dir, output_dir, a_edges, m_edges,
-        m_unit="earth", title="Occurrence fit"):
-    """Plot the catalog and fitted ROI without requiring a fitted model."""
+        m_unit="earth", title="Occurrence fit", mtype=None, xcol="inj_au"):
+    """Plot the catalog and fitted ROI without requiring a fitted model.
+
+    ``mtype`` sets the y column (``inj_<mtype>``; by default from the Tier 1
+    folder name) and ``xcol`` the x column ('inj_au' or 'inj_period').
+    """
     from occurrence import plotting_utils as pu
 
     output_dir = Path(output_dir)
@@ -1528,13 +1532,15 @@ def plot_catalog_roi_completeness(
         m_unit=m_unit,
         fig_title=title,
         fig_savepath=str(output_path),
+        ycol=None if mtype is None else f"inj_{mtype}",
+        xcol=xcol,
     )
     return str(output_path)
 
 
 def plot_roi_occurrence_completeness(
         tier1_dir, tier2_dir, output_dir, summary,
-        mtype="mtrue", m_unit="earth", title="Occurrence fit"):
+        mtype="mtrue", m_unit="earth", title="Occurrence fit", xcol="inj_au"):
     """Plot a piecewise occurrence summary over the average completeness map."""
     from occurrence import plotting_utils as pu
 
@@ -1557,6 +1563,7 @@ def plot_roi_occurrence_completeness(
         zoom=True,
         ycol=f"inj_{mtype}",
         m_unit=m_unit,
+        xcol=xcol,
     )
     return str(output_path)
 
@@ -1579,8 +1586,13 @@ def plot_piecewise_results(
         occurrence_legend_loc="upper right",
         tier1_dir=None,
         tier2_dir=None,
-        summary=None):
-    """Load a direct fit and save the requested result plots."""
+        summary=None,
+        xcol="inj_au"):
+    """Load a direct fit and save the requested result plots.
+
+    ``xcol`` is the injection x column of the Tier 1 maps ('inj_au' or
+    'inj_period'), used to label the completeness-map plots.
+    """
     from occurrence import plotting_utils as pu
 
     if stack_dim not in {"a", "m"}:
@@ -1699,6 +1711,8 @@ def plot_piecewise_results(
             m_edges=m_edges,
             m_unit=m_unit,
             title=title,
+            mtype=mtype,
+            xcol=xcol,
         )
     if plot_roi_occurrence:
         paths["roi_occurrence"] = plot_roi_occurrence_completeness(
@@ -1708,6 +1722,7 @@ def plot_piecewise_results(
             mtype=mtype,
             m_unit=m_unit,
             title=title,
+            xcol=xcol,
         )
     return paths
 

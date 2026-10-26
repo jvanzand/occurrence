@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+from occurrence import completeness_utils as cu
 from occurrence import plotting_utils as pu
 from occurrence import convergence
 from occurrence import dimensions as dm
@@ -20,11 +21,18 @@ from occurrence import sampling_utils as su
 plt.style.use(os.path.join(os.path.dirname(__file__), 'matplotlibrc'))
 
 
+# Each Tier 1 sets its y coordinate (mass "m" or mass ratio "q", true or
+# minimum) and its x coordinate: semi-major axis "a" (AU) or orbital period
+# "p" (days). Period Tier 1s take period edges in a_edges.
 DEFAULT_TIER1_DEFINITIONS = {
-    "mtrue": {"m_or_q": "m", "true_or_sini": "true"},
-    "msini": {"m_or_q": "m", "true_or_sini": "sini"},
-    "qtrue": {"m_or_q": "q", "true_or_sini": "true"},
-    "qsini": {"m_or_q": "q", "true_or_sini": "sini"},
+    "mtrue": {"m_or_q": "m", "true_or_sini": "true", "a_or_p": "a"},
+    "msini": {"m_or_q": "m", "true_or_sini": "sini", "a_or_p": "a"},
+    "qtrue": {"m_or_q": "q", "true_or_sini": "true", "a_or_p": "a"},
+    "qsini": {"m_or_q": "q", "true_or_sini": "sini", "a_or_p": "a"},
+    "mtrue_P": {"m_or_q": "m", "true_or_sini": "true", "a_or_p": "p"},
+    "msini_P": {"m_or_q": "m", "true_or_sini": "sini", "a_or_p": "p"},
+    "qtrue_P": {"m_or_q": "q", "true_or_sini": "true", "a_or_p": "p"},
+    "qsini_P": {"m_or_q": "q", "true_or_sini": "sini", "a_or_p": "p"},
 }
 def _tier1_definition(label, definitions):
     try:
@@ -40,6 +48,10 @@ def _tier1_definition(label, definitions):
         raise ValueError(
             f"Tier 1 {label!r} must define true_or_sini as 'true' or 'sini'"
         )
+    # Definitions written before periods were supported use semi-major axis
+    definition.setdefault("a_or_p", "a")
+    if definition["a_or_p"] not in {"a", "p"}:
+        raise ValueError(f"Tier 1 {label!r} must define a_or_p as 'a' or 'p'")
     return definition
 
 
@@ -67,16 +79,18 @@ def _format_subsample_title(title):
 
 
 _FUNCTION_NAMES = {"a": "SMA Function", "m": "Mass Function",
-                   "e": "Eccentricity Function"}
+                   "e": "Eccentricity Function", "p": "Period Function"}
 
 
-def _occurrence_function_title(stack_dim, subsample_title="", spec=None):
+def _occurrence_function_title(stack_dim, subsample_title="", spec=None,
+                               a_or_p="a"):
     """Return the title for the coordinate left unstacked in the plot."""
     if spec is not None and not spec.legacy:
         fitted = spec.x if stack_dim == "m" else spec.y
         function_name = _FUNCTION_NAMES[fitted]
     else:
-        function_name = "SMA Function" if stack_dim == "m" else "Mass Function"
+        function_name = (_FUNCTION_NAMES[a_or_p] if stack_dim == "m"
+                         else "Mass Function")
     if subsample_title:
         function_name += f" ({subsample_title})"
     return function_name
@@ -115,6 +129,7 @@ def make_tier1(tier1_config, star_df_full, recoveries_dir,
                                recoveries_mtype=recoveries_mtype,
                                m_dir_to_make_q=m_dir_to_make_q,
                                tier1_kind=y_param,
+                               keep_period=getattr(t1, "a_or_p", "a") == "p",
                                )
     main.prep_maps(tier1_dir=t1.t1_dir,
                    star_df=star_df_full,
@@ -122,7 +137,8 @@ def make_tier1(tier1_config, star_df_full, recoveries_dir,
                    m_unit=t1.mass_unit,
                    avg_map_only=avg_map_only,
                    save_single_plots=save_single_plots,
-                   tier1_kind=y_param)
+                   tier1_kind=y_param,
+                   xcol=cu.X_COLUMNS[getattr(t1, "a_or_p", "a")])
     return
 
 
@@ -176,7 +192,8 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
                               star_df=star_df_compl,
                               ycol=ycol,
                               m_unit=t2.t1_mass_unit,
-                              tier1_kind=y_param)
+                              tier1_kind=y_param,
+                              xcol=cu.X_COLUMNS[getattr(t2, "t1_a_or_p", "a")])
 
         main.prep_post_draws(tier1_dir=t2.t1_dir,
                              tier2_dir=t2.t2_dir,
@@ -185,7 +202,8 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
                              saved_maps_dir=saved_maps_dir, m_unit=t2.t1_mass_unit,
                              avg_map_only=avg_map_only,
                              fill_single_nan_with_average=fill_single_nan_with_average,
-                             tier1_kind=y_param)
+                             tier1_kind=y_param,
+                             x_param=getattr(t2, "t1_a_or_p", "a"))
                              
         ## Plot companion catalog
         catalog_path = os.path.join(t2.t1_dir, t2.t2_dir, 'sampled_post_prior_compl.npz')
@@ -195,7 +213,8 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
                         catalog_path=catalog_path,
                         m_unit=t2.t1_mass_unit, fig_title=f'Average Completeness for {nstars} Stars',
                         fig_savepath=plot_save_path,
-                        ycol=ycol)
+                        ycol=ycol,
+                        xcol=cu.X_COLUMNS[getattr(t2, "t1_a_or_p", "a")])
         ##########################
     
     return
@@ -449,10 +468,17 @@ def run_multiple(
                 f"{tier1_label}: explicit dimension roles support mass "
                 "(mtrue, msini) Tier 1 folders, not mass ratio, so far"
             )
+        if not spec.legacy and definition["a_or_p"] != "a":
+            raise NotImplementedError(
+                f"{tier1_label}: explicit dimension roles support "
+                "semi-major axis, not period, so far (the population "
+                "distribution in a has no period counterpart yet)"
+            )
         tier1_configurations.append({
             "mass_unit": mass_unit,
             "m_or_q": m_or_q,
             "true_or_sini": true_or_sini,
+            "a_or_p": definition["a_or_p"],
             "t1_dir": tier1_dir,
             "t1_label": tier1_label,
         })
@@ -540,6 +566,7 @@ def run_multiple(
                 "t1_mass_unit": mass_unit,
                 "t1_true_or_sini": true_or_sini,
                 "t1_m_or_q": m_or_q,
+                "t1_a_or_p": definition["a_or_p"],
                 "spec": spec,
             })
             for tier3_dir in tier3_labels:
@@ -550,6 +577,7 @@ def run_multiple(
                     "tier1_dir": tier1_dir,
                     "tier1_label": tier1_label,
                     "tier1_kind": f"{m_or_q}{true_or_sini}",
+                    "tier1_a_or_p": definition["a_or_p"],
                     "tier2_dir": tier2_dir,
                     "tier3_dir": tier3_dir,
                     "tier3_exists": os.path.isdir(tier3_path),
@@ -734,7 +762,8 @@ def _run_configuration(configuration):
     }
     subsample_title = _format_subsample_title(configuration["title"]).strip()
     title = _occurrence_function_title(
-        configuration["stack_dim"], subsample_title, configuration["spec"]
+        configuration["stack_dim"], subsample_title, configuration["spec"],
+        configuration.get("tier1_a_or_p", "a"),
     )
     early_plot_paths = {}
     roi_occurrence_future = None
@@ -776,6 +805,8 @@ def _run_configuration(configuration):
                     m_edges=configuration["m_edges"],
                     m_unit=configuration["m_unit"],
                     title=title,
+                    mtype=configuration["tier1_kind"],
+                    xcol=cu.X_COLUMNS[configuration.get("tier1_a_or_p", "a")],
                 )
             )
         for model_index, model_name in enumerate(run_models):
@@ -855,11 +886,10 @@ def _run_configuration(configuration):
                             configuration["tier3_dir"], "plots",
                         ),
                         summary,
-                        os.path.basename(os.path.normpath(
-                            configuration["tier1_dir"]
-                        )),
+                        configuration["tier1_kind"],
                         configuration["m_unit"],
                         title,
+                        cu.X_COLUMNS[configuration.get("tier1_a_or_p", "a")],
                     )
             elif model_name in mcmc.SMOOTH_MODELS:
                 amplitude_key = {
@@ -935,7 +965,8 @@ def _run_configuration(configuration):
 
     if configuration["make_plots"] and configuration["plot_models"]:
         with pu.axis_style(**_axis_style(configuration["spec"],
-                                         configuration["stack_dim"])):
+                                         configuration["stack_dim"],
+                                         configuration.get("tier1_a_or_p", "a"))):
             result["plots"] = _plot_models(configuration, title,
                                            early_plot_paths)
         if early_plot_paths:
@@ -981,6 +1012,8 @@ def _plot_models(configuration, title, early_plot_paths):
         model_plot_style=configuration["model_plot_style"],
         n_posterior_draws=configuration["n_posterior_draws"],
         plot_random_seed=configuration["plot_random_seed"],
+        mtype=configuration["tier1_kind"],
+        xcol=cu.X_COLUMNS[configuration.get("tier1_a_or_p", "a")],
     )
 
 
@@ -992,14 +1025,15 @@ _DENSITY_UNITS = {"a": r"\Delta \log a", "m": r"\Delta \log M_c",
 _STACK_NAMES = {"a": ("a", "AU"), "m": ("M_c", r"M_{Jup}"), "e": ("e", "")}
 
 
-def _axis_style(spec, stack_dim):
-    """Plot overrides for a run's spec (empty for legacy runs).
+def _axis_style(spec, stack_dim, a_or_p="a"):
+    """Plot overrides for a run's spec and x coordinate.
 
     Names the modeled and stacked dimensions, writes the density units, and
     labels eccentricity ticks with e rather than the engine's u = 10**e.
+    Legacy runs need overrides only when x is orbital period.
     """
     if spec is None or spec.legacy:
-        return {}
+        return _period_axis_style(stack_dim) if a_or_p == "p" else {}
     modeled = spec.x if stack_dim == "m" else spec.y
     stacked = spec.y if stack_dim == "m" else spec.x
     style = {
@@ -1021,6 +1055,16 @@ def _axis_style(spec, stack_dim):
 
     style["stack_label"] = stack_label
     return style
+
+
+def _period_axis_style(stack_dim):
+    """Plot overrides for legacy runs whose x coordinate is orbital period."""
+    if stack_dim == "m":
+        return {"x_label": "Orbital period [days]"}
+
+    def stack_label(low, high):
+        return rf"$P$={low:g}-{high:g} days"
+    return {"stack_label": stack_label}
 
 
 def _progress_line(index, total, result):

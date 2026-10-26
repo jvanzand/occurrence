@@ -9,7 +9,11 @@ point-process likelihood to the unbinned posterior samples, with a piecewise-con
 Results are organized in three tiers beneath an output directory:
 
 1. **Tier 1** (`mtrue`, `msini`, `qtrue`, `qsini`): per-star completeness maps in the chosen mass
-   or mass-ratio coordinate, built from each system's `recoveries.csv`.
+   or mass-ratio coordinate, built from each system's `recoveries.csv`. The `_P` variants
+   (`mtrue_P`, `msini_P`, `qtrue_P`, `qsini_P`) use orbital period in days instead of
+   semi-major axis; give period edges in `a_edges`. Injections use their injected periods,
+   and companion draws are converted with Kepler's third law (host mass from the star
+   catalog plus each draw's companion mass).
 2. **Tier 2** (one folder per stellar sample): the sample's average completeness map and its
    companion posterior draws, each with its interim prior and completeness.
 3. **Tier 3** (one folder per run): MCMC fits, summaries, and plots for the chosen bins and models.

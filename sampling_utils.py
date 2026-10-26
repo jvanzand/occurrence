@@ -53,6 +53,26 @@ LITERATURE_ECCENTRICITIES = {
 LITERATURE_A_TOLERANCE = 1.25
 
 
+def orbital_period(a_au, m, mstar, m_unit):
+    """Orbital period in days from Kepler's third law.
+
+    ``a_au`` is the semi-major axis in AU, ``m`` the companion mass in
+    ``m_unit`` ('earth', 'jupiter', or 'solar'), and ``mstar`` the host mass
+    in M_sun; the total mass sets the period. This is the inverse of
+    ``radvel_borrowed.semi_major_axis``, so periods and semi-major axes agree
+    between companions and injections.
+    """
+    solar_masses = {"earth": 1/Ms2Me, "jupiter": 1/Ms2Mj, "solar": 1.0}
+    try:
+        m_solar = np.asarray(m, dtype=float)*solar_masses[m_unit]
+    except KeyError:
+        raise ValueError("m_unit must be 'earth', 'jupiter', or 'solar'")
+    total_mass = (np.asarray(mstar, dtype=float) + m_solar)*c.M_sun.value
+    a_m = np.asarray(a_au, dtype=float)*c.au.value
+    period_s = 2*np.pi*np.sqrt(a_m**3/(c.G.value*total_mass))
+    return period_s/86400.0
+
+
 def split_normal_draws(median, minus, plus, size, low=0.0, high=1.0,
                        rng=None):
     """Draw from a split normal (different widths below and above the

@@ -46,7 +46,8 @@ def build_interpolators(maps_dir, star_subset):
     return
 
 
-def average_map(maps_dir, avg_map_dir, star_subset, ycol='inj_msini', m_unit='earth'):
+def average_map(maps_dir, avg_map_dir, star_subset, ycol='inj_msini', m_unit='earth',
+                xcol='inj_au'):
     """
     Load interpolators, compute average completeness map, and save outputs.
     """
@@ -149,17 +150,22 @@ def average_map(maps_dir, avg_map_dir, star_subset, ycol='inj_msini', m_unit='ea
     plot_utils.completeness_plotter(
         parent_xgrid, parent_ygrid, parent_zgrid,
         plot_save_path, 'Average Completeness',
-        save_plot=True, ycol=ycol, m_unit=m_unit
+        save_plot=True, ycol=ycol, m_unit=m_unit, xcol=xcol
     )
 
     return
 
 
 
+# Injection column for each x coordinate a Tier 1 can use: semi-major axis
+# (AU) or orbital period (days, as injected)
+X_COLUMNS = {"a": "inj_au", "p": "inj_period"}
+
+
 def single_map_maker(system_name, recoveries_path, save_dir, mstar, 
                      ycol='inj_msini', m_unit='earth', 
                      fill_nans=True, trends_count=False,
-                     save_plot=False):
+                     save_plot=False, xcol='inj_au'):
     """
     Calculate completeness map from a recoveries.csv file
     and save the map, plus x, y, and z grids used to plot.
@@ -175,8 +181,7 @@ def single_map_maker(system_name, recoveries_path, save_dir, mstar,
     os.makedirs(save_dir, exist_ok=True)
 
 
-    xcol = 'inj_au'
-    xlabel = '$a$ [AU]'
+    xlabel = plot_utils.X_LABELS[xcol]
     
     m_label = '[M$_\oplus$]' if m_unit=='earth' else '[M$_{Jup}$]' if m_unit=='jupiter' else None
     
@@ -224,7 +229,7 @@ def _process_single_star(args):
     Wraps single_map_maker() above
     """
     (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit,
-     avg_map_only, save_single_plots) = args
+     avg_map_only, save_single_plots, maps_xcol) = args
 
     starname = row.star_name
     mstar = row.Mstar
@@ -246,12 +251,13 @@ def _process_single_star(args):
         m_unit=m_unit,
         fill_nans=True,
         save_plot=save_single_plots,
+        xcol=maps_xcol,
     )
     
     return
 
 
-def recs_msini_converter(recoveries_path, save_file):
+def recs_msini_converter(recoveries_path, save_file, keep_period=False):
     """
     Convert a recoveries.csv file from Msini to Mtrue by
     marginalizing over inclination
@@ -259,6 +265,7 @@ def recs_msini_converter(recoveries_path, save_file):
     Arguments:
         recoveries_path (str): Path to a single recoveries.csv file
         save_file (str): Path to save new recoveries.csv file
+        keep_period (bool): Also keep inj_period, for period-based Tier 1s
 
     """
     save_dir = Path(save_file).parent # Ensure save file location exists
@@ -281,6 +288,11 @@ def recs_msini_converter(recoveries_path, save_file):
 
     labels = ['inj_mtrue', 'inj_au', 'inj_e', 'recovered'] # Leave msini label for compatibility
     vals = [m_true, au, ecc, recovered]
+    # Period-based Tier 1s also need the injected period; inclination does
+    # not change it. Other runs omit it so their files stay as before.
+    if keep_period:
+        labels.append('inj_period')
+        vals.append(recs_orig['inj_period'].repeat(ndraws))
     mtrue_recs = pd.DataFrame({label:val for label, val in zip(labels,vals)})
 
     mtrue_recs.to_csv(save_file, index=False)

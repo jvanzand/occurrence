@@ -36,9 +36,11 @@ class Completeness(object):
 
 
         #########################################################################################
-        # Do the below only when inj_period is in the columns
-        # Why? inj_period is only missing when inj_mtrue has already been added, and at that point, msini is not needed so skip the block below
-        if 'inj_period' in self.recoveries.columns and 'inj_msini' not in self.recoveries.columns:
+        # Do the below only for raw injection files (with inj_k) that lack
+        # inj_msini. Converted files (true mass, mass ratio) skip it; they
+        # keep inj_period only when a period-based Tier 1 needs it.
+        if ({'inj_period', 'inj_k'} <= set(self.recoveries.columns)
+                and 'inj_msini' not in self.recoveries.columns):
             if mstar is not None:
 
                 self.mstar = np.zeros_like(self.recoveries['inj_period']) + mstar

@@ -24,6 +24,7 @@ def prep_recoveries_files(tier1_dir,
                           recoveries_mtype,
                           m_dir_to_make_q=None,
                           tier1_kind=None,
+                          keep_period=False,
                           ):
     """
     Prepare recoveries.csv files for occurrence
@@ -42,6 +43,8 @@ def prep_recoveries_files(tier1_dir,
                           files are stored
         m_dir_to_make_q (str): Directory to find mass recoveries files, which
                           can be used to calculate mass ratio q
+        keep_period (bool): Keep inj_period in the converted files, for
+                          Tier 1s whose x coordinate is orbital period
     """
 
     
@@ -53,13 +56,16 @@ def prep_recoveries_files(tier1_dir,
                 recoveries_file = os.path.join(master_rec_dir, starname+'_recoveries.csv')
                 mtrue_recoveries_save_file = os.path.join(tier1_dir, 'mtrue_recoveries/', starname+'_recoveries.csv')
             
-                cu.recs_msini_converter(recoveries_file, mtrue_recoveries_save_file)
+                cu.recs_msini_converter(recoveries_file, mtrue_recoveries_save_file,
+                                        keep_period=keep_period)
             
         else:
             os.makedirs(
                 os.path.join(tier1_dir, 'msini_recoveries'), exist_ok=True
             )
             keep_cols = ['inj_msini', 'inj_au', 'inj_e', 'recovered']
+            if keep_period:
+                keep_cols.append('inj_period')
             for starname in star_df.star_name:
                 recoveries_file = os.path.join(master_rec_dir, starname+'_recoveries.csv')
                 msini_recoveries_save_file = os.path.join(tier1_dir, 'msini_recoveries/', starname+'_recoveries.csv')
@@ -116,7 +122,8 @@ def prep_maps(tier1_dir,
               m_unit='earth',
               avg_map_only=False,
               save_single_plots=False,
-              tier1_kind=None):
+              tier1_kind=None,
+              xcol='inj_au'):
     """
     Prepare both single-system and average completeness 
     maps and calculate corresponding interpolation
@@ -154,7 +161,7 @@ def prep_maps(tier1_dir,
 
     args_list = [
         (row, path_to_recoveries, maps_save_path, maps_ycol, m_unit,
-         avg_map_only, save_single_plots)
+         avg_map_only, save_single_plots, xcol)
         for _, row in star_df.iterrows()
         ]
 
@@ -172,7 +179,8 @@ def make_average_map(tier1_dir, tier2_dir,
                      star_df,
                      ycol,
                      m_unit='earth',
-                     tier1_kind=None):
+                     tier1_kind=None,
+                     xcol='inj_au'):
     """
     Calculate average map from a subset of
     pre-computed completeness maps
@@ -182,10 +190,41 @@ def make_average_map(tier1_dir, tier2_dir,
     path_to_maps = os.path.join(tier1_dir, f"saved_maps_{tier1_label}")
     avg_map_dir = os.path.join(tier1_dir, tier2_dir, 'avg_map/')
     
-    cu.average_map(path_to_maps, avg_map_dir, star_df.star_name.to_list(), ycol=ycol, m_unit=m_unit)
+    cu.average_map(path_to_maps, avg_map_dir, star_df.star_name.to_list(), ycol=ycol, m_unit=m_unit,
+                   xcol=xcol)
     
     return
     
+def periods_from_samples(post_sample_dict, star_df, m_unit):
+    """Replace each companion's semi-major axis samples (AU) with periods.
+
+    Kepler's third law with the host mass from ``star_df`` and each draw's
+    companion mass. Only the drawn samples are converted (500 per companion
+    in prep_post_draws), not the full posterior chains. ``m_unit`` None
+    means masses in M_sun, as the samplers return for mass-ratio Tier 1s.
+    """
+    converted = {}
+    for comp_name, samples in post_sample_dict.items():
+        mstar = _host_mass(star_df, comp_name)
+        converted[comp_name] = np.array([
+            su.orbital_period(samples[0], samples[1], mstar,
+                              m_unit or 'solar'),
+            samples[1],
+        ])
+    return converted
+
+
+def _host_mass(star_df, comp_name):
+    """Return the stellar mass (M_sun) of the star hosting ``comp_name``."""
+    rows = star_df[star_df['comp_list'].apply(lambda names: comp_name in names)]
+    if len(rows) != 1:
+        raise ValueError(
+            f"{comp_name} must belong to exactly one star in star_df; "
+            f"found {len(rows)}"
+        )
+    return float(rows.Mstar.iloc[0])
+
+
 def prep_post_draws(tier1_dir, tier2_dir,
                     star_df, comp_post_dir,
                     sampling_func,
@@ -193,7 +232,8 @@ def prep_post_draws(tier1_dir, tier2_dir,
                     fig_title='Catalog Posteriors',
                     avg_map_only=False,
                     fill_single_nan_with_average=True,
-                    tier1_kind=None):
+                    tier1_kind=None,
+                    x_param='a'):
 
     """
     Sample from companion posteriors according to user-specified
@@ -212,6 +252,13 @@ def prep_post_draws(tier1_dir, tier2_dir,
             convention depends on custom post sampling function
         sampling_func (function): Function from sampling_utils.py
                              that samples posteriors
+        x_param (str): 'a' keeps the semi-major axis samples (AU); 'p'
+                             replaces them with orbital periods (days) from
+                             Kepler's third law, using the host mass in
+                             star_df and each draw's companion mass. The
+                             log-uniform interim prior in a is also
+                             log-uniform in P (constant Jacobian, 3/2), so
+                             the prior values are unchanged.
     """
     
     #### CUSTOMIZE your own sampler to match the posterior format ####
@@ -224,6 +271,12 @@ def prep_post_draws(tier1_dir, tier2_dir,
         saved_maps_dir = os.path.join(
             tier1_dir, f"saved_maps_{tier1_label}"
         )
+    if x_param == 'p':
+        # Before any conversion of mass to mass ratio
+        post_sample_dict = periods_from_samples(post_sample_dict, star_df,
+                                                m_unit)
+    elif x_param != 'a':
+        raise ValueError("x_param must be 'a' or 'p'")
     if 'q' in tier1_label:
 
         for comp_name in post_sample_dict.keys():
@@ -359,7 +412,8 @@ def plot_piecewise(
         plot_catalog_roi=False,
         plot_roi_occurrence=False,
         plot_uncorrected_occurrence_mle=False,
-        occurrence_legend_loc="upper right"):
+        occurrence_legend_loc="upper right",
+        xcol='inj_au'):
     """Load and plot a saved direct piecewise-constant fit."""
     base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
     if mtype is None:
@@ -386,6 +440,7 @@ def plot_piecewise(
         occurrence_legend_loc=occurrence_legend_loc,
         tier1_dir=tier1_dir,
         tier2_dir=tier2_dir,
+        xcol=xcol,
     )
 
 
@@ -408,8 +463,13 @@ def plot_smooth(
         plot_random_seed=None,
         plot_uncorrected_occurrence_mle=False,
         nstars=None,
-        occurrence_legend_loc="upper right"):
-    """Load, plot, and save one smooth direct model."""
+        occurrence_legend_loc="upper right",
+        mtype=None):
+    """Load, plot, and save one smooth direct model.
+
+    ``mtype`` is the Tier 1 mass type ('mtrue', 'msini', 'qtrue', 'qsini');
+    by default it is the Tier 1 folder name.
+    """
     import matplotlib.pyplot as plt
 
     base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
@@ -460,7 +520,7 @@ def plot_smooth(
         figures=figures, output_dir=os.path.join(base_dir, 'plots'),
         stack_dim=stack_dim, model_edges=model_edges, title=title,
         m_unit=m_unit,
-        mtype=os.path.basename(os.path.normpath(tier1_dir)),
+        mtype=mtype or os.path.basename(os.path.normpath(tier1_dir)),
         occurrence_legend_loc=occurrence_legend_loc,
     ))
     return paths
@@ -487,8 +547,14 @@ def plot_models(
         n_posterior_draws=100,
         plot_random_seed=None,
         plot_uncorrected_occurrence_mle=False,
-        occurrence_legend_loc="upper right"):
-    """Plot selected direct models together while retaining separate corners."""
+        occurrence_legend_loc="upper right",
+        mtype=None,
+        xcol='inj_au'):
+    """Plot selected direct models together while retaining separate corners.
+
+    ``mtype`` is the Tier 1 mass type (by default the Tier 1 folder name) and
+    ``xcol`` its injection x column ('inj_au' or 'inj_period').
+    """
     selected = list(plot_models)
     supported = {'piecewise'} | mcmc.SMOOTH_MODELS
     unknown = set(selected) - supported
@@ -504,6 +570,8 @@ def plot_models(
             plot_roi_occurrence=plot_roi_occurrence,
             plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
             occurrence_legend_loc=occurrence_legend_loc,
+            mtype=mtype,
+            xcol=xcol,
         )
     if len(selected) == 1 and selected[0] != 'piecewise':
         return plot_smooth(
@@ -520,11 +588,12 @@ def plot_models(
             plot_uncorrected_occurrence_mle=plot_uncorrected_occurrence_mle,
             nstars=nstars,
             occurrence_legend_loc=occurrence_legend_loc,
+            mtype=mtype,
         )
     base_dir = os.path.join(tier1_dir, tier2_dir, tier3_dir)
     base_figures = {}
     model_edges = m_edges if stack_dim == 'a' else a_edges
-    mtype = os.path.basename(os.path.normpath(tier1_dir))
+    mtype = mtype or os.path.basename(os.path.normpath(tier1_dir))
     paths = {}
     if 'piecewise' in selected:
         fit_path = os.path.join(
@@ -560,7 +629,7 @@ def plot_models(
             plot_catalog_roi=plot_catalog_roi,
             plot_roi_occurrence=plot_roi_occurrence,
             tier1_dir=tier1_dir, tier2_dir=tier2_dir,
-            summary=summary,
+            summary=summary, xcol=xcol,
         )
     else:
         import matplotlib.pyplot as plt
