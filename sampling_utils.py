@@ -19,18 +19,18 @@ Ms2Mj = (c.M_sun/c.M_jup).value
 # (posterior file stem, companion index). The files order companions by
 # semi-major axis (inner first), not by planet letter, so each entry also
 # gives the planet's literature semi-major axis: post_sampler2 checks it
-# against the file's samples and raises if they disagree. The GL 876 and
-# HD 28185 b semi-major axes are standard literature values, not taken from
-# the CLS table. Values are
-# (median e, minus error, plus error, literature a [AU] or None, source).
+# against the file's samples and raises if they disagree. All values are
+# from the CLS tables (GL 876, HD 219134) and the HD 28185 joint
+# RV-astrometry fit (Model 1, adopted). Values are
+# (median e, minus error, plus error, literature a [AU], source).
 LITERATURE_ECCENTRICITIES = {
-    ("GL876", 0): (0.273, 0.098, 0.093, 0.0208, "GL 876 d, CLS I table"),
-    ("GL876", 1): (0.0055, 0.0040, 0.0064, 0.130,
+    ("GL876", 0): (0.273, 0.098, 0.093, 0.02183,
+                   "GL 876 d, CLS table (reference not listed)"),
+    ("GL876", 1): (0.0055, 0.0040, 0.0064, 0.1363,
                    "GL 876 c, Marcy et al. (2001)"),
-    ("GL876", 2): (0.0019, 0.0013, 0.0022, 0.208,
+    ("GL876", 2): (0.0019, 0.0013, 0.0022, 0.2177,
                    "GL 876 b, Marcy et al. (1998)"),
-    # HD 219134: index 0 is the innermost companion. a and e are from the
-    # CLS table, which cites Vogt et al. (2015); planet letters differ
+    # HD 219134: index 0 is the innermost companion; planet letters differ
     # between sources, so only a is used to match.
     ("HD219134", 0): (0.063, 0.045, 0.070, 0.03838,
                       "HD 219134_0, Vogt et al. (2015)"),
@@ -42,10 +42,9 @@ LITERATURE_ECCENTRICITIES = {
                       "HD 219134_3, Vogt et al. (2015)"),
     ("HD219134", 4): (0.025, 0.018, 0.027, 2.968,
                       "HD 219134_4, Vogt et al. (2015)"),
-    ("HD28185", 0): (0.063, 0.004, 0.004, 1.03,
+    ("HD28185", 0): (0.063, 0.004, 0.004, 1.034,
                      "HD 28185 b, joint RV-astrometry fit (Model 1)"),
-    # Semi-major axis not yet recorded; the file's outer companion (8.5 AU)
-    ("HD28185", 1): (0.15, 0.04, 0.04, None,
+    ("HD28185", 1): (0.15, 0.04, 0.04, 8.50,
                      "HD 28185 c, joint RV-astrometry fit (Model 1)"),
 }
 # Largest ratio between a posterior file's median semi-major axis and the
@@ -153,8 +152,7 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth',
                         LITERATURE_ECCENTRICITIES[(sys_name, comp_ind)]
                     )
                     sample_a = np.median(chain_dict[f'sau{comp_ind}'])
-                    if literature_a is not None and not (
-                            1/LITERATURE_A_TOLERANCE
+                    if not (1/LITERATURE_A_TOLERANCE
                             <= sample_a/literature_a
                             <= LITERATURE_A_TOLERANCE):
                         raise ValueError(
