@@ -339,6 +339,48 @@ def _trapezoid_weights(coordinates):
     return weights
 
 
+def _invalid_cell_message(companion, cell_index, in_cell, mask, x_edges,
+                          y_edges):
+    """Describe a companion whose draws in one cell have no usable weight.
+
+    The cell's draws all have completeness/prior of zero (or it is not
+    finite). The message names the cell's bounds, counts and ranges its
+    draws, and lists likely causes, so the failing inputs can be identified
+    from the traceback alone.
+    """
+    y_bin, x_bin = divmod(int(cell_index), x_edges.size - 1)
+    x = companion.x_samples[mask][in_cell]
+    y = companion.y_samples[mask][in_cell]
+    ratios = companion.completeness_over_prior[mask][in_cell]
+    completeness = companion.completeness[mask][in_cell]
+    all_x, all_y = companion.x_samples, companion.y_samples
+    in_roi = np.count_nonzero(mask)
+    return (
+        f"{companion.name} has invalid completeness/prior in cell "
+        f"{cell_index} (x bin {x_bin}: {x_edges[x_bin]:.6g}-"
+        f"{x_edges[x_bin + 1]:.6g}; y bin {y_bin}: {y_edges[y_bin]:.6g}-"
+        f"{y_edges[y_bin + 1]:.6g}).\n"
+        f"  {x.size} of {all_x.size} posterior draws fall in this cell "
+        f"({in_roi} are inside the ROI). Their mean completeness/prior is "
+        f"{np.mean(ratios):.4g}: {np.count_nonzero(ratios == 0)} draws are "
+        f"exactly zero, {np.count_nonzero(~np.isfinite(ratios))} are not "
+        f"finite, completeness ranges {np.nanmin(completeness):.4g}-"
+        f"{np.nanmax(completeness):.4g}.\n"
+        f"  Draws in the cell span x = {x.min():.6g}-{x.max():.6g}, "
+        f"y = {y.min():.6g}-{y.max():.6g}; all of this companion's draws "
+        f"have median x = {np.median(all_x):.6g} (16-84%: "
+        f"{np.percentile(all_x, 16):.6g}-{np.percentile(all_x, 84):.6g}) "
+        f"and median y = {np.median(all_y):.6g} (16-84%: "
+        f"{np.percentile(all_y, 16):.6g}-{np.percentile(all_y, 84):.6g}).\n"
+        "  Completeness is exactly zero where nothing was recovered or "
+        "outside the host's injection grid. Check that the Tier 1 maps and "
+        "the Tier 2 catalog use the same coordinates and units (period vs "
+        "semi-major axis, mass vs mass ratio) and were built by the same "
+        "version of the code, and that this companion's posterior and the "
+        "host's mass match your other machine."
+    )
+
+
 def build_piecewise_cache(companions, exposure, x_edges, y_edges):
     """Precompute all fixed terms in the piecewise-constant likelihood."""
     x_edges = _validate_edges(x_edges, "x_edges")
@@ -383,9 +425,9 @@ def build_piecewise_cache(companions, exposure, x_edges, y_edges):
             cell_weight = np.count_nonzero(in_cell)/companion.original_sample_count
             mean_ratio = np.mean(ratios[in_cell])
             if not np.isfinite(mean_ratio) or mean_ratio <= 0:
-                raise ValueError(
-                    f"{companion.name} has invalid completeness/prior in cell {cell_index}"
-                )
+                raise ValueError(_invalid_cell_message(
+                    companion, cell_index, in_cell, mask, x_edges, y_edges
+                ))
             effective_counts[cell_index] += cell_weight
             log_weight_constant += cell_weight*np.log(mean_ratio)
 

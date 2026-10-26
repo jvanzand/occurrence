@@ -218,3 +218,24 @@ def test_sigmoid_plateaus_and_midpoint():
     assert values[0] == pytest.approx(0.1)
     assert values[1] == pytest.approx(0.3)
     assert values[2] == pytest.approx(0.5)
+
+
+def test_invalid_cell_error_describes_the_cell_and_its_draws():
+    """A cell whose draws all have zero completeness explains itself."""
+    companion = dfu.prepare_companion_samples(
+        name="b", x_samples=[2.0, 2.0, 7.0], y_samples=[2.0, 3.0, 4.0],
+        completeness=[0.5, 0.0, 0.0], interim_prior=[1.0, 1.0, 1.0],
+        x_bounds=(1.0, 10.0), y_bounds=(1.0, 10.0),
+    )
+    with pytest.raises(ValueError) as error:
+        dl.build_piecewise_cache(
+            {"b": companion}, _exposure(), np.array([1.0, 5.0, 10.0]),
+            np.array([1.0, 10.0]),
+        )
+    message = str(error.value)
+    assert "b has invalid completeness/prior in cell 1" in message
+    assert "x bin 1: 5-10; y bin 0: 1-10" in message
+    assert "1 of 3 posterior draws fall in this cell (3 are inside" in message
+    assert "1 draws are exactly zero" in message
+    assert "x = 7-7, y = 4-4" in message
+    assert "period vs semi-major axis" in message
