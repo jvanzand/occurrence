@@ -547,6 +547,12 @@ def test_draws_fall_back_to_the_full_sample_average(tmp_path):
     assert json.loads(str(catalog[main.FALLBACKS_KEY])) == {
         "sample_average": 2, "full_sample_average": {"c": 2},
     }
+    # When the subsample is the full sample, nothing changes or is counted
+    _, _, unchanged = main.weigh_dimension_samples(
+        spec, {"c": [a, m, e]}, star_df, tmp_path, average,
+        full_average=average,
+    )
+    assert unchanged == {}
 
 
 def test_catalogs_without_fallback_counts_are_rebuilt(tmp_path):

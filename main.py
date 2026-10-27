@@ -952,9 +952,14 @@ def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
                         ~(host_completeness > 0) &
                         np.isfinite(full_completeness)
                     )
+                    # Count only draws whose value changes (a subsample
+                    # that is the full sample changes none)
+                    changed = further & ~np.isclose(
+                        host_completeness, full_completeness
+                    )
                     host_completeness[further] = full_completeness[further]
-                    if further.any():
-                        full_fallbacks[comp_name] = int(further.sum())
+                    if changed.any():
+                        full_fallbacks[comp_name] = int(changed.sum())
             physical = {"a": a, "m": m, "e": e}
             factor = np.ones_like(a)
             for name in spec.marginalized:
