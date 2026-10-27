@@ -568,6 +568,18 @@ def test_catalogs_without_fallback_counts_are_rebuilt(tmp_path):
     assert run._dimension_tier2_exists(str(tmp_path), "allstars", spec)
 
 
+def test_stack_label_names_only_non_flat_weighting():
+    from occurrence import run
+    flat = run._axis_style(dm.parse_dimensions(ECC_FIT), "m")["stack_label"]
+    assert flat(0.4, 50.0) == "$M_c$=0.4-50 $M_{Jup}$"
+    lognormal = md.population_marginal("m", (0.4, 50.0))
+    weighted = dm.parse_dimensions(
+        dict(ECC_FIT, m=dict(ECC_FIT["m"], distribution=lognormal))
+    )
+    label = run._axis_style(weighted, "m")["stack_label"](0.4, 50.0)
+    assert label == "$M_c$=0.4-50 $M_{Jup}$ (log-normal weighted)"
+
+
 def test_run_multiple_needs_edges_or_dimensions(tmp_path):
     from occurrence import run
     stars = pd.DataFrame({"star_name": ["a"]})

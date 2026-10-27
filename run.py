@@ -1083,6 +1083,8 @@ _AXIS_LABELS = {"a": "Semi-major axis [AU]",
 _DENSITY_UNITS = {"a": r"\Delta \log a", "m": r"\Delta \log M_c",
                   "e": r"\Delta e"}
 _STACK_NAMES = {"a": ("a", "AU"), "m": ("M_c", r"M_{Jup}"), "e": ("e", "")}
+_WEIGHTING_NAMES = {"beta": "Beta", "bpl": "broken power law",
+                    "lognormal": "log-normal"}
 
 
 def _axis_style(spec, stack_dim, a_or_p="a"):
@@ -1107,11 +1109,15 @@ def _axis_style(spec, stack_dim, a_or_p="a"):
         style["x_tick_formatter"] = pu.eccentricity_tick_formatter
 
     def stack_label(low, high):
+        # A stacked range includes every companion in it; only a non-flat
+        # weighting within the range is worth naming
         low, high = spec.from_engine(stacked, [low, high])
         symbol, unit = _STACK_NAMES[stacked]
-        role = spec.dimensions[stacked].role
+        distribution = spec.dimensions[stacked].distribution
         text = rf"${symbol}$={low:g}-{high:g}" + (f" ${unit}$" if unit else "")
-        return text + (" (marginalized)" if role == "marginalize" else "")
+        if distribution is not None and distribution.form != "flat":
+            text += f" ({_WEIGHTING_NAMES[distribution.form]} weighted)"
+        return text
 
     style["stack_label"] = stack_label
     return style
