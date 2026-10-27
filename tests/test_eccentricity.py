@@ -37,9 +37,33 @@ def test_default_marginals_are_normalized(name):
     assert distribution.cell_probabilities(edges).sum() == pytest.approx(1)
 
 
+def test_default_marginals_are_flat_in_each_coordinate():
+    mass = md.default_marginal("m", (1.0, 10.0))
+    assert mass.form == "flat"
+    # One dex of mass: density 1 per dex everywhere inside
+    assert mass.density([1.0, 3.0, 10.0]).tolist() == [1.0, 1.0, 1.0]
+    separation = md.DEFAULT_MARGINALS["a"]
+    assert separation.density(1.0) == pytest.approx(1/np.log10(300))
+    ecc = md.default_marginal("e", (0.0, 0.5))
+    assert ecc.cell_probabilities([0.0, 0.1, 0.5]) == pytest.approx([0.2, 0.8])
+
+
+def test_population_marginals_are_opt_in():
+    default = dm.parse_dimensions(ECC_FIT)
+    assert {default.dimensions[name].distribution.form
+            for name in ("a", "m")} == {"flat"}
+    lognormal = md.population_marginal("m", (0.4, 50.0))
+    opted = dm.parse_dimensions(
+        dict(ECC_FIT, m=dict(ECC_FIT["m"], distribution=lognormal.record()))
+    )
+    assert opted.dimensions["m"].distribution == lognormal
+    # Tier 2 products depend on the distribution, so the token differs
+    assert opted.token != default.token
+
+
 def test_beta_marginal_matches_the_injections():
     # The CLS injections put about a third of their draws below e = 0.1
-    beta = md.DEFAULT_MARGINALS["e"]
+    beta = md.POPULATION_MARGINALS["e"]
     assert beta.cell_probabilities([0, 0.1])[0] == pytest.approx(0.333, abs=0.002)
     # The density diverges at 0 (alpha < 1) but cell probabilities are exact
     assert np.isfinite(beta.cell_probabilities([0, 1e-6])).all()
@@ -191,7 +215,12 @@ def test_sliced_lookup_uses_each_draws_slice():
     assert values.tolist() == pytest.approx([0.9, 0.4, 0.4])
 
 
-def test_engine_completeness_integrates_with_population_weights():
+@pytest.mark.parametrize("a_distribution", [
+    None,  # the flat default
+    md.population_marginal("a", (0.1, 30.0)),
+])
+def test_engine_completeness_integrates_with_population_weights(
+        a_distribution):
     x, y = np.logspace(-2, 2.5, 100), np.logspace(-1.5, 2.5, 100)
     edges = np.asarray(cu.ECC_SLICE_EDGES)
     centers = 0.5*(edges[1:] + edges[:-1])
@@ -201,7 +230,10 @@ def test_engine_completeness_integrates_with_population_weights():
         x, y, np.stack([(1 - e)*shape for e in centers]), edges
     )
     # Fit e; marginalize a and m: Q(e) = (1 - e) * E_a[g(a)]
-    spec = dm.parse_dimensions(ECC_FIT)
+    settings = dict(ECC_FIT)
+    if a_distribution is not None:
+        settings["a"] = dict(ECC_FIT["a"], distribution=a_distribution)
+    spec = dm.parse_dimensions(settings)
     engine = cu.engine_completeness(spec, sliced)
     a_dist = spec.dimensions["a"].distribution
     log_a = np.linspace(-1, np.log10(30), 20001)

@@ -8,7 +8,8 @@ the completeness maps. A :class:`DimensionSpec` generalizes that:
 * Each of the three dimensions, ``a`` (semi-major axis, AU), ``m``
   (companion mass in M_Jup, true or M sin i per the Tier 1 folder), and ``e``
   (eccentricity), is either **fit** (with bin edges) or **marginalized**
-  (with bounds and a population distribution).
+  (with bounds and a population distribution, flat by default; see
+  ``marginal_distributions``).
 * One or two dimensions are fit. They occupy the engine slots: ``x`` is the
   first fitted dimension (in the order a, m, e) and ``y`` the second. With one
   fitted dimension, ``y`` holds one marginalized dimension as a single bin
@@ -231,7 +232,9 @@ def parse_dimensions(settings):
     ``{"role": "fit", "edges": [...]}`` or
     ``{"role": "marginalize", "bounds": (low, high)}``, optionally with
     ``"distribution": MarginalDistribution`` (or its record) to override the
-    default population distribution. All three dimensions must be listed.
+    default, which is flat in the dimension's coordinate (e.g.
+    ``marginal_distributions.population_marginal("m", bounds)`` for the
+    log-normal mass function). All three dimensions must be listed.
 
     Marginalizing assumes the marginalized dimension is distributed
     independently of the fitted ones (see ``marginal_distributions``).

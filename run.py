@@ -480,8 +480,9 @@ def run_multiple(
         if not spec.legacy and definition["a_or_p"] != "a":
             raise NotImplementedError(
                 f"{tier1_label}: explicit dimension roles support "
-                "semi-major axis, not period, so far (the population "
-                "distribution in a has no period counterpart yet)"
+                "semi-major axis, not period, so far (the dimension "
+                "samples and the a distributions have no period "
+                "counterpart yet)"
             )
         tier1_configurations.append({
             "mass_unit": mass_unit,

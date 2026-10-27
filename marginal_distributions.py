@@ -6,6 +6,16 @@ the rest. Marginalizing over a dimension means averaging over it with a fixed
 population distribution, both in the completeness (the expected number of
 detections) and in each detected companion's likelihood term.
 
+DEFAULT: FLAT
+-------------
+By default a marginalized dimension is flat: uniform per dex in ``a`` and
+``m`` and per unit ``e``. That is the same within-range weighting a stacked
+bin of a fitted dimension gets, so marginalizing over 0.4-50 M_Jup treats
+mass exactly like one stacked mass bin over that range. The literature
+distributions in ``POPULATION_MARGINALS`` (Beta in e, broken power law in a,
+log-normal in m) are opt-in, through :func:`population_marginal` or a
+``distribution`` in the run's ``dimensions`` setting.
+
 INDEPENDENCE ASSUMPTION
 -----------------------
 Marginalizing with a fixed distribution assumes that, inside the region of
@@ -42,6 +52,10 @@ DIMENSION_SCALES = {"a": "log", "m": "log", "e": "linear"}
 _NORMALIZATION_POINTS = 4001
 
 
+def _flat_density(params, values):
+    return np.ones(np.shape(values), dtype=float)
+
+
 def _beta_density(params, values):
     alpha, beta = params
     return stats.beta.pdf(values, alpha, beta)
@@ -63,6 +77,7 @@ def _log_normal_density(params, values):
 
 # name -> (density function, expected parameter names)
 _FORMS = {
+    "flat": (_flat_density, ()),
     "beta": (_beta_density, ("alpha", "beta")),
     "bpl": (_broken_power_law_density, ("C", "beta", "a0", "gamma")),
     "lognormal": (_log_normal_density, ("A", "mu", "sigma")),
@@ -118,14 +133,17 @@ class MarginalDistribution:
     def _raw_integral(self, lower, upper):
         """Integral of the raw density from ``lower`` to ``upper`` (values).
 
-        The Beta form uses its exact CDF, since its density diverges at
-        e = 0 when alpha < 1; the others use a fine midpoint rule in the
-        dimension's coordinate, which never evaluates an endpoint.
+        The flat form is exact; the Beta form uses its exact CDF, since its
+        density diverges at e = 0 when alpha < 1; the others use a fine
+        midpoint rule in the dimension's coordinate, which never evaluates
+        an endpoint.
         """
         if self.form == "beta":
             return float(stats.beta.cdf(upper, *self.params) -
                          stats.beta.cdf(lower, *self.params))
         start, stop = self.coordinate([lower, upper])
+        if self.form == "flat":
+            return float(stop - start)
         edges = np.linspace(start, stop, _NORMALIZATION_POINTS)
         centers = 0.5*(edges[1:] + edges[:-1])
         values = 10**centers if self.scale == "log" else centers
@@ -176,33 +194,58 @@ class MarginalDistribution:
                    tuple(record["bounds"]), record["scale"])
 
 
+# Bounds of the default marginalized ranges. Masses are in Jupiter masses and
+# separations in AU.
+DEFAULT_BOUNDS = {"e": (0.0, 1.0), "a": (0.1, 30.0), "m": (0.4, 50.0)}
+
 # Defaults used whenever a dimension is marginalized and the run does not
-# override them. Masses are in Jupiter masses and separations in AU.
-#   e: Beta(0.867, 3.03), Kipping (2013)
+# override them: flat in each dimension's coordinate (see the module
+# docstring).
+DEFAULT_MARGINALS = {
+    name: MarginalDistribution("flat", (), bounds, DIMENSION_SCALES[name])
+    for name, bounds in DEFAULT_BOUNDS.items()
+}
+
+# Literature population distributions, opt-in through population_marginal:
+#   e: Beta(0.867, 3.03), Kipping (2013); also the injections' distribution
 #   a: broken power law, C = 350, beta = -0.86, a0 = 3.6 AU, gamma = 1.59,
 #      Fulton et al. (2021)
 #   m: log-normal in log10 M with A = 0.09, mu = 0.23, sigma = 0.48 dex, the
 #      full-sample logG fit of the stellar-properties mass-function paper
-DEFAULT_MARGINALS = {
-    "e": MarginalDistribution("beta", (0.867, 3.03), (0.0, 1.0), "linear"),
-    "a": MarginalDistribution("bpl", (350.0, -0.86, 3.6, 1.59), (0.1, 30.0),
-                              "log"),
-    "m": MarginalDistribution("lognormal", (0.09, 0.23, 0.48), (0.4, 50.0),
-                              "log"),
+POPULATION_MARGINALS = {
+    "e": MarginalDistribution("beta", (0.867, 3.03), DEFAULT_BOUNDS["e"],
+                              "linear"),
+    "a": MarginalDistribution("bpl", (350.0, -0.86, 3.6, 1.59),
+                              DEFAULT_BOUNDS["a"], "log"),
+    "m": MarginalDistribution("lognormal", (0.09, 0.23, 0.48),
+                              DEFAULT_BOUNDS["m"], "log"),
 }
 
 
-def default_marginal(name, bounds=None):
-    """Return the default distribution for a dimension, optionally re-bounded.
-
-    Re-bounding keeps the functional form and renormalizes over the new
-    bounds, i.e. it truncates the population to the region of interest.
-    """
+def _rebounded(distributions, kind, name, bounds):
     try:
-        distribution = DEFAULT_MARGINALS[name]
+        distribution = distributions[name]
     except KeyError:
-        raise ValueError(f"no default marginal distribution for {name!r}")
+        raise ValueError(f"no {kind} marginal distribution for {name!r}")
     if bounds is None:
         return distribution
     return MarginalDistribution(distribution.form, distribution.params,
                                 tuple(bounds), distribution.scale)
+
+
+def default_marginal(name, bounds=None):
+    """Return the default (flat) distribution for a dimension.
+
+    ``bounds`` replaces the default range; the density is renormalized over
+    it, i.e. the population is truncated to the region of interest.
+    """
+    return _rebounded(DEFAULT_MARGINALS, "default", name, bounds)
+
+
+def population_marginal(name, bounds=None):
+    """Return a dimension's literature distribution, optionally re-bounded.
+
+    Pass the result as a dimension's ``distribution`` to opt in. Re-bounding
+    keeps the functional form and renormalizes over the new bounds.
+    """
+    return _rebounded(POPULATION_MARGINALS, "population", name, bounds)
