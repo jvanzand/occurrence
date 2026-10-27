@@ -387,6 +387,15 @@ def run_multiple(
         if m_unit != "jupiter":
             raise ValueError("explicit dimension roles need m_unit='jupiter', "
                              "the unit of the marginal distributions")
+        roi_plots = [name for name, requested in (
+            ("plot_catalog_roi", plot_catalog_roi),
+            ("plot_roi_occurrence", plot_roi_occurrence)) if requested]
+        if make_plots and roi_plots:
+            raise ValueError(
+                f"{' and '.join(roi_plots)} need the a-m average map in "
+                "avg_map/, which runs with dimensions do not write; set "
+                "them to False"
+            )
         a_edges = spec.engine_edges("x")
         m_edges = spec.engine_edges("y")
         if spec.stack_dim is not None:

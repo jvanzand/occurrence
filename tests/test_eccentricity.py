@@ -450,6 +450,19 @@ def test_run_multiple_needs_edges_or_dimensions(tmp_path):
                          tier2_df_cuts_dict={}, output_dir=tmp_path)
 
 
+@pytest.mark.parametrize("plot_option",
+                         ["plot_catalog_roi", "plot_roi_occurrence"])
+def test_run_multiple_refuses_roi_plots_with_dimensions(tmp_path,
+                                                        plot_option):
+    from occurrence import run
+    stars = pd.DataFrame({"star_name": ["a"]})
+    with pytest.raises(ValueError, match=f"{plot_option} need the a-m"):
+        run.run_multiple(["mtrue"], ["allstars"], ["t3"], star_df=stars,
+                         tier2_df_cuts_dict={}, output_dir=tmp_path,
+                         m_unit="jupiter", dimensions=ECC_FIT,
+                         **{plot_option: True})
+
+
 def test_companion_plot_background_weights_slices_by_e(tmp_path):
     from occurrence import post_fit_analysis as pfa
     edges = np.asarray(cu.ECC_SLICE_EDGES)
