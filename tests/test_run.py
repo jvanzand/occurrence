@@ -730,3 +730,29 @@ def test_run_multiple_writes_convergence_summaries(tmp_path, monkeypatch,
     assert output.startswith("[1/1] mtrue/allstars/fit: piecewise SHORT")
     assert "set piecewise_nsteps >= " in output
     assert "Finished 1 experiments in" in output
+
+
+def test_run_errors_name_the_run_and_its_catalog(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mtrue").mkdir()
+    monkeypatch.setattr(run, "_tier1_artifacts_exist", lambda *args: True)
+    monkeypatch.setattr(run, "_tier2_artifacts_exist", lambda *args: True)
+
+    def failing_materials(**kwargs):
+        raise ValueError("c has invalid completeness/prior in cell 9")
+
+    monkeypatch.setattr(main, "prep_fit_materials", failing_materials)
+    with pytest.raises(ValueError) as caught:
+        run.run_multiple(
+            tier1_list=["mtrue"], tier2_list=["allstars"],
+            tier3_list=["fit"], a_edges=[0.1, 10.0], m_edges=[0.4, 50.0],
+            star_df=pd.DataFrame({"star_name": ["a"]}),
+            tier2_df_cuts_dict={
+                "allstars": [{"star_df_query": None}, "All Stars"]
+            },
+            make_plots=False,
+        )
+    message = str(caught.value)
+    assert message.startswith("Run mtrue/allstars/fit failed")
+    assert "sampled_post_prior_compl.npz" in message
+    assert "invalid completeness/prior in cell 9" in message

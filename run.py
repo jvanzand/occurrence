@@ -773,6 +773,35 @@ def _run_futures_in_parallel(function, configurations, shared_args, label):
 
 
 def _run_configuration(configuration):
+    """Execute one configuration, naming it in any ValueError it raises.
+
+    Configurations run in worker processes, so an error's traceback alone
+    does not say which Tier 1/Tier 2/Tier 3 run failed; the message is
+    prefixed with that path and the run's Tier 2 catalog.
+    """
+    try:
+        return _run_one_configuration(configuration)
+    except ValueError as error:
+        run_path = "/".join(
+            os.path.basename(os.path.normpath(configuration[key]))
+            for key in ("tier1_dir", "tier2_dir", "tier3_dir")
+        )
+        spec = configuration.get("spec")
+        catalog = (
+            main.dimension_tier2_paths(configuration["tier1_dir"],
+                                       configuration["tier2_dir"],
+                                       spec)["catalog"]
+            if spec is not None and not spec.legacy else
+            os.path.join(configuration["tier1_dir"],
+                         configuration["tier2_dir"],
+                         "sampled_post_prior_compl.npz")
+        )
+        raise ValueError(
+            f"Run {run_path} failed (Tier 2 catalog: {catalog}):\n{error}"
+        ) from error
+
+
+def _run_one_configuration(configuration):
     """Execute one configuration produced by :func:`run_multiple`."""
     start = time.perf_counter()
     fit_seconds = {}
