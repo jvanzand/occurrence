@@ -763,6 +763,65 @@ def make_dimension_average_maps(tier1_dir, tier2_dir, spec, star_df,
     return engine_map
 
 
+def plot_dimension_average_maps(tier1_dir, tier2_dir, spec, star_names,
+                                tier1_label, overwrite=False):
+    """Save images of a spec's Tier 2 average maps, as the original maps do.
+
+    Writes ``sliced_average_maps.png`` (the sample-average map in each e
+    slice, titled with the median injections per star in the slice) next to
+    the sliced average, and ``average_completeness.png`` (the completeness
+    the fit uses, in its fitted dimensions) next to the engine map. Existing
+    images are kept unless ``overwrite``. Returns the paths written.
+    """
+    paths = dimension_tier2_paths(tier1_dir, tier2_dir, spec)
+    sliced_image = os.path.join(paths["sliced_average"],
+                                "sliced_average_maps.png")
+    engine_image = os.path.join(paths["engine_average"],
+                                "average_completeness.png")
+    written = []
+    sliced = cu.load_sliced(paths["sliced_average"])
+    if overwrite or not os.path.exists(sliced_image):
+        maps_dir = sliced_maps_dir(tier1_dir, tier1_label)
+        star_counts = []
+        for star in star_names:
+            path = os.path.join(maps_dir, star, cu.SLICED_MAP_FILE)
+            if os.path.exists(path):
+                with np.load(path) as data:
+                    star_counts.append(data["counts"])
+        counts = np.median(star_counts, axis=0) if star_counts else None
+        mass = "M_c" if "true" in tier1_label else r"M_c \sin i"
+        repeated = (", counting each orbit's 10 inclination copies"
+                    if tier1_label.endswith("true") else "")
+        pu.plot_sliced_average_maps(
+            sliced, sliced_image,
+            title=(f"{tier2_dir}: average completeness of {len(star_names)} "
+                   f"stars in each e slice\nInjections: median per star in "
+                   f"the slice{repeated}"),
+            y_label=rf"${mass}$ [$M_{{\rm Jup}}$]",
+            counts=counts,
+        )
+        written.append(sliced_image)
+    if overwrite or not os.path.exists(engine_image):
+        with open(os.path.join(paths["engine_average"], "interp_fn.pkl"),
+                  "rb") as stream:
+            engine_map = pickle.load(stream)
+        units = {"a": " AU", "m": r" $M_{\rm Jup}$", "e": ""}
+        averaged = ", ".join(
+            f"{name} = {low:g}-{high:g}{units[name]} "
+            f"({spec.dimensions[name].distribution.form})"
+            for name in spec.marginalized
+            for low, high in [spec.dimensions[name].bounds]
+        )
+        pu.plot_engine_completeness(
+            spec, engine_map, engine_image,
+            title=(f"{tier2_dir}: completeness the fit uses\n"
+                   f"averaged over {averaged}"),
+            e_edges=sliced.e_edges,
+        )
+        written.append(engine_image)
+    return written
+
+
 def prep_dimension_post_draws(tier1_dir, tier2_dir, spec, star_df,
                               comp_post_dir, sampling_func, tier1_label,
                               m_unit='jupiter', num_samples=500,

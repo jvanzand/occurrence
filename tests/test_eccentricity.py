@@ -3,6 +3,7 @@ eccentricity-sliced completeness, eccentricity draws, and eccentricity models.
 """
 
 import json
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -472,6 +473,39 @@ def test_weigh_dimension_samples_builds_engine_catalog(tmp_path):
     np.testing.assert_allclose(factor, expected)
     assert factor[-1] == 0
     assert dm.spec_from_json(str(catalog[fit_utils.DIMENSIONS_KEY])) == spec
+
+
+@pytest.mark.parametrize("settings", [
+    ECC_FIT,  # one fitted dimension: a curve
+    {"a": {"role": "fit", "edges": [0.1, 1.0, 30.0]},
+     "m": {"role": "fit", "edges": [0.4, 5.0, 50.0]},
+     "e": {"role": "marginalize", "bounds": (0.0, 1.0)}},  # two: a map
+])
+def test_dimension_average_map_images_are_written_once(tmp_path, settings):
+    from occurrence import main
+    x, y = np.logspace(-2, 2.5, 20), np.logspace(-1.5, 2.5, 20)
+    edges = np.asarray(cu.ECC_SLICE_EDGES)
+    maps_dir = Path(main.sliced_maps_dir(str(tmp_path), "mtrue"))
+    counts = np.arange(len(edges) - 1)*10
+    for star in ("s1", "s2"):
+        cu.SlicedCompleteness(
+            x, y, np.full((len(edges) - 1, 20, 20), 0.5), edges
+        ).save(maps_dir / star, extra={"counts": counts})
+    spec = dm.parse_dimensions(settings)
+    stars = pd.DataFrame({"star_name": ["s1", "s2"]})
+    main.make_dimension_average_maps(str(tmp_path), "allstars", spec, stars,
+                                     "mtrue")
+    written = main.plot_dimension_average_maps(
+        str(tmp_path), "allstars", spec, ["s1", "s2"], "mtrue"
+    )
+    assert [Path(path).name for path in written] == [
+        "sliced_average_maps.png", "average_completeness.png"
+    ]
+    assert all(Path(path).stat().st_size > 0 for path in written)
+    # Existing images are kept unless asked to overwrite
+    assert main.plot_dimension_average_maps(
+        str(tmp_path), "allstars", spec, ["s1", "s2"], "mtrue"
+    ) == []
 
 
 def test_run_multiple_needs_edges_or_dimensions(tmp_path):

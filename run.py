@@ -694,6 +694,20 @@ def run_multiple(
             for configuration in missing_tier2:
                 make_tier2(configuration, *preparation_arguments)
 
+    # Images of the dimension runs' average maps, for new and existing Tier 2
+    # products (the original avg_map/ images are made with the map)
+    for configuration in tier2_configurations:
+        spec = configuration["spec"]
+        if spec is None or spec.legacy:
+            continue
+        query = configuration["star_df_query"]
+        stars = star_df.query(query) if query else star_df
+        main.plot_dimension_average_maps(
+            configuration["t1_dir"], configuration["t2_dir"], spec,
+            stars.star_name.tolist(),
+            f"{configuration['t1_m_or_q']}{configuration['t1_true_or_sini']}",
+        )
+
     missing_tier3 = [
         configuration for configuration in configurations
         if not configuration["tier3_exists"]

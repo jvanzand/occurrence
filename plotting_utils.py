@@ -283,6 +283,115 @@ def expand_ylim_for_legend(axis, step=1.08, max_steps=25):
 X_LABELS = {"inj_au": "$a$ [AU]", "inj_period": "$P$ [days]"}
 
 
+# Axis labels for the dimension-run completeness figures
+_DIMENSION_LABELS = {"a": "Semi-major axis [AU]",
+                     "m": r"Companion mass [$M_{\rm Jup}$]",
+                     "e": "Eccentricity"}
+
+
+def plot_sliced_average_maps(sliced, save_path, title, y_label,
+                             counts=None):
+    """Plot a sample's average completeness map in each eccentricity slice.
+
+    ``sliced`` is a :class:`completeness_utils.SlicedCompleteness`; one
+    panel per slice shows completeness in (a, mass), with points that have
+    no estimate in gray. ``counts`` (one per slice) are printed in each
+    panel's title.
+    """
+    import copy
+    n_slices = sliced.n_slices
+    ncols = min(4, n_slices)
+    nrows = int(np.ceil(n_slices/ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6*ncols, 5*nrows + 1),
+                             sharex=True, sharey=True, squeeze=False,
+                             constrained_layout=True)
+    cmap = copy.copy(matplotlib.cm.get_cmap("viridis"))
+    cmap.set_bad("lightgray")
+    for index, ax in enumerate(axes.flat):
+        if index >= n_slices:
+            ax.set_visible(False)
+            continue
+        mesh = ax.pcolormesh(sliced.xgrid, sliced.ygrid,
+                             np.ma.masked_invalid(sliced.zgrids[index]),
+                             vmin=0, vmax=1, cmap=cmap, shading="auto")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        low, high = sliced.e_edges[index], sliced.e_edges[index + 1]
+        panel_title = f"$e$ = {low:g}-{high:g}"
+        if counts is not None:
+            panel_title += f": {counts[index]:g} injections"
+        ax.set_title(panel_title)
+    for ax in axes[-1]:
+        ax.set_xlabel(_DIMENSION_LABELS["a"])
+    for ax in axes[:, 0]:
+        ax.set_ylabel(y_label)
+    colorbar = fig.colorbar(mesh, ax=axes, shrink=0.9, pad=0.02)
+    colorbar.set_label("Completeness")
+    axes[0, 0].legend(handles=[ptch.Patch(color="lightgray",
+                                          label="No estimate")],
+                      loc="lower right", fontsize=16)
+    fig.suptitle(title, fontsize=22)
+    fig.savefig(save_path, dpi=200)
+    plt.close(fig)
+
+
+def plot_engine_completeness(spec, interpolator, save_path, title,
+                             e_edges=None):
+    """Plot the completeness a dimension run's fit uses, in its fitted dimensions.
+
+    ``interpolator`` is the run's engine map (completeness averaged over the
+    sample and integrated over the marginalized dimensions). With one fitted
+    dimension the figure is a curve; with two it is a map. ``e_edges`` marks
+    the completeness map's eccentricity slices on an eccentricity axis.
+    """
+    def physical_grid(name, size):
+        low, high = spec.dimensions[name].bounds
+        if spec.dimensions[name].scale == "linear":
+            return np.linspace(low, high, size)
+        return np.geomspace(low, high, size)
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+    x_name = spec.x
+    x_values = physical_grid(x_name, 400)
+    if spec.y_is_marginalized:
+        y_engine = np.mean(spec.to_engine(
+            spec.y, spec.dimensions[spec.y].bounds
+        ))
+        completeness = interpolator(
+            (spec.to_engine(x_name, x_values), np.full(x_values.size, y_engine))
+        )
+        ax.plot(x_values, completeness, color="k",
+                label="Sample-average completeness")
+        ax.set_ylim(0, 1)
+        ax.set_ylabel("Completeness")
+        if x_name == "e" and e_edges is not None:
+            for index, edge in enumerate(e_edges):
+                ax.axvline(edge, color="gray", ls=":", lw=1,
+                           label="Completeness-map $e$ slices"
+                           if index == 0 else None)
+        ax.legend(loc="lower left", fontsize=18)
+    else:
+        y_name = spec.y
+        y_values = physical_grid(y_name, 200)
+        X, Y = np.meshgrid(x_values, y_values)
+        completeness = interpolator(
+            (spec.to_engine(x_name, X), spec.to_engine(y_name, Y))
+        )
+        mesh = ax.pcolormesh(X, Y, completeness, vmin=0, vmax=1,
+                             cmap="viridis", shading="auto")
+        fig.colorbar(mesh, ax=ax).set_label("Sample-average completeness")
+        if spec.dimensions[y_name].scale == "log":
+            ax.set_yscale("log")
+        ax.set_ylabel(_DIMENSION_LABELS[y_name])
+    if spec.dimensions[x_name].scale == "log":
+        ax.set_xscale("log")
+    ax.set_xlabel(_DIMENSION_LABELS[x_name])
+    ax.set_title(title, fontsize=20, pad=12)
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=200)
+    plt.close(fig)
+
+
 def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True, 
                          a_m_lims_pairs=None, summary_dict=None,
                          zoom=False,
