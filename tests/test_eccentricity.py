@@ -9,6 +9,7 @@ import h5py
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 from occurrence import completeness_utils as cu
 from occurrence import dimensions as dm
@@ -38,15 +39,25 @@ def test_default_marginals_are_normalized(name):
     assert distribution.cell_probabilities(edges).sum() == pytest.approx(1)
 
 
-def test_default_marginals_are_flat_in_each_coordinate():
+def test_default_marginals_are_flat_in_a_and_m():
     mass = md.default_marginal("m", (1.0, 10.0))
     assert mass.form == "flat"
     # One dex of mass: density 1 per dex everywhere inside
     assert mass.density([1.0, 3.0, 10.0]).tolist() == [1.0, 1.0, 1.0]
     separation = md.DEFAULT_MARGINALS["a"]
     assert separation.density(1.0) == pytest.approx(1/np.log10(300))
-    ecc = md.default_marginal("e", (0.0, 0.5))
-    assert ecc.cell_probabilities([0.0, 0.1, 0.5]) == pytest.approx([0.2, 0.8])
+
+
+def test_default_eccentricity_marginal_is_the_injection_beta():
+    # Runs without dimensions average e over the injections' Beta inside
+    # each star's map; a marginalized e matches them by default
+    assert md.DEFAULT_MARGINALS["e"] == md.INJECTION_ECCENTRICITY
+    rebounded = md.default_marginal("e", (0.0, 0.5))
+    assert rebounded.form == "beta"
+    expected = (stats.beta.cdf(0.1, 0.867, 3.03) /
+                stats.beta.cdf(0.5, 0.867, 3.03))
+    assert rebounded.cell_probabilities([0.0, 0.1, 0.5])[0] == \
+        pytest.approx(expected)
 
 
 def test_population_marginals_are_opt_in():
@@ -64,7 +75,7 @@ def test_population_marginals_are_opt_in():
 
 def test_beta_marginal_matches_the_injections():
     # The CLS injections put about a third of their draws below e = 0.1
-    beta = md.POPULATION_MARGINALS["e"]
+    beta = md.INJECTION_ECCENTRICITY
     assert beta.cell_probabilities([0, 0.1])[0] == pytest.approx(0.333, abs=0.002)
     # The density diverges at 0 (alpha < 1) but cell probabilities are exact
     assert np.isfinite(beta.cell_probabilities([0, 1e-6])).all()

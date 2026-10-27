@@ -6,15 +6,19 @@ the rest. Marginalizing over a dimension means averaging over it with a fixed
 population distribution, both in the completeness (the expected number of
 detections) and in each detected companion's likelihood term.
 
-DEFAULT: FLAT
--------------
-By default a marginalized dimension is flat: uniform per dex in ``a`` and
-``m`` and per unit ``e``. That is the same within-range weighting a stacked
-bin of a fitted dimension gets, so marginalizing over 0.4-50 M_Jup treats
-mass exactly like one stacked mass bin over that range. The literature
-distributions in ``POPULATION_MARGINALS`` (Beta in e, broken power law in a,
-log-normal in m) are opt-in, through :func:`population_marginal` or a
-``distribution`` in the run's ``dimensions`` setting.
+DEFAULTS: FLAT IN a AND m, THE INJECTION BETA IN e
+--------------------------------------------------
+By default a marginalized ``a`` or ``m`` is flat (uniform per dex), the same
+within-range weighting a stacked bin of a fitted dimension gets, so
+marginalizing over 0.4-50 M_Jup treats mass exactly like one stacked mass
+bin over that range. A marginalized ``e`` defaults to Beta(0.867, 3.03), the
+distribution the injections were drawn from. Runs without ``dimensions``
+average e over that same distribution, because each star's map averages all
+its injections, so the defaults reproduce the weighting of the original
+runs in all three dimensions. The literature distributions for ``a`` and
+``m`` in ``POPULATION_MARGINALS`` (broken power law, log-normal) are opt-in,
+through :func:`population_marginal` or a ``distribution`` in the run's
+``dimensions`` setting.
 
 INDEPENDENCE ASSUMPTION
 -----------------------
@@ -198,23 +202,28 @@ class MarginalDistribution:
 # separations in AU.
 DEFAULT_BOUNDS = {"e": (0.0, 1.0), "a": (0.1, 30.0), "m": (0.4, 50.0)}
 
+# The injections' eccentricity distribution, Beta(0.867, 3.03) (Kipping 2013)
+INJECTION_ECCENTRICITY = MarginalDistribution(
+    "beta", (0.867, 3.03), DEFAULT_BOUNDS["e"], "linear"
+)
+
 # Defaults used whenever a dimension is marginalized and the run does not
-# override them: flat in each dimension's coordinate (see the module
+# override them: flat in a and m, the injection Beta in e (see the module
 # docstring).
 DEFAULT_MARGINALS = {
-    name: MarginalDistribution("flat", (), bounds, DIMENSION_SCALES[name])
-    for name, bounds in DEFAULT_BOUNDS.items()
+    "a": MarginalDistribution("flat", (), DEFAULT_BOUNDS["a"], "log"),
+    "m": MarginalDistribution("flat", (), DEFAULT_BOUNDS["m"], "log"),
+    "e": INJECTION_ECCENTRICITY,
 }
 
 # Literature population distributions, opt-in through population_marginal:
-#   e: Beta(0.867, 3.03), Kipping (2013); also the injections' distribution
+#   e: the injection Beta (also the default)
 #   a: broken power law, C = 350, beta = -0.86, a0 = 3.6 AU, gamma = 1.59,
 #      Fulton et al. (2021)
 #   m: log-normal in log10 M with A = 0.09, mu = 0.23, sigma = 0.48 dex, the
 #      full-sample logG fit of the stellar-properties mass-function paper
 POPULATION_MARGINALS = {
-    "e": MarginalDistribution("beta", (0.867, 3.03), DEFAULT_BOUNDS["e"],
-                              "linear"),
+    "e": INJECTION_ECCENTRICITY,
     "a": MarginalDistribution("bpl", (350.0, -0.86, 3.6, 1.59),
                               DEFAULT_BOUNDS["a"], "log"),
     "m": MarginalDistribution("lognormal", (0.09, 0.23, 0.48),
@@ -234,7 +243,7 @@ def _rebounded(distributions, kind, name, bounds):
 
 
 def default_marginal(name, bounds=None):
-    """Return the default (flat) distribution for a dimension.
+    """Return the default distribution for a dimension (see module docstring).
 
     ``bounds`` replaces the default range; the density is renormalized over
     it, i.e. the population is truncated to the region of interest.
