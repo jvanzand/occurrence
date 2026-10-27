@@ -469,7 +469,7 @@ def test_weigh_dimension_samples_builds_engine_catalog(tmp_path):
     m = np.array([2.0, 2.0, 2.0, 2.0])
     e = np.array([0.05, 0.15, 0.5, 0.5])
     star_df = pd.DataFrame({"star_name": ["star"], "comp_list": [["c"]]})
-    catalog, fallback = main.weigh_dimension_samples(
+    catalog, fallback, full_fallbacks = main.weigh_dimension_samples(
         spec, {"c": [a, m, e]}, star_df, tmp_path, average
     )
     rows = catalog["c"]
@@ -478,6 +478,7 @@ def test_weigh_dimension_samples_builds_engine_catalog(tmp_path):
     # Zero and NaN host values fall back to the average
     np.testing.assert_allclose(rows[3], [0.3, 0.3, 0.6, 0.6])
     assert fallback == 2
+    assert full_fallbacks == {}
     factor = catalog["c::marginal_factor"]
     expected = (spec.dimensions["a"].distribution.density(a) *
                 spec.dimensions["m"].distribution.density(m))
@@ -517,6 +518,48 @@ def test_dimension_average_map_images_are_written_once(tmp_path, settings):
     assert main.plot_dimension_average_maps(
         str(tmp_path), "allstars", spec, ["s1", "s2"], "mtrue"
     ) == []
+
+
+def test_draws_fall_back_to_the_full_sample_average(tmp_path):
+    from occurrence import main
+    x, y = np.logspace(-2, 2.5, 20), np.logspace(-1.5, 2.5, 20)
+    edges = np.asarray(cu.ECC_SLICE_EDGES)
+    n_slices = len(edges) - 1
+    host = np.full((n_slices, 20, 20), np.nan)   # the host has no estimate
+    cu.SlicedCompleteness(x, y, host, edges).save(tmp_path / "star")
+    sample = np.full((n_slices, 20, 20), 0.3)
+    sample[-1] = 0.0                             # the subsample's is zero
+    sample[-2] = np.nan                          # or undefined
+    average = cu.SlicedCompleteness(x, y, sample, edges)
+    full = cu.SlicedCompleteness(x, y, np.full((n_slices, 20, 20), 0.05),
+                                 edges)
+    spec = dm.parse_dimensions(ECC_FIT)
+    a, m = np.full(3, 1.0), np.full(3, 2.0)
+    e = np.array([0.05, 0.7, 0.9])
+    star_df = pd.DataFrame({"star_name": ["star"], "comp_list": [["c"]]})
+    catalog, fallback, full_fallbacks = main.weigh_dimension_samples(
+        spec, {"c": [a, m, e]}, star_df, tmp_path, average,
+        full_average=full,
+    )
+    np.testing.assert_allclose(catalog["c"][3], [0.3, 0.05, 0.05])
+    assert fallback == 2
+    assert full_fallbacks == {"c": 2}
+    assert json.loads(str(catalog[main.FALLBACKS_KEY])) == {
+        "sample_average": 2, "full_sample_average": {"c": 2},
+    }
+
+
+def test_catalogs_without_fallback_counts_are_rebuilt(tmp_path):
+    from occurrence import main, run
+    spec = dm.parse_dimensions(ECC_FIT)
+    paths = main.dimension_tier2_paths(str(tmp_path), "allstars", spec)
+    Path(paths["catalog"]).parent.mkdir(parents=True)
+    record = {fit_utils.DIMENSIONS_KEY: np.asarray(spec.to_json())}
+    np.savez(paths["catalog"], **record)
+    assert not run._dimension_tier2_exists(str(tmp_path), "allstars", spec)
+    np.savez(paths["catalog"], **record,
+             **{main.FALLBACKS_KEY: np.asarray("{}")})
+    assert run._dimension_tier2_exists(str(tmp_path), "allstars", spec)
 
 
 def test_run_multiple_needs_edges_or_dimensions(tmp_path):

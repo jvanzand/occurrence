@@ -4,6 +4,7 @@
 ## already done. Then do an occurrence fit.
 
 import os
+import json
 import glob
 import numpy as np
 import pandas as pd
@@ -822,34 +823,78 @@ def plot_dimension_average_maps(tier1_dir, tier2_dir, spec, star_names,
     return written
 
 
+# Catalog entry recording how many draws used each completeness fallback;
+# catalogs without it predate the full-sample fallback and are rebuilt
+FALLBACKS_KEY = "__fallbacks__"
+
+# Full-sample sliced average, shared by every subsample of a Tier 1
+FULL_SAMPLE_AVERAGE_DIR = "avg_map" + cu.SLICED_MAPS_SUFFIX + "_full_sample"
+
+
+def full_sample_average(tier1_dir, tier1_label, star_names):
+    """Load (or make) the sliced average over every star in a Tier 1.
+
+    Subsamples fall back to it where their own average is undefined or
+    zero (see :func:`weigh_dimension_samples`). It is rebuilt when the
+    number of stars it was made from differs from ``star_names``.
+    """
+    path = os.path.join(tier1_dir, FULL_SAMPLE_AVERAGE_DIR)
+    record = os.path.join(path, cu.SLICED_MAP_FILE)
+    if os.path.exists(record):
+        with np.load(record) as data:
+            n_stars = int(data["n_stars"])
+        if n_stars == len(star_names):
+            return cu.load_sliced(path)
+    average, _ = cu.sliced_average_map(
+        sliced_maps_dir(tier1_dir, tier1_label), path, list(star_names)
+    )
+    return average
+
+
 def prep_dimension_post_draws(tier1_dir, tier2_dir, spec, star_df,
                               comp_post_dir, sampling_func, tier1_label,
                               m_unit='jupiter', num_samples=500,
-                              fill_single_nan_with_average=True):
+                              fill_single_nan_with_average=True,
+                              full_sample_stars=None):
     """Sample companion posteriors in a, m, and e and weight them per spec.
 
     Draws ``num_samples`` (a, m, e) samples per companion with
     ``sampling_func(..., include_ecc=True)``, weights them with
     :func:`weigh_dimension_samples`, and saves the catalog. Returns its path.
+    ``full_sample_stars`` (every star of the Tier 1) enables the fallback to
+    the full-sample average; without it, draws stop at the sample average.
     """
     samples = sampling_func(comp_post_dir, star_df, num_samples=num_samples,
                             m_unit=m_unit, include_ecc=True)
     paths = dimension_tier2_paths(tier1_dir, tier2_dir, spec)
-    output, fallback_total = weigh_dimension_samples(
+    full_average = (
+        None if full_sample_stars is None else
+        full_sample_average(tier1_dir, tier1_label, full_sample_stars)
+    )
+    output, fallback_total, full_fallbacks = weigh_dimension_samples(
         spec, samples, star_df, sliced_maps_dir(tier1_dir, tier1_label),
         cu.load_sliced(paths["sliced_average"]),
         fill_single_nan_with_average=fill_single_nan_with_average,
+        full_average=full_average,
     )
     if fallback_total:
         print(f"{tier2_dir}: {fallback_total} posterior draws used the sample-"
               "average completeness where the host's sliced map is undefined "
               "or zero")
+    if full_fallbacks:
+        listed = ", ".join(f"{name} ({count})" for name, count in
+                           sorted(full_fallbacks.items(),
+                                  key=lambda item: -item[1]))
+        print(f"{tier2_dir}: {sum(full_fallbacks.values())} of those used the "
+              "full-sample average, where the sample average is also "
+              f"undefined or zero: {listed}")
     np.savez(paths["catalog"], **output)
     return paths["catalog"]
 
 
 def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
-                            fill_single_nan_with_average=True):
+                            fill_single_nan_with_average=True,
+                            full_average=None):
     """Turn (a, m, e) posterior samples into a catalog for one spec.
 
     ``samples`` maps companion names to ``[a, m, e]`` arrays (M_Jup, AU);
@@ -862,7 +907,10 @@ def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
         original code's rule; zeros are added because slicing by e leaves
         each moving-average box only a few injections, so "0 of N
         recovered" is common where the true completeness is small but
-        positive, and a detected companion cannot have zero completeness;
+        positive, and a detected companion cannot have zero completeness.
+        Where the sample average is also undefined or zero, values fall
+        back to ``full_average`` (the full sample's sliced average), if
+        given; a subsample's average rests on fewer stars;
       * the marginal factor: the product, over marginalized dimensions, of
         the population density at the draw divided by the posterior's
         interim prior there. Both are densities in the dimension's own
@@ -872,11 +920,14 @@ def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
         marginalized dimensions are independent of the fitted ones.
     The main array keeps the original seven-row layout (x, y, average and
     host completeness, their ratios to the prior, and the prior), so the
-    fit code reads it unchanged. Returns (catalog dict, number of draws that
-    fell back to the average completeness, whether undefined or zero).
+    fit code reads it unchanged; ``FALLBACKS_KEY`` records the fallback
+    counts. Returns (catalog dict, number of draws that fell back to the
+    sample average, {companion: draws that fell back further to the
+    full-sample average}).
     """
     output = {dfu.DIMENSIONS_KEY: np.asarray(spec.to_json())}
     fallback_total = 0
+    full_fallbacks = {}
     for star_name, comp_list in zip(star_df.star_name, star_df.comp_list):
         present = [name for name in comp_list if name in samples]
         if not present:
@@ -894,6 +945,16 @@ def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
                 fallback = undefined & np.isfinite(average_completeness)
                 host_completeness[fallback] = average_completeness[fallback]
                 fallback_total += int(fallback.sum())
+                if full_average is not None:
+                    full_completeness = full_average((a, m, e))
+                    further = (
+                        undefined &
+                        ~(host_completeness > 0) &
+                        np.isfinite(full_completeness)
+                    )
+                    host_completeness[further] = full_completeness[further]
+                    if further.any():
+                        full_fallbacks[comp_name] = int(further.sum())
             physical = {"a": a, "m": m, "e": e}
             factor = np.ones_like(a)
             for name in spec.marginalized:
@@ -912,4 +973,8 @@ def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
             output[comp_name + separator + "marginal_factor"] = factor
             for name, values in physical.items():
                 output[comp_name + separator + name] = values
-    return output, fallback_total
+    output[FALLBACKS_KEY] = np.asarray(json.dumps({
+        "sample_average": fallback_total,
+        "full_sample_average": full_fallbacks,
+    }))
+    return output, fallback_total, full_fallbacks

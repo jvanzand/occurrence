@@ -181,6 +181,7 @@ def make_tier2(tier2_config, star_df_full, comp_post_dir, sampling_func,
             t2.t1_dir, t2.t2_dir, spec, star_df, comp_post_dir,
             sampling_func, y_param, m_unit=t2.t1_mass_unit,
             fill_single_nan_with_average=fill_single_nan_with_average,
+            full_sample_stars=star_df_full.star_name.tolist(),
         )
         return
 
@@ -234,8 +235,10 @@ def _dimension_tier2_exists(tier1_dir, tier2_dir, spec):
         return False
     with np.load(paths["catalog"]) as data:
         saved = dm.spec_from_json(str(data[main.dfu.DIMENSIONS_KEY]))
+        # Catalogs made before the full-sample fallback are rebuilt
+        current = main.FALLBACKS_KEY in data.files
     dm.check_matching(spec, saved, paths["catalog"], include_fit_edges=False)
-    return True
+    return current
 
 
 def _y_edges_for_tier(m_edges, m_or_q, m_unit):
@@ -530,6 +533,10 @@ def run_multiple(
                                  f"{label}_recoveries"),
                     label, m_unit=m_unit,
                 )
+            # The full-sample average subsamples fall back to, made here
+            # once rather than by parallel Tier 2 workers
+            main.full_sample_average(configuration["t1_dir"], label,
+                                     star_df.star_name.tolist())
 
     configurations = []
     tier2_configurations = []
