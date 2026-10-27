@@ -923,7 +923,8 @@ def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
     fit code reads it unchanged; ``FALLBACKS_KEY`` records the fallback
     counts. Returns (catalog dict, number of draws that fell back to the
     sample average, {companion: draws that fell back further to the
-    full-sample average}).
+    full-sample average}), counting only draws inside the marginalized
+    ranges.
     """
     output = {dfu.DIMENSIONS_KEY: np.asarray(spec.to_json())}
     fallback_total = 0
@@ -938,13 +939,13 @@ def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
                        for values in samples[comp_name])
             average_completeness = average((a, m, e))
             host_completeness = host((a, m, e))
+            fallback = changed = np.zeros(a.shape, dtype=bool)
             if fill_single_nan_with_average:
                 undefined = ~np.isfinite(host_completeness) | (
                     host_completeness <= 0
                 )
                 fallback = undefined & np.isfinite(average_completeness)
                 host_completeness[fallback] = average_completeness[fallback]
-                fallback_total += int(fallback.sum())
                 if full_average is not None:
                     full_completeness = full_average((a, m, e))
                     further = (
@@ -958,8 +959,6 @@ def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
                         host_completeness, full_completeness
                     )
                     host_completeness[further] = full_completeness[further]
-                    if changed.any():
-                        full_fallbacks[comp_name] = int(changed.sum())
             physical = {"a": a, "m": m, "e": e}
             factor = np.ones_like(a)
             for name in spec.marginalized:
@@ -967,6 +966,12 @@ def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
                 with np.errstate(invalid="ignore"):
                     factor = factor*distribution.density(physical[name])
             factor[~np.isfinite(factor)] = 0.0
+            # Fallbacks are counted only for draws inside the marginalized
+            # ranges, the ones the fit uses
+            used = factor > 0
+            fallback_total += int(np.sum(fallback & used))
+            if np.any(changed & used):
+                full_fallbacks[comp_name] = int(np.sum(changed & used))
             prior = np.ones_like(a)
             x = spec.to_engine(spec.x, physical[spec.x])
             y = spec.to_engine(spec.y, physical[spec.y])
