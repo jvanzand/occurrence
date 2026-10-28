@@ -1900,6 +1900,199 @@ def make_appendix_parameter_table(
     return output_path
 
 
+def _format_bin_limit(value):
+    """Format a bin edge with three significant figures (0.4, 13, 0.00158)."""
+    return np.format_float_positional(float(f"{float(value):.3g}"), trim="-")
+
+
+def _ord_table_row(summary_path):
+    """Read one experiment's run statistics and ORD bins from its summary.
+
+    Returns ``(statistics, ord_cells, limits)``: the formatted ``Nstars``,
+    ``Neff``, and ``AvgCompl`` (the same values and precision
+    :func:`make_variables` writes), one ``mode^{+}_{-}`` string per ORD bin,
+    and the ``(low, high)`` limits of each bin in the mass variable.
+    """
+    with np.load(summary_path) as summary:
+        nstars = _scalar(summary, "nstars", summary_path)
+        if not nstars.is_integer():
+            raise ValueError(f"'nstars' in {summary_path} must be an integer")
+        avg_compl = _scalar(summary, "cell_compl_single", summary_path)
+        required = ("cell_weights", "mode_ORD", "hdi_low_ORD", "hdi_high_ORD",
+                    "n_abins", "n_mbins", "a_m_lims_pairs")
+        missing = [key for key in required if key not in summary]
+        if missing:
+            raise KeyError(f"{summary_path} does not contain {missing!r}")
+        n_a = int(_scalar(summary, "n_abins", summary_path))
+        n_m = int(_scalar(summary, "n_mbins", summary_path))
+        cell_weights = np.asarray(summary["cell_weights"], dtype=float)
+        if cell_weights.size == 0 or not np.isfinite(cell_weights).all():
+            raise ValueError(
+                f"'cell_weights' in {summary_path} must be nonempty and finite"
+            )
+        mode, low, high = (
+            np.asarray(summary[key], dtype=float).reshape(-1)
+            for key in ("mode_ORD", "hdi_low_ORD", "hdi_high_ORD")
+        )
+        pairs = np.asarray(summary["a_m_lims_pairs"], dtype=float)
+
+    # One ORD per histogram cell; the bins are the mass bins only when the
+    # separation range is a single bin.
+    if n_a != 1:
+        raise ValueError(
+            f"{summary_path} has {n_a} separation bins; the ORD table lists "
+            "one ORD per mass bin, so it needs a single separation bin"
+        )
+    if not (mode.size == low.size == high.size == n_m and
+            pairs.shape == (n_m, 2, 2)):
+        raise ValueError(
+            f"ORD arrays in {summary_path} do not match n_mbins={n_m}"
+        )
+    cells = []
+    for index, (bin_mode, bin_low, bin_high) in enumerate(
+            zip(mode, low, high)):
+        try:
+            cells.append(f"${_format_parameter(bin_mode, bin_low, bin_high)}$")
+        except ValueError as error:
+            raise ValueError(
+                f"ORD bin {index + 1} in {summary_path} has no positive "
+                f"68% HDI on both sides of its mode (mode={bin_mode}, "
+                f"HDI=[{bin_low}, {bin_high}]): {error}"
+            ) from None
+    statistics = {
+        "Nstars": str(int(nstars)),
+        "Neff": f"{cell_weights.sum():.1f}",
+        "AvgCompl": f"{avg_compl:.2f}",
+    }
+    return statistics, cells, pairs[:, 1, :]
+
+
+def make_appendix_ord_table(
+        results_dir, tier1_dirs, tier2_types, t3,
+        caption="Histogram Occurrence Rate Densities",
+        label="tab:ord_appendix", output_file=None, note=None,
+        tier1_labels=None, sample_labels=None, tier1_page_breaks=False,
+        show_bin_limits=True):
+    """Create an appendix table of every histogram (piecewise) ORD bin.
+
+    Each experiment is one row holding its mass variable, stellar subsample,
+    ``N_star``, ``N_eff``, and average completeness, followed by the ORD of
+    every mass bin: the posterior mode with its 68% highest-density
+    interval.  Everything is read from the experiment's saved
+    ``summary_dict_piecewise.npz`` (``nstars``, ``cell_weights``,
+    ``cell_compl_single``, and the ``*_ORD`` arrays), so no entry depends on
+    ``variables.tex``; ``N_star``, ``N_eff``, and the completeness match the
+    values :func:`make_variables` writes.  Rows follow the order of
+    :func:`make_appendix_parameter_table`: Tier 1 values as supplied, then
+    Tier 2 types as supplied, with ``allstars`` once and every other type as
+    its high row followed by its low row.  Every experiment must have the
+    same number of ORD bins, and the bins of one Tier 1 must have the same
+    limits in every sample.
+
+    With ``show_bin_limits``, a row at the start of each Tier 1 section
+    gives that section's bin limits in its mass variable (the limits differ
+    between mass and mass ratio, so the column heads only number the bins).
+    ``tier1_labels`` and ``sample_labels`` map directory names to the text of
+    the first two columns, ``note`` is LaTeX text for a table note, and
+    ``tier1_page_breaks`` starts each Tier 1 section after the first on a new
+    page.  ``t3`` is the Tier 3 folder holding every experiment's summary.
+    """
+    results_dir = Path(results_dir)
+    tier1_dirs = list(tier1_dirs)
+    tier2_types = list(tier2_types)
+    if not tier1_dirs or not tier2_types:
+        raise ValueError("tier1_dirs and tier2_types cannot be empty")
+    tier1_labels = dict(tier1_labels or {})
+    sample_labels = dict(sample_labels or {})
+
+    sections = []
+    n_bins = None
+    for tier1_dir in tier1_dirs:
+        tier1_name = Path(tier1_dir).name
+        rows = []
+        limits = None
+        for tier2_type in tier2_types:
+            for tier2_dir, _ in _tier2_directories(tier2_type):
+                summary_path = (
+                    results_dir / tier1_dir / tier2_dir / t3 /
+                    "saved_dicts" / SUMMARY_FILENAME
+                )
+                if not summary_path.is_file():
+                    raise FileNotFoundError(
+                        f"no piecewise summary found at {summary_path}"
+                    )
+                statistics, cells, bin_limits = _ord_table_row(summary_path)
+                if n_bins is None:
+                    n_bins = len(cells)
+                elif len(cells) != n_bins:
+                    raise ValueError(
+                        f"{summary_path} has {len(cells)} ORD bins; earlier "
+                        f"experiments have {n_bins}"
+                    )
+                if limits is None:
+                    limits = bin_limits
+                elif not np.allclose(limits, bin_limits, rtol=1e-6):
+                    raise ValueError(
+                        f"{summary_path} has different bin limits from the "
+                        f"other {tier1_name} samples"
+                    )
+                rows.append([
+                    tier1_labels.get(tier1_name, tier1_name),
+                    sample_labels.get(tier2_dir, tier2_dir),
+                    statistics["Nstars"], statistics["Neff"],
+                    statistics["AvgCompl"], *cells,
+                ])
+        sections.append((tier1_name, rows, limits))
+
+    lines = [
+        r"\begin{longrotatetable}",
+        r"\begin{deluxetable*}{" + "c"*(5 + n_bins) + "}",
+        rf"\tablecaption{{{caption}}}",
+        rf"\label{{{label}}}",
+        "",
+        r"\tablehead{",
+        r"\shortstack{Mass\\Variable} &",
+        r"\shortstack{Stellar\\Subsample} &",
+        r"$N_\star$ &",
+        r"\shortstack{$N_{\mathrm{eff}}$} &",
+        r"Completeness &",
+        " & ".join(f"Bin {index}" for index in range(1, n_bins + 1)),
+        r"}",
+        r"\startdata",
+    ]
+    for section_index, (tier1_name, rows, limits) in enumerate(sections):
+        if tier1_page_breaks and section_index > 0:
+            lines.append(r"\tablebreak")
+        if show_bin_limits:
+            limit_cells = [
+                f"{_format_bin_limit(low)}--{_format_bin_limit(high)}"
+                for low, high in limits
+            ]
+            lines.append(" & ".join([
+                tier1_labels.get(tier1_name, tier1_name), "Bin limits",
+                "", "", "", *limit_cells,
+            ]) + r" \\")
+            lines.append(r"\hline")
+        lines.extend(" & ".join(row) + r" \\" for row in rows)
+        lines.append(r"\hline")
+    lines.append(r"\enddata")
+    lines.extend(_table_note_lines(note))
+    lines.extend([
+        r"\end{deluxetable*}",
+        r"\end{longrotatetable}",
+    ])
+
+    if output_file is None:
+        output_path = (
+            results_dir / PAPER_TABLES_DIRNAME / f"ord_appendix_{t3}.tex"
+        )
+    else:
+        output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return output_path
+
+
 def _three_parameter_levels(tier2_dir):
     """Extract mass, metallicity, and age levels from a subset directory."""
     match = re.fullmatch(

@@ -2269,3 +2269,121 @@ def test_variables_changes_reports_new_removed_and_largest_changes():
     assert [item[0] for item in changes["changed"]] == ["McA", "McB"]
     assert changes["largest"][0] == ("McB", r"2.4\,\sigma", r"3.6\,\sigma")
     assert post_fit_analysis.read_variable_commands(new)["McSame"] == "719"
+
+
+def _write_ord_summary(root, tier2, tier3, n_bins=3, **overrides):
+    edges = 10.0**np.arange(n_bins + 1)
+    values = {
+        "nstars": 123,
+        "cell_weights": np.full(n_bins, 2.5),
+        "cell_compls": np.full(n_bins, 0.5),
+        "cell_compl_single": 0.456,
+        "n_abins": 1,
+        "n_mbins": n_bins,
+        "a_m_lims_pairs": np.array([
+            [[0.1, 10.0], [low, high]]
+            for low, high in zip(edges[:-1], edges[1:])
+        ]),
+        "mode_ORD": np.array([0.05, 0.1234, 0.0021][:n_bins]),
+        "hdi_low_ORD": np.array([0.04, 0.1, 0.001][:n_bins]),
+        "hdi_high_ORD": np.array([0.07, 0.15, 0.0045][:n_bins]),
+    }
+    values.update(overrides)
+    directory = root / tier2 / tier3 / "saved_dicts"
+    directory.mkdir(parents=True)
+    np.savez(directory / post_fit_analysis.SUMMARY_FILENAME, **values)
+
+
+def test_appendix_ord_table_lists_statistics_and_every_bin(tmp_path):
+    for tier1 in ("mtrue", "qtrue"):
+        for tier2 in ("allstars", "highMstar", "lowMstar"):
+            _write_ord_summary(tmp_path / tier1, tier2, "paper_bounds")
+
+    output = post_fit_analysis.make_appendix_ord_table(
+        tmp_path, ["mtrue", "qtrue"], ["allstars", "Mstar"], "paper_bounds",
+        tier1_labels={"mtrue": "$M_c$", "qtrue": "$q$"},
+        sample_labels={"allstars": "All Stars"}, tier1_page_breaks=True,
+        note="ORD note.",
+    )
+
+    assert output == tmp_path / "paper_tables" / "ord_appendix_paper_bounds.tex"
+    text = output.read_text()
+    assert r"\begin{deluxetable*}{cccccccc}" in text
+    assert "Bin 3\n}" in text
+    rows = [line for line in text.splitlines() if " & " in line
+            and not line.startswith(("\\shortstack", "Bin"))]
+    # Bin limits, then allstars/highMstar/lowMstar, for each Tier 1
+    assert len(rows) == 8
+    assert rows[0] == (r"$M_c$ & Bin limits &  &  &  & 1--10 & 10--100 & "
+                       r"100--1000 \\")
+    first = rows[1].split(" & ")
+    assert first[:5] == ["$M_c$", "All Stars", "123", "7.5", "0.46"]
+    assert first[5] == "$0.05^{+0.02}_{-0.01}$"
+    assert first[7] == "$0.002^{+0.002}_{-0.001}$ \\\\"
+    assert rows[2].split(" & ")[1] == "highMstar"
+    assert rows[4].startswith("$q$ & Bin limits")
+    assert text.count(r"\tablebreak") == 1
+    assert text.index(r"\tablebreak") < text.index("$q$ & Bin limits")
+    assert "\\textbf{Note.} ORD note." in text
+
+
+def test_appendix_ord_table_matches_make_variables_statistics(tmp_path):
+    _write_ord_summary(
+        tmp_path / "mtrue", "allstars", "paper_bounds",
+        cell_weights=np.array([40.1, 58.63, 0.04]),
+    )
+    table = post_fit_analysis.make_appendix_ord_table(
+        tmp_path, ["mtrue"], ["allstars"], "paper_bounds",
+        show_bin_limits=False,
+    ).read_text()
+    variables = post_fit_analysis.make_variables(
+        tmp_path, ["mtrue"], ["allstars"], ["paper_bounds"],
+        stack_dim="a",
+    ).read_text()
+    row = next(line for line in table.splitlines()
+               if line.startswith("mtrue & allstars")).split(" & ")
+    values = dict(re.findall(
+        r"\\McAllstarsPaperBounds(\w+)\}\{\\ensuremath\{([\d.]+)\}", variables
+    ))
+    assert row[2:5] == [values["Nstars"], values["Neff"], values["AvgCompl"]]
+    assert "Bin limits" not in table
+
+
+def test_appendix_ord_table_checks_every_experiment(tmp_path):
+    _write_ord_summary(tmp_path / "mtrue", "highMstar", "paper_bounds")
+    with pytest.raises(FileNotFoundError, match="lowMstar"):
+        post_fit_analysis.make_appendix_ord_table(
+            tmp_path, ["mtrue"], ["Mstar"], "paper_bounds")
+
+    _write_ord_summary(tmp_path / "mtrue", "lowMstar", "paper_bounds",
+                       n_bins=2)
+    with pytest.raises(ValueError, match="2 ORD bins"):
+        post_fit_analysis.make_appendix_ord_table(
+            tmp_path, ["mtrue"], ["Mstar"], "paper_bounds")
+
+
+def test_appendix_ord_table_rejects_inconsistent_bin_limits(tmp_path):
+    _write_ord_summary(tmp_path / "mtrue", "highMstar", "paper_bounds")
+    shifted = np.array([[[0.1, 10.0], [low, high]] for low, high in
+                        [(2, 20), (20, 200), (200, 2000)]])
+    _write_ord_summary(tmp_path / "mtrue", "lowMstar", "paper_bounds",
+                       a_m_lims_pairs=shifted)
+    with pytest.raises(ValueError, match="different bin limits"):
+        post_fit_analysis.make_appendix_ord_table(
+            tmp_path, ["mtrue"], ["Mstar"], "paper_bounds")
+
+
+def test_appendix_ord_table_rejects_bins_without_a_two_sided_hdi(tmp_path):
+    _write_ord_summary(tmp_path / "mtrue", "allstars", "paper_bounds",
+                       hdi_low_ORD=np.array([0.04, 0.1234, 0.001]))
+    with pytest.raises(ValueError, match="ORD bin 2"):
+        post_fit_analysis.make_appendix_ord_table(
+            tmp_path, ["mtrue"], ["allstars"], "paper_bounds")
+
+
+def test_appendix_ord_table_needs_one_separation_bin(tmp_path):
+    _write_ord_summary(tmp_path / "mtrue", "allstars", "paper_bounds",
+                       n_abins=2, n_mbins=1)
+    with pytest.raises(ValueError, match="single separation bin"):
+        post_fit_analysis.make_appendix_ord_table(
+            tmp_path, ["mtrue"], ["allstars"], "paper_bounds")
