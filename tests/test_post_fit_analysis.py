@@ -2314,16 +2314,16 @@ def test_appendix_ord_table_lists_statistics_and_every_bin(tmp_path):
             and not line.startswith(("\\shortstack", "Bin"))]
     # Bin limits, then allstars/highMstar/lowMstar, for each Tier 1
     assert len(rows) == 8
-    assert rows[0] == (r"$M_c$ & Bin limits &  &  &  & 1--10 & 10--100 & "
-                       r"100--1000 \\")
+    # Only the limits are filled in on a bin-limit row
+    assert rows[0] == r" &  &  &  &  & 1--10 & 10--100 & 100--1000 \\"
     first = rows[1].split(" & ")
     assert first[:5] == ["$M_c$", "All Stars", "123", "7.5", "0.46"]
     assert first[5] == "$0.05^{+0.02}_{-0.01}$"
     assert first[7] == "$0.002^{+0.002}_{-0.001}$ \\\\"
     assert rows[2].split(" & ")[1] == "highMstar"
-    assert rows[4].startswith("$q$ & Bin limits")
+    assert rows[4] == rows[0]
+    assert "Bin limits" not in text
     assert text.count(r"\tablebreak") == 1
-    assert text.index(r"\tablebreak") < text.index("$q$ & Bin limits")
     assert "\\textbf{Note.} ORD note." in text
 
 
@@ -2387,3 +2387,34 @@ def test_appendix_ord_table_needs_one_separation_bin(tmp_path):
     with pytest.raises(ValueError, match="single separation bin"):
         post_fit_analysis.make_appendix_ord_table(
             tmp_path, ["mtrue"], ["allstars"], "paper_bounds")
+
+
+def test_appendix_ord_table_writes_bin_limits_with_units(tmp_path):
+    # Mass ratio limits of 0.0382, 0.0764 and 1.234 percent in 1 Msun bins
+    for tier1, edges in (("mtrue", (0.4, 0.8, 1.6, 3.2)),
+                         ("qtrue", (3.82e-4, 7.64e-4, 1.234e-2, 4.77e-2))):
+        pairs = np.array([[[0.1, 10.0], [low, high]]
+                          for low, high in zip(edges[:-1], edges[1:])])
+        _write_ord_summary(tmp_path / tier1, "allstars", "paper_bounds",
+                           a_m_lims_pairs=pairs)
+    text = post_fit_analysis.make_appendix_ord_table(
+        tmp_path, ["mtrue", "qtrue"], ["allstars"], "paper_bounds",
+        bin_limit_styles={
+            "mtrue": {"unit": r"~\Mjup"},
+            "qtrue": {"scale": 100, "decimals": 1, "unit": r"\%"},
+        },
+    ).read_text()
+    limit_rows = [line for line in text.splitlines()
+                  if line.startswith(" &  &  &  &  & ")]
+    assert limit_rows == [
+        r" &  &  &  &  & 0.4--0.8~\Mjup & 0.8--1.6~\Mjup & 1.6--3.2~\Mjup \\",
+        r" &  &  &  &  & 0.0--0.1\% & 0.1--1.2\% & 1.2--4.8\% \\",
+    ]
+    with pytest.raises(ValueError, match="unrequested Tier 1"):
+        post_fit_analysis.make_appendix_ord_table(
+            tmp_path, ["mtrue"], ["allstars"], "paper_bounds",
+            bin_limit_styles={"qtrue": {"scale": 100}})
+    with pytest.raises(ValueError, match="unknown bin limit style"):
+        post_fit_analysis.make_appendix_ord_table(
+            tmp_path, ["mtrue"], ["allstars"], "paper_bounds",
+            bin_limit_styles={"mtrue": {"units": "x"}})

@@ -1972,7 +1972,7 @@ def make_appendix_ord_table(
         caption="Histogram Occurrence Rate Densities",
         label="tab:ord_appendix", output_file=None, note=None,
         tier1_labels=None, sample_labels=None, tier1_page_breaks=False,
-        show_bin_limits=True):
+        show_bin_limits=True, bin_limit_styles=None):
     """Create an appendix table of every histogram (piecewise) ORD bin.
 
     Each experiment is one row holding its mass variable, stellar subsample,
@@ -1991,7 +1991,13 @@ def make_appendix_ord_table(
 
     With ``show_bin_limits``, a row at the start of each Tier 1 section
     gives that section's bin limits in its mass variable (the limits differ
-    between mass and mass ratio, so the column heads only number the bins).
+    between mass and mass ratio, so the column heads only number the bins);
+    only the limits are filled in, and the other cells are left blank.
+    ``bin_limit_styles`` maps a Tier 1 name to how its limits are written,
+    with the keys ``scale`` (multiplies each limit; 100 for percent),
+    ``decimals`` (rounds half up to this many decimal places; by default
+    three significant figures), and ``unit`` (LaTeX appended to each range,
+    e.g. ``r"~\\Mjup"`` or ``r"\\%"``).  Tier 1s not named keep bare limits.
     ``tier1_labels`` and ``sample_labels`` map directory names to the text of
     the first two columns, ``note`` is LaTeX text for a table note, and
     ``tier1_page_breaks`` starts each Tier 1 section after the first on a new
@@ -2004,6 +2010,24 @@ def make_appendix_ord_table(
         raise ValueError("tier1_dirs and tier2_types cannot be empty")
     tier1_labels = dict(tier1_labels or {})
     sample_labels = dict(sample_labels or {})
+    bin_limit_styles = {
+        name: dict(style) for name, style in (bin_limit_styles or {}).items()
+    }
+    for name, style in bin_limit_styles.items():
+        unknown = sorted(set(style) - {"scale", "decimals", "unit"})
+        if name not in {Path(tier1).name for tier1 in tier1_dirs}:
+            raise ValueError(
+                f"bin_limit_styles names unrequested Tier 1 {name!r}"
+            )
+        if unknown:
+            raise ValueError(f"unknown bin limit style keys {unknown}")
+
+    def format_limit(tier1_name, value):
+        style = bin_limit_styles.get(tier1_name, {})
+        value = float(value)*style.get("scale", 1)
+        if style.get("decimals") is None:
+            return _format_bin_limit(value)
+        return _round_half_up(value, style["decimals"])
 
     sections = []
     n_bins = None
@@ -2064,14 +2088,13 @@ def make_appendix_ord_table(
         if tier1_page_breaks and section_index > 0:
             lines.append(r"\tablebreak")
         if show_bin_limits:
+            unit = bin_limit_styles.get(tier1_name, {}).get("unit", "")
             limit_cells = [
-                f"{_format_bin_limit(low)}--{_format_bin_limit(high)}"
+                f"{format_limit(tier1_name, low)}--"
+                f"{format_limit(tier1_name, high)}{unit}"
                 for low, high in limits
             ]
-            lines.append(" & ".join([
-                tier1_labels.get(tier1_name, tier1_name), "Bin limits",
-                "", "", "", *limit_cells,
-            ]) + r" \\")
+            lines.append(" & ".join(["", "", "", "", "", *limit_cells]) + r" \\")
             lines.append(r"\hline")
         lines.extend(" & ".join(row) + r" \\" for row in rows)
         lines.append(r"\hline")
