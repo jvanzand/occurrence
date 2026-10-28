@@ -2389,6 +2389,28 @@ def test_appendix_ord_table_needs_one_separation_bin(tmp_path):
             tmp_path, ["mtrue"], ["allstars"], "paper_bounds")
 
 
+def test_appendix_ord_table_keeps_first_nonzero_digit_of_small_limits(tmp_path):
+    # Percent limits 0.0382, 0.0764, 0.096, 0.153, 0.3055, 4.773
+    edges = (3.82e-4, 7.64e-4, 9.6e-4, 1.53e-3, 3.055e-3, 4.773e-2)
+    pairs = np.array([[[0.1, 10.0], [low, high]]
+                      for low, high in zip(edges[:-1], edges[1:])])
+    _write_ord_summary(tmp_path / "qtrue", "allstars", "paper_bounds",
+                       n_bins=5, a_m_lims_pairs=pairs,
+                       mode_ORD=np.full(5, 0.1), hdi_low_ORD=np.full(5, 0.05),
+                       hdi_high_ORD=np.full(5, 0.2))
+    kwargs = dict(bin_limit_styles={"qtrue": {
+        "scale": 100, "decimals": 1, "fine_below": 0.1, "unit": r"\%"}})
+    text = post_fit_analysis.make_appendix_ord_table(
+        tmp_path, ["qtrue"], ["allstars"], "paper_bounds", **kwargs
+    ).read_text()
+    limit_row = [line for line in text.splitlines()
+                 if line.startswith(" &  &  &  &  & ")]
+    assert limit_row == [
+        r" &  &  &  &  & 0.04--0.08\% & 0.08--0.1\% & 0.1--0.2\% & "
+        r"0.2--0.3\% & 0.3--4.8\% \\"
+    ]
+
+
 def test_appendix_ord_table_writes_bin_limits_with_units(tmp_path):
     # Mass ratio limits of 0.0382, 0.0764 and 1.234 percent in 1 Msun bins
     for tier1, edges in (("mtrue", (0.4, 0.8, 1.6, 3.2)),

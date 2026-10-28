@@ -1996,8 +1996,10 @@ def make_appendix_ord_table(
     ``bin_limit_styles`` maps a Tier 1 name to how its limits are written,
     with the keys ``scale`` (multiplies each limit; 100 for percent),
     ``decimals`` (rounds half up to this many decimal places; by default
-    three significant figures), and ``unit`` (LaTeX appended to each range,
-    e.g. ``r"~\\Mjup"`` or ``r"\\%"``).  Tier 1s not named keep bare limits.
+    three significant figures), ``fine_below`` (limits between zero and this
+    value keep their first nonzero decimal place instead, so 0.0382 with
+    ``decimals`` 1 reads 0.04 rather than 0.0), and ``unit`` (LaTeX appended
+    to each range, e.g. ``r"~\\Mjup"`` or ``r"\\%"``).  Tier 1s not named keep bare limits.
     ``tier1_labels`` and ``sample_labels`` map directory names to the text of
     the first two columns, ``note`` is LaTeX text for a table note, and
     ``tier1_page_breaks`` starts each Tier 1 section after the first on a new
@@ -2014,7 +2016,9 @@ def make_appendix_ord_table(
         name: dict(style) for name, style in (bin_limit_styles or {}).items()
     }
     for name, style in bin_limit_styles.items():
-        unknown = sorted(set(style) - {"scale", "decimals", "unit"})
+        unknown = sorted(
+            set(style) - {"scale", "decimals", "fine_below", "unit"}
+        )
         if name not in {Path(tier1).name for tier1 in tier1_dirs}:
             raise ValueError(
                 f"bin_limit_styles names unrequested Tier 1 {name!r}"
@@ -2025,9 +2029,20 @@ def make_appendix_ord_table(
     def format_limit(tier1_name, value):
         style = bin_limit_styles.get(tier1_name, {})
         value = float(value)*style.get("scale", 1)
-        if style.get("decimals") is None:
+        decimals = style.get("decimals")
+        if decimals is None:
             return _format_bin_limit(value)
-        return _round_half_up(value, style["decimals"])
+        # Below ``fine_below``, keep the first nonzero decimal place so small
+        # limits do not round to zero (0.0382 as 0.04, not 0.0).
+        if 0 < value < style.get("fine_below", 0):
+            fine = int(-np.floor(np.log10(value)))
+            if fine > decimals:
+                rounded = _round_half_up(value, fine)
+                # 0.096 rounds up to 0.10, which is written 0.1.
+                if float(rounded) >= 10.0**-decimals:
+                    return _round_half_up(float(rounded), decimals)
+                return rounded
+        return _round_half_up(value, decimals)
 
     sections = []
     n_bins = None
