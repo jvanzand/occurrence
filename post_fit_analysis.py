@@ -1905,6 +1905,27 @@ def _format_bin_limit(value):
     return np.format_float_positional(float(f"{float(value):.3g}"), trim="-")
 
 
+def _round_sig_half_up(value, sig_figs):
+    """Format ``value`` to ``sig_figs`` significant figures, rounding half up.
+
+    Trailing zeros are kept (1.2, 2.0), and a value that rounds up to the next
+    power of ten keeps the same count (0.096 to 2 figures is 0.10).
+    """
+    from decimal import ROUND_HALF_UP, Decimal
+
+    number = Decimal(repr(float(value)))
+    if number == 0:
+        return "0"
+    rounded = number.quantize(
+        Decimal(1).scaleb(number.adjusted() - sig_figs + 1), ROUND_HALF_UP
+    )
+    if rounded.adjusted() > number.adjusted():
+        rounded = rounded.quantize(
+            Decimal(1).scaleb(rounded.adjusted() - sig_figs + 1)
+        )
+    return format(rounded, "f")
+
+
 def _ord_table_row(summary_path):
     """Read one experiment's run statistics and ORD bins from its summary.
 
@@ -1995,8 +2016,10 @@ def make_appendix_ord_table(
     only the limits are filled in, and the other cells are left blank.
     ``bin_limit_styles`` maps a Tier 1 name to how its limits are written,
     with the keys ``scale`` (multiplies each limit; 100 for percent),
-    ``decimals`` (rounds half up to this many decimal places; by default
-    three significant figures), ``fine_below`` (limits between zero and this
+    ``sig_figs`` (rounds half up to this many significant figures, so 0.0382
+    with 2 reads 0.038; cannot be combined with ``decimals``), ``decimals``
+    (rounds half up to this many decimal places; with neither key, three
+    significant figures), ``fine_below`` (limits between zero and this
     value keep their first nonzero decimal place instead, so 0.0382 with
     ``decimals`` 1 reads 0.04 rather than 0.0), and ``unit`` (LaTeX appended
     to each range, e.g. ``r"~\\Mjup"`` or ``r"\\%"``).  Tier 1s not named keep bare limits.
@@ -2017,7 +2040,8 @@ def make_appendix_ord_table(
     }
     for name, style in bin_limit_styles.items():
         unknown = sorted(
-            set(style) - {"scale", "decimals", "fine_below", "unit"}
+            set(style) - {"scale", "sig_figs", "decimals", "fine_below",
+                          "unit"}
         )
         if name not in {Path(tier1).name for tier1 in tier1_dirs}:
             raise ValueError(
@@ -2025,10 +2049,18 @@ def make_appendix_ord_table(
             )
         if unknown:
             raise ValueError(f"unknown bin limit style keys {unknown}")
+        if "sig_figs" in style and ("decimals" in style or
+                                    "fine_below" in style):
+            raise ValueError(
+                "bin limit style 'sig_figs' cannot be combined with "
+                "'decimals' or 'fine_below'"
+            )
 
     def format_limit(tier1_name, value):
         style = bin_limit_styles.get(tier1_name, {})
         value = float(value)*style.get("scale", 1)
+        if style.get("sig_figs") is not None:
+            return _round_sig_half_up(value, style["sig_figs"])
         decimals = style.get("decimals")
         if decimals is None:
             return _format_bin_limit(value)

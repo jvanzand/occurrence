@@ -2411,6 +2411,33 @@ def test_appendix_ord_table_keeps_first_nonzero_digit_of_small_limits(tmp_path):
     ]
 
 
+def test_appendix_ord_table_rounds_limits_to_significant_figures(tmp_path):
+    # Percent limits 0.0382, 0.0764, 0.0996, 0.1527, 0.3055, 1.241, 4.773
+    edges = (3.82e-4, 7.64e-4, 9.96e-4, 1.527e-3, 3.055e-3, 1.241e-2,
+             4.773e-2)
+    pairs = np.array([[[0.1, 10.0], [low, high]]
+                      for low, high in zip(edges[:-1], edges[1:])])
+    _write_ord_summary(tmp_path / "qtrue", "allstars", "paper_bounds",
+                       n_bins=6, a_m_lims_pairs=pairs,
+                       mode_ORD=np.full(6, 0.1), hdi_low_ORD=np.full(6, 0.05),
+                       hdi_high_ORD=np.full(6, 0.2))
+    text = post_fit_analysis.make_appendix_ord_table(
+        tmp_path, ["qtrue"], ["allstars"], "paper_bounds",
+        bin_limit_styles={"qtrue": {"scale": 100, "sig_figs": 2,
+                                    "unit": r"\%"}},
+    ).read_text()
+    limit_row = [line for line in text.splitlines()
+                 if line.startswith(" &  &  &  &  & ")]
+    assert limit_row == [
+        r" &  &  &  &  & 0.038--0.076\% & 0.076--0.10\% & 0.10--0.15\% & "
+        r"0.15--0.31\% & 0.31--1.2\% & 1.2--4.8\% \\"
+    ]
+    with pytest.raises(ValueError, match="cannot be combined"):
+        post_fit_analysis.make_appendix_ord_table(
+            tmp_path, ["qtrue"], ["allstars"], "paper_bounds",
+            bin_limit_styles={"qtrue": {"sig_figs": 2, "decimals": 1}})
+
+
 def test_appendix_ord_table_writes_bin_limits_with_units(tmp_path):
     # Mass ratio limits of 0.0382, 0.0764 and 1.234 percent in 1 Msun bins
     for tier1, edges in (("mtrue", (0.4, 0.8, 1.6, 3.2)),
