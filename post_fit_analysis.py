@@ -34,6 +34,11 @@ _TIER1_LATEX_PREFIXES = {
 _MASS_RATIO_TIER1S = {"qtrue", "qsini", "qtrue_P", "qsini_P"}
 _PERIOD_TIER1S = {"mtrue_P", "msini_P", "qtrue_P", "qsini_P"}
 
+# Model pairs whose BIC difference, BIC_first - BIC_second, gets its own
+# macro (e.g. \McAllstarsPaperBoundsSigmoidLogGDbicBinaZero), so the text can
+# quote Delta BIC without subtracting rounded BICs
+_DELTA_BIC_PAIRS = (("sigmoid", "logG"),)
+
 # Models in the paper's order (Section 3.2, Table 1). Parameter macro names
 # spell out the paper's symbols: sigmoid B_1, B_2; log-linear C_1, C_2;
 # escarpment D_1, D_2.
@@ -4476,6 +4481,29 @@ def make_variables(
                                     )
                                 command_names.add(name)
                                 block.append(_command(name, f"{bic:.1f}"))
+                        for first, second in _DELTA_BIC_PAIRS:
+                            if not {first, second} <= set(all_bics[key]):
+                                continue
+                            differences = (
+                                np.asarray(all_bics[key][first], dtype=float) -
+                                np.asarray(all_bics[key][second], dtype=float)
+                            )
+                            for bin_index, difference in enumerate(differences):
+                                name = (
+                                    prefix +
+                                    _MODEL_PARAMETER_MACROS[first][0] +
+                                    _MODEL_PARAMETER_MACROS[second][0] +
+                                    "Dbic" +
+                                    f"Bin{experiment_dim}{_number_word(bin_index)}"
+                                )
+                                if name in command_names:
+                                    raise ValueError(
+                                        f"duplicate LaTeX command name: {name}"
+                                    )
+                                command_names.add(name)
+                                block.append(
+                                    _command(name, f"{difference:.1f}")
+                                )
                     blocks.append("\n".join(block))
 
     empty_tier3_dirs = [

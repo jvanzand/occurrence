@@ -181,7 +181,10 @@ def test_make_variables_collects_parametric_fit_chains(tmp_path, monkeypatch):
     monkeypatch.setattr(
         post_fit_analysis, "calculate_all_bics",
         lambda *args: {
-            "mtrue/allstars/roi": {"escarpment": [4.25, -1.04]}
+            "mtrue/allstars/roi": {
+                "escarpment": [4.25, -1.04],
+                "sigmoid": [832.64, 1.0], "logG": [824.26, 1.0],
+            }
         },
     )
 
@@ -195,6 +198,9 @@ def test_make_variables_collects_parametric_fit_chains(tmp_path, monkeypatch):
     assert r"\McAllstarsRoiEscarpmentIntOccBinaZero" in text
     assert "% Parametric model: escarpment" in text
     assert r"\McAllstarsRoiEscarpmentBicBinaZero}{\ensuremath{4.2}}" in text
+    # Delta BIC comes from the unrounded BICs (832.6 - 824.3 would give 8.3)
+    assert r"\McAllstarsRoiSigmoidLogGDbicBinaZero}{\ensuremath{8.4}}" in text
+    assert "EscarpmentLogGDbic" not in text
 
 
 def test_make_variables_derives_loglinear_slope_from_fit_bounds(
