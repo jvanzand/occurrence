@@ -2241,6 +2241,44 @@ def test_plot_stellar_parameter_histograms_writes_each_parameter(tmp_path):
     assert all(path.is_file() for path in outputs.values())
 
 
+def test_plot_stellar_mass_feh_scatter_writes_figure(tmp_path):
+    catalog = pd.DataFrame({
+        "Mstar": [0.5, 0.9, 1.0, 1.1, 1.3, np.nan],
+        "feh": [-0.2, 0.0, 0.1, 0.1, -0.1, 0.3],
+    })
+    output = post_fit_analysis.plot_stellar_mass_feh_scatter(tmp_path, catalog)
+    assert output == (
+        tmp_path / post_fit_analysis.PAPER_FIGURES_DIRNAME /
+        "stellar_scatter_mass_feh.png"
+    )
+    assert output.is_file()
+    with pytest.raises(ValueError, match="finite mass and metallicity"):
+        post_fit_analysis.plot_stellar_mass_feh_scatter(
+            tmp_path, pd.DataFrame({"Mstar": [np.nan], "feh": [0.0]}))
+
+
+def test_split_by_cut_puts_the_cut_value_in_the_low_sample():
+    high, low = post_fit_analysis._split_by_cut(
+        np.array([0.9, 1.0, 1.1, np.nan]), 1.0)
+    assert high.tolist() == [False, False, True, False]
+    assert low.tolist() == [True, True, False, False]
+
+
+def test_age_histogram_draws_only_the_mass_range_outline(tmp_path, monkeypatch):
+    import matplotlib.axes
+    calls = []
+    original = matplotlib.axes.Axes.plot
+    monkeypatch.setattr(
+        matplotlib.axes.Axes, "plot",
+        lambda self, *args, **kwargs: (calls.append(kwargs.get("linestyle")),
+                                       original(self, *args, **kwargs))[1])
+    catalog = pd.DataFrame({"Mstar": [0.5, 0.9, 1.1, 1.3],
+                            "feh": [0.0] * 4, "age": [2.0, 3.0, 6.0, 8.0]})
+    post_fit_analysis.plot_stellar_parameter_histograms(
+        tmp_path, "Age", catalog)
+    assert "--" not in calls
+
+
 def test_plot_stellar_parameter_histograms_rejects_unknown_parameter(
         tmp_path):
     catalog = pd.DataFrame({"Mstar": [1.0], "feh": [0.0], "age": [5.0]})

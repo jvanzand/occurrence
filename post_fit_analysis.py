@@ -567,9 +567,8 @@ def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
 
     The histogram is drawn as a single outline, as on the ORD plots, and a
     dotted line marks the value that divides the high and low samples. For
-    age, the solid outline shows only stars in the mass range where the
-    activity-age relation holds, and a dashed gray outline shows every star
-    with an age.
+    age, only stars in the mass range where the activity-age relation holds
+    are shown, since no age is derived outside it.
     """
     from matplotlib import pyplot as plt
 
@@ -601,10 +600,6 @@ def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
                 rf"M_{{\odot}}$ ({int(in_mass_range.sum())})"
             ),
         )
-        _histogram_outline(
-            axis, values[finite], edges, color="gray", linestyle="--",
-            linewidth=2, label=f"All ({int(finite.sum())})",
-        )
         # Legend at the ORD plots' size
         axis.legend(fontsize=1.6*plt.rcParams["font.size"])
     else:
@@ -619,6 +614,140 @@ def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=300)
+    plt.close(figure)
+    return output_path
+
+
+def _split_by_cut(values, cut):
+    """Return masks of the high (``> cut``) and low (``<= cut``) samples."""
+    finite = np.isfinite(values)
+    return finite & (values > cut), finite & (values <= cut)
+
+
+def plot_stellar_mass_feh_scatter(results_dir, sample_catalog, bins=20):
+    """Plot every star's mass and metallicity with marginal histograms.
+
+    Points are colored by stellar mass sample (high ``Mstar > cut``, low
+    otherwise) and drawn as circles for metal-rich stars ([Fe/H] > cut) and
+    triangles for metal-poor ones, with the dividing values as dotted lines.
+    The top histogram shows the mass samples in the same colors and the side
+    histogram the metallicity samples in dark and light gray; the legend
+    gives each sample's number of stars.  The figure belongs to the sample
+    rather than to any fit, so it is saved as ``stellar_scatter_mass_feh.png``
+    in ``results_dir/paper_figures``, beside the paper tables.
+
+    Returns
+    -------
+    pathlib.Path
+        The generated plot path.
+    """
+    from matplotlib import pyplot as plt
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+    from matplotlib.ticker import MaxNLocator
+
+    plt.style.use(str(Path(__file__).resolve().parent / "matplotlibrc"))
+    mass_column, mass_label, mass_cut = _HISTOGRAM_PARAMETERS["mstar"]
+    feh_column, feh_label, feh_cut = _HISTOGRAM_PARAMETERS["feh"]
+    mass = np.asarray(sample_catalog[mass_column], dtype=float)
+    feh = np.asarray(sample_catalog[feh_column], dtype=float)
+    has_both = np.isfinite(mass) & np.isfinite(feh)
+    if not has_both.any():
+        raise ValueError("no stars have a finite mass and metallicity")
+    mass, feh = mass[has_both], feh[has_both]
+    # Shift each set of bins so the dividing value is a bin edge and no bin
+    # mixes the high and low samples (the 1e-9 keeps stars exactly at the
+    # value, which belong to the low sample, in the lower bin)
+    mass_edges = np.histogram_bin_edges(mass, bins=bins)
+    mass_edges = mass_edges + (
+        mass_cut - mass_edges[np.argmin(np.abs(mass_edges - mass_cut))] + 1e-9
+    )
+    feh_edges = np.histogram_bin_edges(feh, bins=bins)
+    feh_edges = feh_edges + (
+        feh_cut - feh_edges[np.argmin(np.abs(feh_edges - feh_cut))] + 1e-9
+    )
+    high_mass, low_mass = _split_by_cut(mass, mass_cut)
+    rich, poor = _split_by_cut(feh, feh_cut)
+
+    mass_colors = {"high": "tab:red", "low": "tab:blue"}
+    feh_colors = {"rich": "0.25", "poor": "0.75"}
+    markers = {"rich": "o", "poor": "^"}
+    size = plt.rcParams["font.size"]
+
+    figure = plt.figure(figsize=(9, 7.5))
+    grid = figure.add_gridspec(
+        2, 2, width_ratios=(4, 1.6), height_ratios=(1.1, 4),
+        hspace=0.05, wspace=0.05,
+    )
+    legend_axis = figure.add_subplot(grid[0, 1])
+    legend_axis.axis("off")
+    axis = figure.add_subplot(grid[1, 0])
+    top = figure.add_subplot(grid[0, 0], sharex=axis)
+    side = figure.add_subplot(grid[1, 1], sharey=axis)
+
+    for mass_name, mass_mask in (("high", high_mass), ("low", low_mass)):
+        for feh_name, feh_mask in (("rich", rich), ("poor", poor)):
+            group = mass_mask & feh_mask
+            axis.scatter(
+                mass[group], feh[group], color=mass_colors[mass_name],
+                marker=markers[feh_name], s=4*size, alpha=0.8,
+                edgecolor="k", linewidth=0.5,
+            )
+    for mass_name, mass_mask in (("high", high_mass), ("low", low_mass)):
+        top.hist(mass[mass_mask], bins=mass_edges, histtype="stepfilled",
+                 color=mass_colors[mass_name], alpha=0.5)
+        top.hist(mass[mass_mask], bins=mass_edges, histtype="step",
+                 color=mass_colors[mass_name], linewidth=2)
+    for feh_name, feh_mask in (("rich", rich), ("poor", poor)):
+        side.hist(feh[feh_mask], bins=feh_edges, histtype="stepfilled",
+                  orientation="horizontal", color=feh_colors[feh_name],
+                  alpha=0.7)
+        side.hist(feh[feh_mask], bins=feh_edges, histtype="step",
+                  orientation="horizontal", color="k", linewidth=1.5)
+    for line_axis in (axis, top):
+        line_axis.axvline(mass_cut, color="k", linestyle=":", linewidth=1.5)
+    for line_axis in (axis, side):
+        line_axis.axhline(feh_cut, color="k", linestyle=":", linewidth=1.5)
+
+    axis.set_xlabel(mass_label)
+    axis.set_ylabel(feh_label)
+    top.set_ylabel("Number of stars")
+    side.set_xlabel("Number of stars")
+    plt.setp(top.get_xticklabels(), visible=False)
+    plt.setp(side.get_yticklabels(), visible=False)
+    top.set_ylim(bottom=0)
+    side.set_xlim(left=0)
+    side.xaxis.set_major_locator(MaxNLocator(3))
+
+    def sample_label(name, mask):
+        return f"{name} ({int(mask.sum())})"
+
+    handles = [
+        Patch(facecolor="none", edgecolor="none",
+              label=f"All stars ({len(mass)})"),
+        Patch(facecolor=mass_colors["high"], edgecolor="k", alpha=0.8,
+              label=sample_label(
+                  rf"$M_\star>{mass_cut:g}~M_\odot$", high_mass)),
+        Patch(facecolor=mass_colors["low"], edgecolor="k", alpha=0.8,
+              label=sample_label(
+                  rf"$M_\star\leq{mass_cut:g}~M_\odot$", low_mass)),
+        Line2D([], [], linestyle="none", marker=markers["rich"],
+               markerfacecolor=feh_colors["rich"], markeredgecolor="k",
+               label=sample_label(rf"[Fe/H]$>{feh_cut:g}$", rich)),
+        Line2D([], [], linestyle="none", marker=markers["poor"],
+               markerfacecolor=feh_colors["poor"], markeredgecolor="k",
+               label=sample_label(rf"[Fe/H]$\leq{feh_cut:g}$", poor)),
+        Line2D([], [], color="k", linestyle=":", linewidth=1.5,
+               label="Sample division"),
+    ]
+    legend_axis.legend(handles=handles, loc="center left",
+                       fontsize=0.9*size, frameon=False, borderaxespad=0)
+
+    output_path = Path(results_dir) / PAPER_FIGURES_DIRNAME / (
+        "stellar_scatter_mass_feh.png"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(figure)
     return output_path
 
