@@ -179,7 +179,7 @@ def test_make_variables_collects_parametric_fit_chains(tmp_path, monkeypatch):
             stack_bounds=np.array([1.0, 10.0]),
         )
     monkeypatch.setattr(
-        post_fit_analysis, "calculate_all_delta_bics",
+        post_fit_analysis, "calculate_all_bics",
         lambda *args: {
             "mtrue/allstars/roi": {"escarpment": [4.25, -1.04]}
         },
@@ -194,7 +194,7 @@ def test_make_variables_collects_parametric_fit_chains(tmp_path, monkeypatch):
     assert r"\ensuremath{1.30^{+0.07}_{-0.07}}" in text
     assert r"\McAllstarsRoiEscarpmentIntOccBinaZero" in text
     assert "% Parametric model: escarpment" in text
-    assert r"\McAllstarsRoiEscarpmentDbicBinaZero}{\ensuremath{4.2}}" in text
+    assert r"\McAllstarsRoiEscarpmentBicBinaZero}{\ensuremath{4.2}}" in text
 
 
 def test_make_variables_derives_loglinear_slope_from_fit_bounds(
@@ -215,7 +215,7 @@ def test_make_variables_derives_loglinear_slope_from_fit_bounds(
         stack_bounds=np.array([1.0, 10.0]),
     )
     monkeypatch.setattr(
-        post_fit_analysis, "calculate_all_delta_bics",
+        post_fit_analysis, "calculate_all_bics",
         lambda *args: {"mtrue/allstars/roi": {"loglinear": [2.0]}},
     )
 
@@ -231,7 +231,7 @@ def test_make_variables_derives_loglinear_slope_from_fit_bounds(
     ) in text
 
 
-def test_calculate_delta_bic_uses_flat_minus_model_convention(
+def test_calculate_bic_uses_k_ln_n_minus_twice_max_log_likelihood(
         tmp_path, monkeypatch):
     chain_dir = tmp_path / "chains"
     chain_dir.mkdir()
@@ -250,9 +250,6 @@ def test_calculate_delta_bic_uses_flat_minus_model_convention(
         lambda *args, **kwargs: cache,
     )
     monkeypatch.setattr(
-        post_fit_analysis, "_optimize_flat_model", lambda cache: (0.2, -12.0)
-    )
-    monkeypatch.setattr(
         post_fit_analysis, "_maximum_likelihood_draw",
         lambda path, model: np.array([1.0, 2.0, 3.0]),
     )
@@ -261,15 +258,16 @@ def test_calculate_delta_bic_uses_flat_minus_model_convention(
         lambda *args: -8.0,
     )
 
-    result = post_fit_analysis.calculate_delta_bic(
+    result = post_fit_analysis.calculate_bic(
         tmp_path / "data.npz", chain_dir
     )
 
-    expected = (np.log(3) + 24.0) - (3*np.log(3) + 16.0)
+    # Three logG parameters, three companion systems, ln(L_max) = -8
+    expected = 3*np.log(3) + 16.0
     np.testing.assert_allclose(result["logG"], [expected])
 
 
-def test_calculate_all_delta_bics_saves_results_for_every_folder(
+def test_calculate_all_bics_saves_results_for_every_folder(
         tmp_path, monkeypatch):
     for tier2 in ("highMass", "lowMass"):
         chain_dir = tmp_path / "mtrue" / tier2 / "roi" / "saved_chains"
@@ -282,9 +280,9 @@ def test_calculate_all_delta_bics_saves_results_for_every_folder(
         return {"logG": np.array([3.25])}
 
     monkeypatch.setattr(
-        post_fit_analysis, "calculate_delta_bic", fake_calculate
+        post_fit_analysis, "calculate_bic", fake_calculate
     )
-    result = post_fit_analysis.calculate_all_delta_bics(
+    result = post_fit_analysis.calculate_all_bics(
         tmp_path, ["mtrue"], ["Mass"], ["roi"], stack_dim="a"
     )
 
@@ -295,10 +293,10 @@ def test_calculate_all_delta_bics_saves_results_for_every_folder(
     assert len(calls) == 2
     saved = json.loads(
         (tmp_path / "paper_tables" /
-         post_fit_analysis.DELTA_BIC_FILENAME).read_text()
+         post_fit_analysis.BIC_FILENAME).read_text()
     )
     assert saved["stack_dim"] == "a"
-    assert saved["delta_bic_convention"] == "BIC_flat - BIC_model"
+    assert saved["bic_convention"] == "k ln(n) - 2 ln(L_max)"
     assert saved["results"] == result
 
 
@@ -413,8 +411,8 @@ def test_make_appendix_parameter_table_preserves_order_and_uses_commands(
     assert r"\McAllstarsPaperBoundsLogLinearParamCTwoBinaZero" in model_rows["loglinear"]
     assert r"\nodata" in model_rows["logG"]
     # Third block (mtrue/lowMstar): log-linear is third, escarpment last
-    assert r"\McLowMstarPaperBoundsLogLinearDbicBinaZero" in all_data_rows[10]
-    assert r"\McLowMstarPaperBoundsEscarpmentDbicBinaZero" in all_data_rows[11]
+    assert r"\McLowMstarPaperBoundsLogLinearBicBinaZero" in all_data_rows[10]
+    assert r"\McLowMstarPaperBoundsEscarpmentBicBinaZero" in all_data_rows[11]
     assert r"\QAllstarsPaperBoundsLogLinearIntOccBinaZero" in text
     assert r"\QLowMstarPaperBoundsLogLinearIntOccBinaZero" not in text
     assert "tablecomments" not in text
@@ -1534,7 +1532,7 @@ def _variables(text):
 
 
 def test_make_variables_compares_high_and_low_samples(tmp_path, monkeypatch):
-    monkeypatch.setattr(post_fit_analysis, "calculate_all_delta_bics",
+    monkeypatch.setattr(post_fit_analysis, "calculate_all_bics",
                         lambda *args: defaultdict(dict))
     _write_comparison_sample(tmp_path, "allstars", 0.1, 1.0, 0)
     _write_comparison_sample(tmp_path, "highMstar", 0.3, 1.0, 1)
@@ -1576,7 +1574,7 @@ def test_make_variables_compares_high_and_low_samples(tmp_path, monkeypatch):
 
 def test_make_variables_can_compare_low_relative_to_high(tmp_path,
                                                          monkeypatch):
-    monkeypatch.setattr(post_fit_analysis, "calculate_all_delta_bics",
+    monkeypatch.setattr(post_fit_analysis, "calculate_all_bics",
                         lambda *args: defaultdict(dict))
     _write_comparison_sample(tmp_path, "highAct", 0.1, 0.5, 1)
     _write_comparison_sample(tmp_path, "lowAct", 0.25, 1.0, 2)
@@ -1593,7 +1591,7 @@ def test_make_variables_can_compare_low_relative_to_high(tmp_path,
 
 
 def test_make_variables_skips_incomplete_pairs(tmp_path, monkeypatch):
-    monkeypatch.setattr(post_fit_analysis, "calculate_all_delta_bics",
+    monkeypatch.setattr(post_fit_analysis, "calculate_all_bics",
                         lambda *args: defaultdict(dict))
     _write_comparison_sample(tmp_path, "highMstar", 0.3, 1.0, 1)
     text = post_fit_analysis.make_variables(
@@ -1672,7 +1670,7 @@ def test_plot_model_cdf_comparison_formats_mass_ratio_ticks(tmp_path,
 
 def test_make_variables_handles_standalone_mass_binned_percent_runs(
         tmp_path, monkeypatch):
-    monkeypatch.setattr(post_fit_analysis, "calculate_all_delta_bics",
+    monkeypatch.setattr(post_fit_analysis, "calculate_all_bics",
                         lambda *args: defaultdict(dict))
     _write_summary(tmp_path / "mtrue", "allstars", "roi")
     # A standalone sample fit over one separation bin and two mass bins.
@@ -2123,7 +2121,7 @@ def test_appendix_table_restricts_models_and_labels_samples(tmp_path):
     text = post_fit_analysis.make_appendix_parameter_table(
         tmp_path, ["mtrue", "qtrue"], ["allstars", "Mstar"], "paper_bounds",
         model_samples={"loglinear": [("mtrue", "allstars")]},
-        omit_occurrence=["loglinear"], omit_delta_bic=["loglinear"],
+        omit_occurrence=["loglinear"], omit_bic=["loglinear"],
         tier1_labels={"mtrue": "$M_c$", "qtrue": "$q$"},
         sample_labels={"allstars": "All Stars", "highMstar": r"High $M_\star$"},
     ).read_text()
@@ -2134,9 +2132,9 @@ def test_appendix_table_restricts_models_and_labels_samples(tmp_path):
     assert models.count("log-linear") == 1
     loglinear_row = rows[models.index("log-linear")]
     assert loglinear_row.split(" & ")[6] == r"\nodata"
-    # Delta BIC omitted too (last cell)
+    # BIC omitted too (last cell)
     assert loglinear_row.split(" & ")[-1].startswith(r"\nodata")
-    assert "LogLinearDbic" not in text
+    assert "LogLinearBic" not in text
     assert rows[models.index("log-linear") - 1].startswith("$M_c$ & All Stars")
     assert "$q$ & High $M_\\star$" in text
     assert r"\shortstack{Mass\\Variable}" in text
@@ -2171,7 +2169,7 @@ def test_appendix_table_takes_a_model_from_another_run(tmp_path):
     assert escarpment[6] == r"\McAllstarsPaperBoundsNoGPEscarpmentIntOccBinaZero"
     assert "McAllstarsPaperBoundsNoGPEscarpmentParamDOneBinaZero" in escarpment[7]
     assert escarpment[-1].startswith(
-        r"\McAllstarsPaperBoundsNoGPEscarpmentDbicBinaZero")
+        r"\McAllstarsPaperBoundsNoGPEscarpmentBicBinaZero")
     # Experiment cells still describe the main run
     assert rows[0].startswith(r"mtrue & allstars & \McAllstarsPaperBoundsNstars")
     assert rows[4].split(" & ")[6].startswith(r"\QAllstarsPaperBoundsNoGP")

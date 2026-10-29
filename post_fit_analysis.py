@@ -6,7 +6,6 @@ from pathlib import Path
 import re
 
 import numpy as np
-from scipy.optimize import minimize_scalar
 from scipy.stats import norm
 
 from occurrence import fit_utils as dfu
@@ -16,7 +15,7 @@ from occurrence import mcmc_powerlaw
 
 
 SUMMARY_FILENAME = "summary_dict_piecewise.npz"
-DELTA_BIC_FILENAME = "delta_bics.json"
+BIC_FILENAME = "bics.json"
 PAPER_TABLES_DIRNAME = "paper_tables"
 # Figures of the whole sample, not tied to any fit, saved beside the tables
 PAPER_FIGURES_DIRNAME = "paper_figures"
@@ -1651,51 +1650,28 @@ def _maximum_likelihood_draw(path, model_name):
     return samples[index]
 
 
-def _optimize_flat_model(cache):
-    """Optimize a positive constant occurrence-rate density."""
-    effective_count = float(np.sum(cache.companion_weights))
-    exposure = float(np.sum(cache.exposure_weights))
-    if effective_count <= 0 or exposure <= 0:
-        raise ValueError("flat-model optimization requires positive data and exposure")
-    initial_log_amplitude = np.log(effective_count/exposure)
+def calculate_bic(fit_path, chain_dir, stack_dim="a"):
+    """Calculate the BIC of every saved parametric fit.
 
-    def objective(log_amplitude):
-        amplitude = np.exp(log_amplitude)
-        return -dl.cached_smooth_log_likelihood(
-            np.array([amplitude]), cache,
-            lambda theta, x: np.full_like(x, theta[0], dtype=float),
-        )
-
-    result = minimize_scalar(
-        objective,
-        bounds=(initial_log_amplitude - 20.0, initial_log_amplitude + 20.0),
-        method="bounded",
-    )
-    if not result.success or not np.isfinite(result.fun):
-        raise RuntimeError(f"flat-model optimization failed: {result.message}")
-    return np.exp(result.x), -float(result.fun)
-
-
-def calculate_delta_bic(fit_path, chain_dir, stack_dim="a"):
-    """Compare every saved parametric fit with an optimized flat model.
-
-    The comparison is performed separately in each stack bin and over the
-    model-coordinate interval used for the fit.  The returned values use
-    ``BIC_flat - BIC_model``; positive values favor the parametric model.  The
-    sample size in the BIC penalty is the number of companion systems
-    contributing posterior support to that fitted interval.
+    The BIC is calculated separately in each stack bin and over the
+    model-coordinate interval used for the fit, as ``k ln(n) - 2 ln(L_max)``,
+    with ``L_max`` the likelihood of the chain's maximum-likelihood draw.  The
+    sample size ``n`` is the number of companion systems contributing
+    posterior support to that fitted interval.  The likelihood omits
+    constant terms, so only differences between BICs of fits to the same
+    data are meaningful.
 
     Returns
     -------
     dict
-        Model names mapped to arrays of delta-BIC values in stack-bin order.
+        Model names mapped to arrays of BIC values in stack-bin order.
     """
     if stack_dim not in {"a", "m"}:
         raise ValueError("stack_dim must be 'a' or 'm'")
     fit_path = Path(fit_path)
     chain_dir = Path(chain_dir)
     companions, exposure = dfu.load_fit_data(fit_path)
-    comparisons = {}
+    bics = {}
 
     for model_name, (_, parameter_names) in _MODEL_PARAMETER_MACROS.items():
         paths = list(chain_dir.glob(f"chains_{model_name}_bin*.npz"))
@@ -1709,7 +1685,7 @@ def calculate_delta_bic(fit_path, chain_dir, stack_dim="a"):
                 f"non-contiguous {model_name} stack-bin chains: {actual_indices}"
             )
 
-        model_deltas = []
+        model_bics = []
         for path in paths:
             with np.load(path) as chain:
                 if "stack_bounds" not in chain or "model_bounds" not in chain:
@@ -1722,7 +1698,6 @@ def calculate_delta_bic(fit_path, chain_dir, stack_dim="a"):
                 companions, exposure, stack_dim, stack_bounds,
                 model_bounds=model_bounds,
             )
-            _, flat_log_likelihood = _optimize_flat_model(cache)
             draw = _maximum_likelihood_draw(path, model_name)
             if draw.size != len(parameter_names):
                 raise ValueError(f"parameter count in {path} does not match {model_name}")
@@ -1737,18 +1712,16 @@ def calculate_delta_bic(fit_path, chain_dir, stack_dim="a"):
             n_observations = len(cache.companion_names)
             if n_observations < 1:
                 raise ValueError(f"no companion systems contribute to {path}")
-            flat_bic = np.log(n_observations) - 2.0*flat_log_likelihood
-            model_bic = (
+            model_bics.append(
                 len(parameter_names)*np.log(n_observations) -
                 2.0*model_log_likelihood
             )
-            model_deltas.append(flat_bic - model_bic)
-        comparisons[model_name] = np.asarray(model_deltas)
-    return comparisons
+        bics[model_name] = np.asarray(model_bics)
+    return bics
 
 
 def _result_key(tier1_dir, tier2_dir, tier3_dir):
-    """Return the portable relative key used in the delta-BIC cache."""
+    """Return the portable relative key used in the BIC cache."""
     return Path(tier1_dir, tier2_dir, tier3_dir).as_posix()
 
 
@@ -1852,7 +1825,7 @@ def make_appendix_parameter_table(
         label="tab:model_params_appendix", output_file=None, note=None,
         model_samples=None, omit_occurrence=(), tier1_labels=None,
         sample_labels=None, model_tier3=None, model_order=None,
-        tier1_page_breaks=False, omit_delta_bic=()):
+        tier1_page_breaks=False, omit_bic=()):
     """Create a hierarchical appendix table for all smooth fitted models.
 
     Each experiment contains one row for every smooth model whose requested
@@ -1869,9 +1842,9 @@ def make_appendix_parameter_table(
     model name to ``(tier1, tier2)`` pairs (e.g. ``{"loglinear": [("mtrue",
     "allstars")]}``); models not named appear wherever they were fitted.
     Models in ``omit_occurrence`` show ``\\nodata`` for their integrated
-    occurrence, and models in ``omit_delta_bic`` for their Delta BIC (e.g. a
-    model fit over only part of the domain, whose Delta BIC is not
-    comparable with the others').  ``tier1_labels`` and ``sample_labels`` map Tier 1 and Tier 2
+    occurrence, and models in ``omit_bic`` for their BIC (e.g. a model fit
+    over only part of the domain, whose BIC is not comparable with the
+    others').  ``tier1_labels`` and ``sample_labels`` map Tier 1 and Tier 2
     directory names to the text shown in the first two columns (e.g.
     ``{"mtrue": "$M_c$"}``, ``{"lowAct": "Old"}``); unmapped names are shown
     as they are.
@@ -1903,7 +1876,7 @@ def make_appendix_parameter_table(
         for model, pairs in (model_samples or {}).items()
     }
     unknown = sorted(
-        (set(model_samples) | set(omit_occurrence) | set(omit_delta_bic)) -
+        (set(model_samples) | set(omit_occurrence) | set(omit_bic)) -
         set(_MODEL_PARAMETER_MACROS)
     )
     if unknown:
@@ -1938,7 +1911,7 @@ def make_appendix_parameter_table(
         r"Model &",
         r"\shortstack{Integrated\\Occurrence Rate} &",
         r"$\theta_1$ & $\theta_2$ & $\theta_3$ & $\theta_4$ &",
-        r"$\Delta\mathrm{BIC}$",
+        r"BIC",
         r"}",
         r"\startdata",
     ]
@@ -1994,8 +1967,8 @@ def make_appendix_parameter_table(
                         model_prefix + model_macro + "IntOcc" +
                         parameter_bin_suffix
                     )
-                    delta_bic = (
-                        model_prefix + model_macro + "Dbic" +
+                    bic = (
+                        model_prefix + model_macro + "Bic" +
                         parameter_bin_suffix
                     )
                     row = (
@@ -2005,8 +1978,8 @@ def make_appendix_parameter_table(
                         r"\nodata" if model_name in omit_occurrence
                         else f"\\{occurrence}",
                         *parameter_cells,
-                        r"\nodata" if model_name in omit_delta_bic
-                        else f"\\{delta_bic}",
+                        r"\nodata" if model_name in omit_bic
+                        else f"\\{bic}",
                     ]
                     lines.append(" & ".join(row) + r" \\")
                 if calculated_models:
@@ -3751,14 +3724,14 @@ def make_one_parameter_table(
     return output_path
 
 
-def calculate_all_delta_bics(
+def calculate_all_bics(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim="a",
         standalone_tier2_dirs=(), tier3_stack_dims=None):
-    """Calculate and save delta-BIC values for every requested results folder.
+    """Calculate and save BIC values for every requested results folder.
 
     The arguments and Tier 2 expansion rules match :func:`make_variables`.
     Results are returned as a dictionary keyed by relative results paths and
-    are also saved to ``results_dir/paper_tables/delta_bics.json``.  Folders
+    are also saved to ``results_dir/paper_tables/bics.json``.  Folders
     containing no recognized parametric chains are represented by an empty
     dictionary; requested folders that do not exist are left out.
     """
@@ -3772,7 +3745,7 @@ def calculate_all_delta_bics(
         raise ValueError("stack_dim must be 'a' or 'm'")
 
     tier2_dirs = _requested_tier2_dirs(tier2_types, standalone_tier2_dirs)
-    all_delta_bics = {}
+    all_bics = {}
     for tier1_dir in tier1_dirs:
         for tier2_dir in tier2_dirs:
                 for tier3_dir in tier3_dirs:
@@ -3788,30 +3761,30 @@ def calculate_all_delta_bics(
                         for model_name in _MODEL_PARAMETER_MACROS
                     ) if chain_dir.is_dir() else False
                     if not has_parametric_chains:
-                        all_delta_bics[key] = {}
+                        all_bics[key] = {}
                         continue
-                    comparisons = calculate_delta_bic(
+                    bics = calculate_bic(
                         result_dir / "saved_dicts" / "fit_data.npz",
                         chain_dir,
                         _tier3_stack_dim(tier3_dir, stack_dim,
                                          tier3_stack_dims),
                     )
-                    all_delta_bics[key] = {
+                    all_bics[key] = {
                         model_name: np.asarray(values, dtype=float).tolist()
-                        for model_name, values in comparisons.items()
+                        for model_name, values in bics.items()
                     }
 
     paper_tables_dir = results_dir / PAPER_TABLES_DIRNAME
     paper_tables_dir.mkdir(parents=True, exist_ok=True)
     output = {
         "stack_dim": stack_dim,
-        "delta_bic_convention": "BIC_flat - BIC_model",
-        "results": all_delta_bics,
+        "bic_convention": "k ln(n) - 2 ln(L_max)",
+        "results": all_bics,
     }
-    (paper_tables_dir / DELTA_BIC_FILENAME).write_text(
+    (paper_tables_dir / BIC_FILENAME).write_text(
         json.dumps(output, indent=2) + "\n", encoding="utf-8"
     )
-    return all_delta_bics
+    return all_bics
 
 
 def _stack_statistics(summary, stack_dim, summary_path):
@@ -4364,7 +4337,7 @@ def make_variables(
                             for column in ("Mstar", "feh")})
         return _format_median_ratios(*medians)
 
-    all_delta_bics = calculate_all_delta_bics(
+    all_bics = calculate_all_bics(
         results_dir, tier1_dirs, tier2_types, tier3_dirs, stack_dim,
         standalone_tier2_dirs, tier3_stack_dims,
     )
@@ -4489,13 +4462,12 @@ def make_variables(
                             block.append(_command(name, value))
                     if parametric_groups:
                         key = _result_key(tier1_dir, tier2_dir, tier3_dir)
-                        delta_bics = all_delta_bics[key]
-                        block.extend(["", "%"*36, "% BIC comparisons"])
-                        for model_name, deltas in delta_bics.items():
+                        block.extend(["", "%"*36, "% BIC"])
+                        for model_name, bics in all_bics[key].items():
                             model_macro = _MODEL_PARAMETER_MACROS[model_name][0]
-                            for bin_index, delta in enumerate(deltas):
+                            for bin_index, bic in enumerate(bics):
                                 name = (
-                                    prefix + model_macro + "Dbic" +
+                                    prefix + model_macro + "Bic" +
                                     f"Bin{experiment_dim}{_number_word(bin_index)}"
                                 )
                                 if name in command_names:
@@ -4503,7 +4475,7 @@ def make_variables(
                                         f"duplicate LaTeX command name: {name}"
                                     )
                                 command_names.add(name)
-                                block.append(_command(name, f"{delta:.1f}"))
+                                block.append(_command(name, f"{bic:.1f}"))
                     blocks.append("\n".join(block))
 
     empty_tier3_dirs = [
