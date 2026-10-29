@@ -597,7 +597,7 @@ def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
             label=(
                 rf"${_THREE_PARAMETER_DEFAULT_CUTS['Mstar_min']:g}-"
                 rf"{_THREE_PARAMETER_DEFAULT_CUTS['Mstar_max']:g}~"
-                rf"M_{{\odot}}$ ({int(in_mass_range.sum())})"
+                rf"M_{{\odot}}$ ({int(in_mass_range.sum())} stars)"
             ),
         )
         # Legend at the ORD plots' size
@@ -609,7 +609,7 @@ def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
     axis.axvline(divider, color="k", linestyle=":", linewidth=1.5)
     axis.set_ylim(bottom=0)
     axis.set_xlabel(label)
-    axis.set_ylabel("Number of stars")
+    axis.set_ylabel(r"$N_\star$")
     figure.tight_layout()
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -628,10 +628,10 @@ def plot_stellar_mass_feh_scatter(results_dir, sample_catalog, bins=20):
     """Plot every star's mass and metallicity with marginal histograms.
 
     Points are colored by stellar mass sample (high ``Mstar > cut``, low
-    otherwise) and drawn as circles for metal-rich stars ([Fe/H] > cut) and
-    triangles for metal-poor ones, with the dividing values as dotted lines.
-    The top histogram shows the mass samples in the same colors and the side
-    histogram the metallicity samples in dark and light gray; the legend
+    otherwise) and drawn fainter for metal-poor stars ([Fe/H] <= cut), with
+    the dividing values as dotted lines.  The top histogram shows the mass
+    samples in the same colors and the side histogram the metallicity samples
+    in gray, with the metal-poor half fainter; the legend
     gives each sample's number of stars.  The figure belongs to the sample
     rather than to any fit, so it is saved as ``stellar_scatter_mass_feh.png``
     in ``results_dir/paper_figures``, beside the paper tables.
@@ -670,8 +670,8 @@ def plot_stellar_mass_feh_scatter(results_dir, sample_catalog, bins=20):
     rich, poor = _split_by_cut(feh, feh_cut)
 
     mass_colors = {"high": "tab:red", "low": "tab:blue"}
-    feh_colors = {"rich": "0.25", "poor": "0.75"}
-    markers = {"rich": "o", "poor": "^"}
+    # Metallicity sample sets the opacity: metal-poor stars are fainter
+    feh_alpha = {"rich": 0.9, "poor": 0.35}
     size = plt.rcParams["font.size"]
 
     figure = plt.figure(figsize=(9, 7.5))
@@ -690,7 +690,7 @@ def plot_stellar_mass_feh_scatter(results_dir, sample_catalog, bins=20):
             group = mass_mask & feh_mask
             axis.scatter(
                 mass[group], feh[group], color=mass_colors[mass_name],
-                marker=markers[feh_name], s=4*size, alpha=0.8,
+                marker="o", s=4*size, alpha=feh_alpha[feh_name],
                 edgecolor="k", linewidth=0.5,
             )
     for mass_name, mass_mask in (("high", high_mass), ("low", low_mass)):
@@ -700,10 +700,11 @@ def plot_stellar_mass_feh_scatter(results_dir, sample_catalog, bins=20):
                  color=mass_colors[mass_name], linewidth=2)
     for feh_name, feh_mask in (("rich", rich), ("poor", poor)):
         side.hist(feh[feh_mask], bins=feh_edges, histtype="stepfilled",
-                  orientation="horizontal", color=feh_colors[feh_name],
-                  alpha=0.7)
+                  orientation="horizontal", color="0.3",
+                  alpha=feh_alpha[feh_name])
         side.hist(feh[feh_mask], bins=feh_edges, histtype="step",
-                  orientation="horizontal", color="k", linewidth=1.5)
+                  orientation="horizontal", color="k", linewidth=1.5,
+                  alpha=feh_alpha[feh_name] + 0.1)
     for line_axis in (axis, top):
         line_axis.axvline(mass_cut, color="k", linestyle=":", linewidth=1.5)
     for line_axis in (axis, side):
@@ -711,8 +712,8 @@ def plot_stellar_mass_feh_scatter(results_dir, sample_catalog, bins=20):
 
     axis.set_xlabel(mass_label)
     axis.set_ylabel(feh_label)
-    top.set_ylabel("Number of stars")
-    side.set_xlabel("Number of stars")
+    top.set_ylabel(r"$N_\star$")
+    side.set_xlabel(r"$N_\star$")
     plt.setp(top.get_xticklabels(), visible=False)
     plt.setp(side.get_yticklabels(), visible=False)
     top.set_ylim(bottom=0)
@@ -725,23 +726,23 @@ def plot_stellar_mass_feh_scatter(results_dir, sample_catalog, bins=20):
     handles = [
         Patch(facecolor="none", edgecolor="none",
               label=f"All stars ({len(mass)})"),
-        Patch(facecolor=mass_colors["high"], edgecolor="k", alpha=0.8,
+        Patch(facecolor=mass_colors["high"], edgecolor="k", alpha=0.9,
               label=sample_label(
                   rf"$M_\star>{mass_cut:g}~M_\odot$", high_mass)),
-        Patch(facecolor=mass_colors["low"], edgecolor="k", alpha=0.8,
+        Patch(facecolor=mass_colors["low"], edgecolor="k", alpha=0.9,
               label=sample_label(
                   rf"$M_\star\leq{mass_cut:g}~M_\odot$", low_mass)),
-        Line2D([], [], linestyle="none", marker=markers["rich"],
-               markerfacecolor=feh_colors["rich"], markeredgecolor="k",
+        Line2D([], [], linestyle="none", marker="o",
+               markerfacecolor="0.3", markeredgecolor="k",
+               alpha=feh_alpha["rich"],
                label=sample_label(rf"[Fe/H]$>{feh_cut:g}$", rich)),
-        Line2D([], [], linestyle="none", marker=markers["poor"],
-               markerfacecolor=feh_colors["poor"], markeredgecolor="k",
+        Line2D([], [], linestyle="none", marker="o",
+               markerfacecolor="0.3", markeredgecolor="k",
+               alpha=feh_alpha["poor"],
                label=sample_label(rf"[Fe/H]$\leq{feh_cut:g}$", poor)),
-        Line2D([], [], color="k", linestyle=":", linewidth=1.5,
-               label="Sample division"),
     ]
     legend_axis.legend(handles=handles, loc="center left",
-                       fontsize=0.9*size, frameon=False, borderaxespad=0)
+                       fontsize=1.3*size, frameon=False, borderaxespad=0)
 
     output_path = Path(results_dir) / PAPER_FIGURES_DIRNAME / (
         "stellar_scatter_mass_feh.png"
