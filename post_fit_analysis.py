@@ -597,11 +597,12 @@ def _plot_stellar_histogram(stars, stellar_parameter, output_path, bins=20):
             label=(
                 rf"${_THREE_PARAMETER_DEFAULT_CUTS['Mstar_min']:g}-"
                 rf"{_THREE_PARAMETER_DEFAULT_CUTS['Mstar_max']:g}~"
-                rf"M_{{\odot}}$ ({int(in_mass_range.sum())} stars)"
+                rf"M_{{\odot}}$" "\n" f"({int(in_mass_range.sum())} stars)"
             ),
         )
         # Legend at the ORD plots' size
-        axis.legend(fontsize=1.6*plt.rcParams["font.size"])
+        axis.legend(loc="upper right",
+                    fontsize=1.6*plt.rcParams["font.size"])
     else:
         _histogram_outline(
             axis, values[finite], edges, color="k", linewidth=2.5,
