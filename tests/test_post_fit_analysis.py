@@ -2350,18 +2350,23 @@ def test_appendix_ord_table_lists_statistics_and_every_bin(tmp_path):
 
     assert output == tmp_path / "paper_tables" / "ord_appendix_paper_bounds.tex"
     text = output.read_text()
-    assert r"\begin{deluxetable*}{cccccccc}" in text
+    assert r"\begin{deluxetable*}{ccccccccc}" in text
+    assert r"$Q_{\text{avg}}$ &" in text
     assert "Bin 3\n}" in text
     rows = [line for line in text.splitlines() if " & " in line
             and not line.startswith(("\\shortstack", "Bin"))]
     # Bin limits, then allstars/highMstar/lowMstar, for each Tier 1
     assert len(rows) == 8
     # Only the limits are filled in on a bin-limit row
-    assert rows[0] == r" &  &  &  &  & 1--10 & 10--100 & 100--1000 \\"
+    assert rows[0] == r" &  &  &  &  &  & 1--10 & 10--100 & 100--1000 \\"
     first = rows[1].split(" & ")
     assert first[:5] == ["$M_c$", "All Stars", "123", "7.5", "0.46"]
-    assert first[5] == "$0.05^{+0.02}_{-0.01}$"
-    assert first[7] == "$0.002^{+0.002}_{-0.001}$ \\\\"
+    # The histogram's integrated rate cites the make_variables command
+    assert first[5] == r"\McAllstarsPaperBoundsPiecewiseIntOccBinaZero"
+    assert first[6] == "$0.05^{+0.02}_{-0.01}$"
+    assert first[8] == "$0.002^{+0.002}_{-0.001}$ \\\\"
+    assert rows[5].split(" & ")[5] == (
+        r"\QAllstarsPaperBoundsPiecewiseIntOccBinaZero")
     assert rows[2].split(" & ")[1] == "highMstar"
     assert rows[4] == rows[0]
     assert "Bin limits" not in text
@@ -2446,9 +2451,9 @@ def test_appendix_ord_table_keeps_first_nonzero_digit_of_small_limits(tmp_path):
         tmp_path, ["qtrue"], ["allstars"], "paper_bounds", **kwargs
     ).read_text()
     limit_row = [line for line in text.splitlines()
-                 if line.startswith(" &  &  &  &  & ")]
+                 if line.startswith(" &  &  &  &  &  & ")]
     assert limit_row == [
-        r" &  &  &  &  & 0.04--0.08\% & 0.08--0.1\% & 0.1--0.2\% & "
+        r" &  &  &  &  &  & 0.04--0.08\% & 0.08--0.1\% & 0.1--0.2\% & "
         r"0.2--0.3\% & 0.3--4.8\% \\"
     ]
 
@@ -2469,9 +2474,9 @@ def test_appendix_ord_table_rounds_limits_to_significant_figures(tmp_path):
                                     "unit": r"\%"}},
     ).read_text()
     limit_row = [line for line in text.splitlines()
-                 if line.startswith(" &  &  &  &  & ")]
+                 if line.startswith(" &  &  &  &  &  & ")]
     assert limit_row == [
-        r" &  &  &  &  & 0.038--0.076\% & 0.076--0.10\% & 0.10--0.15\% & "
+        r" &  &  &  &  &  & 0.038--0.076\% & 0.076--0.10\% & 0.10--0.15\% & "
         r"0.15--0.31\% & 0.31--1.2\% & 1.2--4.8\% \\"
     ]
     with pytest.raises(ValueError, match="cannot be combined"):
@@ -2496,10 +2501,10 @@ def test_appendix_ord_table_writes_bin_limits_with_units(tmp_path):
         },
     ).read_text()
     limit_rows = [line for line in text.splitlines()
-                  if line.startswith(" &  &  &  &  & ")]
+                  if line.startswith(" &  &  &  &  &  & ")]
     assert limit_rows == [
-        r" &  &  &  &  & 0.4--0.8~\Mjup & 0.8--1.6~\Mjup & 1.6--3.2~\Mjup \\",
-        r" &  &  &  &  & 0.0--0.1\% & 0.1--1.2\% & 1.2--4.8\% \\",
+        r" &  &  &  &  &  & 0.4--0.8~\Mjup & 0.8--1.6~\Mjup & 1.6--3.2~\Mjup \\",
+        r" &  &  &  &  &  & 0.0--0.1\% & 0.1--1.2\% & 1.2--4.8\% \\",
     ]
     with pytest.raises(ValueError, match="unrequested Tier 1"):
         post_fit_analysis.make_appendix_ord_table(

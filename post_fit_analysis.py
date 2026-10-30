@@ -1912,7 +1912,7 @@ def make_appendix_parameter_table(
         r"\shortstack{Stellar\\Subsample} &",
         r"$N_\star$ &",
         r"\shortstack{$N_{\mathrm{eff}}$} &",
-        r"Completeness &",
+        r"$Q_{\text{avg}}$ &",
         r"Model &",
         r"\shortstack{Integrated\\Occurrence Rate} &",
         r"$\theta_1$ & $\theta_2$ & $\theta_3$ & $\theta_4$ &",
@@ -2102,16 +2102,19 @@ def make_appendix_ord_table(
         caption="Histogram Occurrence Rate Densities",
         label="tab:ord_appendix", output_file=None, note=None,
         tier1_labels=None, sample_labels=None, tier1_page_breaks=False,
-        show_bin_limits=True, bin_limit_styles=None):
+        show_bin_limits=True, bin_limit_styles=None, stack_dim="a",
+        stack_bin=0):
     """Create an appendix table of every histogram (piecewise) ORD bin.
 
     Each experiment is one row holding its mass variable, stellar subsample,
-    ``N_star``, ``N_eff``, and average completeness, followed by the ORD of
-    every mass bin: the posterior mode with its 68% highest-density
-    interval.  Everything is read from the experiment's saved
-    ``summary_dict_piecewise.npz`` (``nstars``, ``cell_weights``,
-    ``cell_compl_single``, and the ``*_ORD`` arrays), so no entry depends on
-    ``variables.tex``; ``N_star``, ``N_eff``, and the completeness match the
+    ``N_star``, ``N_eff``, average completeness, and the histogram's
+    integrated occurrence rate, followed by the ORD of every mass bin: the
+    posterior mode with its 68% highest-density interval.  The integrated
+    rate cites the ``PiecewiseIntOcc`` command :func:`make_variables` writes
+    for ``stack_dim`` and ``stack_bin``, so it matches the text; everything
+    else is read from the experiment's saved ``summary_dict_piecewise.npz``
+    (``nstars``, ``cell_weights``, ``cell_compl_single``, and the ``*_ORD``
+    arrays), and ``N_star``, ``N_eff``, and the completeness match the
     values :func:`make_variables` writes.  Rows follow the order of
     :func:`make_appendix_parameter_table`: Tier 1 values as supplied, then
     Tier 2 types as supplied, with ``allstars`` once and every other type as
@@ -2142,6 +2145,11 @@ def make_appendix_ord_table(
     tier2_types = list(tier2_types)
     if not tier1_dirs or not tier2_types:
         raise ValueError("tier1_dirs and tier2_types cannot be empty")
+    if stack_dim not in {"a", "m"}:
+        raise ValueError("stack_dim must be 'a' or 'm'")
+    if not isinstance(stack_bin, (int, np.integer)) or stack_bin < 0:
+        raise ValueError("stack_bin must be a nonnegative integer")
+    occurrence_suffix = f"Bin{stack_dim}{_number_word(stack_bin)}"
     tier1_labels = dict(tier1_labels or {})
     sample_labels = dict(sample_labels or {})
     bin_limit_styles = {
@@ -2220,13 +2228,16 @@ def make_appendix_ord_table(
                     tier1_labels.get(tier1_name, tier1_name),
                     sample_labels.get(tier2_dir, tier2_dir),
                     statistics["Nstars"], statistics["Neff"],
-                    statistics["AvgCompl"], *cells,
+                    statistics["AvgCompl"],
+                    "\\" + _experiment_prefix(tier1_dir, tier2_dir, t3) +
+                    "PiecewiseIntOcc" + occurrence_suffix,
+                    *cells,
                 ])
         sections.append((tier1_name, rows, limits))
 
     lines = [
         r"\begin{longrotatetable}",
-        r"\begin{deluxetable*}{" + "c"*(5 + n_bins) + "}",
+        r"\begin{deluxetable*}{" + "c"*(6 + n_bins) + "}",
         rf"\tablecaption{{{caption}}}",
         rf"\label{{{label}}}",
         "",
@@ -2235,7 +2246,8 @@ def make_appendix_ord_table(
         r"\shortstack{Stellar\\Subsample} &",
         r"$N_\star$ &",
         r"\shortstack{$N_{\mathrm{eff}}$} &",
-        r"Completeness &",
+        r"$Q_{\text{avg}}$ &",
+        r"\shortstack{Integrated\\Occurrence Rate} &",
         " & ".join(f"Bin {index}" for index in range(1, n_bins + 1)),
         r"}",
         r"\startdata",
@@ -2250,7 +2262,7 @@ def make_appendix_ord_table(
                 f"{format_limit(tier1_name, high)}{unit}"
                 for low, high in limits
             ]
-            lines.append(" & ".join(["", "", "", "", "", *limit_cells]) + r" \\")
+            lines.append(" & ".join([""]*6 + limit_cells) + r" \\")
             lines.append(r"\hline")
         lines.extend(" & ".join(row) + r" \\" for row in rows)
         lines.append(r"\hline")
