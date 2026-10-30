@@ -2247,7 +2247,7 @@ def make_appendix_ord_table(
         r"$N_\star$ &",
         r"\shortstack{$N_{\mathrm{eff}}$} &",
         r"$Q_{\text{avg}}$ &",
-        r"\shortstack{Integrated\\Occurrence Rate} &",
+        r"\shortstack{Integrated\\Rate} &",
         " & ".join(f"Bin {index}" for index in range(1, n_bins + 1)),
         r"}",
         r"\startdata",
