@@ -1914,7 +1914,7 @@ def make_appendix_parameter_table(
         r"\shortstack{$N_{\mathrm{eff}}$} &",
         r"$Q_{\text{avg}}$ &",
         r"Model &",
-        r"\shortstack{Integrated\\Occurrence Rate} &",
+        r"\shortstack{Integrated\\Rate} &",
         r"$\theta_1$ & $\theta_2$ & $\theta_3$ & $\theta_4$ &",
         r"BIC",
         r"}",
