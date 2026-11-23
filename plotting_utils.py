@@ -1101,12 +1101,12 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 # Ensure y-range includes highest error bar for this subplot
                 # per-subplot ylim will be set after plotting to enforce a common range
 
-            # Compute a single y-axis upper limit across all subplots and apply
-            global_top = np.nanmax(high)
-            if np.isfinite(global_top):
-                ytop = 1.1 * global_top
-                for ax_i in ax:
-                    ax_i.set_ylim(0, max(ax_i.get_ylim()[1], ytop))
+            # # Compute a single y-axis upper limit across all subplots and apply
+            # global_top = np.nanmax(high)
+            # if np.isfinite(global_top):
+            #     ytop = 1.1 * global_top
+            #     for ax_i in ax:
+            #         ax_i.set_ylim(0, max(ax_i.get_ylim()[1], ytop))
 
             # Set the common y-label for the whole figure
             fig.supylabel(
@@ -1197,12 +1197,12 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
         if stack_dim == 'a' and mtype in ['qtrue', 'qsini']:
             plt.setp(ax[0].get_xticklabels(), rotation=90, ha='left')
 
-        # Compute a single y-axis upper limit across all subplots and apply
-        global_top = np.nanmax(high)
-        if np.isfinite(global_top):
-            ytop = 1.1 * global_top
-            for ax_i in ax:
-                ax_i.set_ylim(0, max(ax_i.get_ylim()[1], ytop))
+        # # Compute a single y-axis upper limit across all subplots and apply
+        # global_top = np.nanmax(high)
+        # if np.isfinite(global_top):
+        #     ytop = 1.1 * global_top
+        #     for ax_i in ax:
+        #         ax_i.set_ylim(0, max(ax_i.get_ylim()[1], ytop))
 
         # Set the common y-label for the whole figure
         fig.supylabel(
@@ -1213,11 +1213,11 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
 
         ax[-1].set_title(title, fontsize=label_size) # Set title on top figure (suptitle is too high)
 
-        ## Find and set the widest y lims to apply for all subplots
-        min_y_allstack = np.min([ax[i].get_ylim()[0] for i in range(len(ax))])
-        max_y_allstack = np.max([ax[i].get_ylim()[1] for i in range(len(ax))])
-        for ax_i in ax:
-            ax_i.set_ylim(min_y_allstack, max_y_allstack)
+        # ## Find and set the widest y lims to apply for all subplots
+        # min_y_allstack = np.min([ax[i].get_ylim()[0] for i in range(len(ax))])
+        # max_y_allstack = np.max([ax[i].get_ylim()[1] for i in range(len(ax))])
+        # for ax_i in ax:
+        #     ax_i.set_ylim(min_y_allstack, max_y_allstack)
 
     fig.tight_layout(rect=[0,0,1,0.95])
     
