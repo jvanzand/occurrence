@@ -1076,11 +1076,14 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                         linestyle='--', linewidth=2,
                         label='Uncorrected',
                     )
-                    legend_with_label_last(
-                        ax_i, 'Uncorrected',
-                        fontsize=1.7*matplotlib.rcParams['font.size'],
-                        loc=legend_loc,
-                    )
+                    # Only the top panel (last axis) carries a legend, and
+                    # a smaller one, since stacked panels are shorter
+                    if i == len(ax) - 1:
+                        legend_with_label_last(
+                            ax_i, 'Uncorrected',
+                            fontsize=1.0*matplotlib.rcParams['font.size'],
+                            loc=legend_loc,
+                        )
 
                 ax_i.set_xscale('log')
                 ax_i.xaxis.set_major_locator(FixedLocator(x_edges))
@@ -1155,11 +1158,14 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                         linestyle='--', linewidth=2,
                         label='Uncorrected',
                     )
-                    legend_with_label_last(
-                        ax_i, 'Uncorrected',
-                        fontsize=1.7*matplotlib.rcParams['font.size'],
-                        loc=legend_loc,
-                    )
+                    # Only the top panel (last axis) carries a legend, and
+                    # a smaller one, since stacked panels are shorter
+                    if i == len(ax) - 1:
+                        legend_with_label_last(
+                            ax_i, 'Uncorrected',
+                            fontsize=1.0*matplotlib.rcParams['font.size'],
+                            loc=legend_loc,
+                        )
 
                 ax_i.set_xscale('log')
                 # Show tick marks at bin edges rather than centers

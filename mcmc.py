@@ -1005,10 +1005,6 @@ def add_smooth_model_to_figures(
         label = 'log-linear' if model_name == 'loglinear' else label
         label = 'Broken power law' if model_name == 'bpl' else label
         label = 'two-Rayleigh' if model_name == 'ecc_mixture' else label
-        if len(loaded) > 1:
-            label += " (" + _stack_interval_label(
-                item["stack_coordinate"], item["stack_bounds"], m_unit
-            ) + ")"
         if plot_density:
             axis = _axis_for_stack(
                 figures["density"][1], display_stack_index
@@ -1134,7 +1130,9 @@ def save_model_figures(
     paths = {}
     for name, (figure, axes) in figures.items():
         ylabel, filename = plot_specs[name]
-        for axis in np.atleast_1d(axes):
+        axes_list = np.atleast_1d(axes)
+        stacked = np.ndim(axes) > 0
+        for axis in axes_list:
             _draw_queued_extrapolations(axis)
             axis.set_xscale("log")
             axis.set_xlim(
@@ -1159,10 +1157,15 @@ def save_model_figures(
                  (coordinate == "mass" and mtype in {"mtrue", "msini"})) and
                     formatter.rotate_labels):
                 plt.setp(axis.get_xticklabels(), rotation=45, ha="right")
+            # Stacked panels are shorter, so they get a smaller legend, and
+            # only the top panel (last axis) carries one
+            legend_scale = 1.0 if stacked else 1.6
             legend_fontsize = (
-                1.6*plt.rcParams["font.size"]
+                legend_scale*plt.rcParams["font.size"]
                 if name in {"density", "occurrence"} else None
             )
+            if stacked and axis is not axes_list[-1]:
+                continue
             pu.legend_with_label_last(
                 axis, "Uncorrected", fontsize=legend_fontsize,
                 loc=(occurrence_legend_loc
@@ -1174,17 +1177,16 @@ def save_model_figures(
             axes.set_title(title)
         figure.tight_layout()
         if name in {"density", "occurrence"}:
+            if stacked:
+                # Each stacked panel keeps its own y-range, anchored at zero
+                for axis in axes_list:
+                    axis.set_ylim(bottom=0)
             # Give the legend vertical room when uncertain fits reach it
             expanded = [
                 pu.expand_ylim_for_legend(axis)
                 for axis in np.atleast_1d(axes)
             ]
             if any(expanded):
-                # Stacked panels keep a common y-range
-                stacked = np.atleast_1d(axes)
-                top = max(axis.get_ylim()[1] for axis in stacked)
-                for axis in stacked:
-                    axis.set_ylim(axis.get_ylim()[0], top)
                 figure.tight_layout()
         path = output_dir / filename
         figure.savefig(path, dpi=300)
@@ -1388,15 +1390,6 @@ def _axis_for_stack(axes, index):
     """Select the plotting axis associated with a saved stack-bin chain."""
     axes = np.asarray(axes, dtype=object)
     return axes.item() if axes.ndim == 0 else axes[index]
-
-
-def _stack_interval_label(coordinate, bounds, m_unit):
-    """Return a concise legend label for one marginalized stack interval."""
-    if coordinate == "sma":
-        unit = "AU"
-    else:
-        unit = "$M_{Jup}$" if m_unit == "jupiter" else "$M_{Earth}$"
-    return f"{bounds[0]:g}--{bounds[1]:g} {unit}"
 
 
 def piecewise_cumulative_figure(
