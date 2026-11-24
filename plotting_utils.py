@@ -280,11 +280,11 @@ def expand_ylim_for_legend(axis, step=1.08, max_steps=25):
 
 
 # Axis label for each injection x column (see completeness_utils.X_COLUMNS)
-X_LABELS = {"inj_au": "$a$ [AU]", "inj_period": "$P$ [days]"}
+X_LABELS = {"inj_au": "$a$ [au]", "inj_period": "$P$ [days]"}
 
 
 # Axis labels for the dimension-run completeness figures
-_DIMENSION_LABELS = {"a": "Semi-major axis [AU]",
+_DIMENSION_LABELS = {"a": "Semi-major axis [au]",
                      "m": r"Companion mass [$M_{\rm Jup}$]",
                      "e": "Eccentricity"}
 
@@ -928,7 +928,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
             y = mode[0]
             err = get_err(mode[0], low[0], high[0])
             xparam_label = 'SMA'
-            xunit_label = '[AU]'
+            xunit_label = '[au]'
             xlabel = xparam_label+' '+xunit_label
             
             ## For labeling stack dimension
@@ -945,7 +945,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
             
             ## For labeling stack dimension
             yparam_label = 'SMA'
-            yunit_label = 'AU'
+            yunit_label = 'au'
 
         # Use geometric centers for log bins
         centers = np.sqrt(x_edges[:-1] * x_edges[1:])
@@ -1116,7 +1116,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 styled("density_label", plot_ylabel) if rate_type == 'ORD'
                 else plot_ylabel, fontsize=label_size)
             # Set x-label on bottom-most axis (after reversing it's index 0)
-            ax[0].set_xlabel(styled("x_label", 'SMA [AU]'), fontsize=label_size)
+            ax[0].set_xlabel(styled("x_label", 'SMA [au]'), fontsize=label_size)
             if tick_label_fmt_fn.rotate_labels:
                 plt.setp(ax[0].get_xticklabels(), rotation=45, ha='right')
 
@@ -1190,7 +1190,7 @@ def plot_occurrence_hist(summary_dict, stack_dim, m_unit='earth', mtype='mtrue',
                 # Add right-side vertical label showing SMA range for this subplot
                 a_lo = a_edges[i]
                 a_hi = a_edges[i+1]
-                lbl = rf"SMA={twin_axis_formatter(a_lo)}-{twin_axis_formatter(a_hi)} AU"
+                lbl = rf"SMA={twin_axis_formatter(a_lo)}-{twin_axis_formatter(a_hi)} au"
                 lbl = styled("stack_label", lambda low, high: lbl)(a_lo, a_hi)
                 ax2 = ax_i.twinx()
                 ax2.set_ylabel(lbl, size=label_size-6, rotation=90)

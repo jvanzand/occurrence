@@ -29,7 +29,7 @@ eccentricity distribution while marginalizing over mass assumes the mass
 distribution is the same at every eccentricity. This is the same assumption
 the original code made implicitly for eccentricity, whose completeness maps
 average over Beta-distributed injections. It is weakest where real
-correlations exist (tidal circularization inside ~0.1 AU; possibly higher
+correlations exist (tidal circularization inside ~0.1 au; possibly higher
 eccentricities for more massive giants), so check it by splitting a sample on
 the marginalized dimension.
 
@@ -199,7 +199,7 @@ class MarginalDistribution:
 
 
 # Bounds of the default marginalized ranges. Masses are in Jupiter masses and
-# separations in AU.
+# separations in au.
 DEFAULT_BOUNDS = {"e": (0.0, 1.0), "a": (0.1, 30.0), "m": (0.4, 50.0)}
 
 # The injections' eccentricity distribution, Beta(0.867, 3.03) (Kipping 2013)
@@ -218,7 +218,7 @@ DEFAULT_MARGINALS = {
 
 # Literature population distributions, opt-in through population_marginal:
 #   e: the injection Beta (also the default)
-#   a: broken power law, C = 350, beta = -0.86, a0 = 3.6 AU, gamma = 1.59,
+#   a: broken power law, C = 350, beta = -0.86, a0 = 3.6 au, gamma = 1.59,
 #      Fulton et al. (2021)
 #   m: log-normal in log10 M with A = 0.09, mu = 0.23, sigma = 0.48 dex, the
 #      full-sample logG fit of the stellar-properties mass-function paper

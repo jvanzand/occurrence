@@ -22,7 +22,7 @@ plt.style.use(os.path.join(os.path.dirname(__file__), 'matplotlibrc'))
 
 
 # Each Tier 1 sets its y coordinate (mass "m" or mass ratio "q", true or
-# minimum) and its x coordinate: semi-major axis "a" (AU) or orbital period
+# minimum) and its x coordinate: semi-major axis "a" (au) or orbital period
 # "p" (days). Period Tier 1s take period edges in a_edges.
 DEFAULT_TIER1_DEFINITIONS = {
     "mtrue": {"m_or_q": "m", "true_or_sini": "true", "a_or_p": "a"},
@@ -1078,11 +1078,11 @@ def _plot_models(configuration, title, early_plot_paths):
 
 
 # Axis labels for runs with explicit dimension roles
-_AXIS_LABELS = {"a": "Semi-major axis [AU]",
+_AXIS_LABELS = {"a": "Semi-major axis [au]",
                 "m": r"Companion mass [$M_{Jup}$]", "e": "Eccentricity"}
 _DENSITY_UNITS = {"a": r"\Delta \log a", "m": r"\Delta \log M_c",
                   "e": r"\Delta e"}
-_STACK_NAMES = {"a": ("a", "AU"), "m": ("M_c", r"M_{Jup}"), "e": ("e", "")}
+_STACK_NAMES = {"a": ("a", "au"), "m": ("M_c", r"M_{Jup}"), "e": ("e", "")}
 _WEIGHTING_NAMES = {"beta": "Beta", "bpl": "broken power law",
                     "lognormal": "log-normal"}
 

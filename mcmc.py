@@ -1098,7 +1098,7 @@ def save_model_figures(
     output_dir.mkdir(parents=True, exist_ok=True)
     coordinate = "mass" if stack_dim == "a" else "sma"
     if coordinate == "sma":
-        x_label = "Semi-major axis [AU]"
+        x_label = "Semi-major axis [au]"
     elif mtype in {"qtrue", "qsini"}:
         x_label = r"Mass Ratio [$M_c/M_{\star}$]"
     else:
@@ -1422,7 +1422,7 @@ def piecewise_cumulative_figure(
         ]
     elif stack_dim == "m":
         model_edges, n_stack = a_edges, n_m
-        coordinate_label = "Semimajor axis (AU)"
+        coordinate_label = "Semimajor axis (au)"
         cumulative_samples = [
             np.column_stack([
                 np.zeros(samples.shape[0]),

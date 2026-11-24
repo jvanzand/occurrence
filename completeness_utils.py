@@ -158,7 +158,7 @@ def average_map(maps_dir, avg_map_dir, star_subset, ycol='inj_msini', m_unit='ea
 
 
 # Injection column for each x coordinate a Tier 1 can use: semi-major axis
-# (AU) or orbital period (days, as injected)
+# (au) or orbital period (days, as injected)
 X_COLUMNS = {"a": "inj_au", "p": "inj_period"}
 
 
@@ -345,7 +345,7 @@ def cell_completeness(xlims, ylims, interp_fn):
     Arguments:
         xlims (tuple of floats): Min and max separations defining cell 
 				(units are whatever the grid is in; for
-				this project, AU)
+				this project, au)
         ylims (tuple of floats): Min and max M values defining cell
 				(units are whatever the grid is in; for
 				this project, MJup)
@@ -375,7 +375,7 @@ def cell_completeness(xlims, ylims, interp_fn):
 
     if counter==0:
         avg = 0.001
-        print("All NANs encountered in bin with xlim={} AU and ylim={} M_E".format(xlims, ylims))
+        print("All NANs encountered in bin with xlim={} au and ylim={} M_E".format(xlims, ylims))
 
     else:
         avg = total/counter

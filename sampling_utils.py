@@ -22,7 +22,7 @@ Ms2Mj = (c.M_sun/c.M_jup).value
 # against the file's samples and raises if they disagree. All values are
 # from the CLS tables (GL 876, HD 219134) and the HD 28185 joint
 # RV-astrometry fit (Model 1, adopted). Values are
-# (median e, minus error, plus error, literature a [AU], source).
+# (median e, minus error, plus error, literature a [au], source).
 LITERATURE_ECCENTRICITIES = {
     ("GL876", 0): (0.273, 0.098, 0.093, 0.02183,
                    "GL 876 d, CLS table (reference not listed)"),
@@ -56,7 +56,7 @@ LITERATURE_A_TOLERANCE = 1.25
 def orbital_period(a_au, m, mstar, m_unit):
     """Orbital period in days from Kepler's third law.
 
-    ``a_au`` is the semi-major axis in AU, ``m`` the companion mass in
+    ``a_au`` is the semi-major axis in au, ``m`` the companion mass in
     ``m_unit`` ('earth', 'jupiter', or 'solar'), and ``mstar`` the host mass
     in M_sun; the total mass sets the period. This is the inverse of
     ``radvel_borrowed.semi_major_axis``, so periods and semi-major axes agree
@@ -177,9 +177,9 @@ def post_sampler2(companion_post_dir, star_df, num_samples=1000, m_unit='earth',
                             <= LITERATURE_A_TOLERANCE):
                         raise ValueError(
                             f"{chain_file} companion {comp_ind} has median "
-                            f"a = {sample_a:.3g} AU, but its literature "
+                            f"a = {sample_a:.3g} au, but its literature "
                             f"eccentricity is for {source} at "
-                            f"{literature_a:g} AU"
+                            f"{literature_a:g} au"
                         )
                     # A generator seeded by the companion, so these draws
                     # do not shift the global random stream that the other

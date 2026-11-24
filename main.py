@@ -197,7 +197,7 @@ def make_average_map(tier1_dir, tier2_dir,
     return
     
 def periods_from_samples(post_sample_dict, star_df, m_unit):
-    """Replace each companion's semi-major axis samples (AU) with periods.
+    """Replace each companion's semi-major axis samples (au) with periods.
 
     Kepler's third law with the host mass from ``star_df`` and each draw's
     companion mass. Only the drawn samples are converted (500 per companion
@@ -253,7 +253,7 @@ def prep_post_draws(tier1_dir, tier2_dir,
             convention depends on custom post sampling function
         sampling_func (function): Function from sampling_utils.py
                              that samples posteriors
-        x_param (str): 'a' keeps the semi-major axis samples (AU); 'p'
+        x_param (str): 'a' keeps the semi-major axis samples (au); 'p'
                              replaces them with orbital periods (days) from
                              Kepler's third law, using the host mass in
                              star_df and each draw's companion mass. The
@@ -806,7 +806,7 @@ def plot_dimension_average_maps(tier1_dir, tier2_dir, spec, star_names,
         with open(os.path.join(paths["engine_average"], "interp_fn.pkl"),
                   "rb") as stream:
             engine_map = pickle.load(stream)
-        units = {"a": " AU", "m": r" $M_{\rm Jup}$", "e": ""}
+        units = {"a": " au", "m": r" $M_{\rm Jup}$", "e": ""}
         averaged = ", ".join(
             f"{name} = {low:g}-{high:g}{units[name]} "
             f"({spec.dimensions[name].distribution.form})"
@@ -897,7 +897,7 @@ def weigh_dimension_samples(spec, samples, star_df, host_maps_dir, average,
                             full_average=None):
     """Turn (a, m, e) posterior samples into a catalog for one spec.
 
-    ``samples`` maps companion names to ``[a, m, e]`` arrays (M_Jup, AU);
+    ``samples`` maps companion names to ``[a, m, e]`` arrays (M_Jup, au);
     ``host_maps_dir`` holds the stars' sliced maps and ``average`` is the
     sample's sliced average. For each draw, records:
       * the engine coordinates of the x and y slots (e as 10**e);

@@ -1204,7 +1204,7 @@ def plot_model_cdf_comparison(
         elif coordinate == "sma" and tier1_names <= _PERIOD_TIER1S:
             xlabel = "Orbital period [days]"
         elif coordinate == "sma":
-            xlabel = "Semi-major axis [AU]"
+            xlabel = "Semi-major axis [au]"
         elif tier1_names <= _MASS_RATIO_TIER1S:
             xlabel = r"Mass Ratio [$M_c/M_{\star}$]"
         else:

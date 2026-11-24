@@ -5,7 +5,7 @@ slots, ``x`` and ``y``, on logarithmic axes. Originally ``x`` was semi-major
 axis and ``y`` companion mass, with eccentricity marginalized implicitly by
 the completeness maps. A :class:`DimensionSpec` generalizes that:
 
-* Each of the three dimensions, ``a`` (semi-major axis, AU), ``m``
+* Each of the three dimensions, ``a`` (semi-major axis, au), ``m``
   (companion mass in M_Jup, true or M sin i per the Tier 1 folder), and ``e``
   (eccentricity), is either **fit** (with bin edges) or **marginalized**
   (with bounds and a population distribution: by default flat in ``a`` and
