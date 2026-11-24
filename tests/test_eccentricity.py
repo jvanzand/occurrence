@@ -465,7 +465,7 @@ def test_weigh_dimension_samples_builds_engine_catalog(tmp_path):
         x, y, np.full((len(edges) - 1, 20, 20), 0.3), edges
     )
     spec = dm.parse_dimensions(ECC_FIT)
-    a = np.array([1.0, 1.0, 1.0, 50.0])     # the last is outside 0.1-30 AU
+    a = np.array([1.0, 1.0, 1.0, 50.0])     # the last is outside 0.1-30 au
     m = np.array([2.0, 2.0, 2.0, 2.0])
     e = np.array([0.05, 0.15, 0.5, 0.5])
     star_df = pd.DataFrame({"star_name": ["star"], "comp_list": [["c"]]})

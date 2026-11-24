@@ -95,7 +95,7 @@ def semi_major_axis(P, Mtotal):
         Mtotal (float): Mass [Msun]
 
     Returns:
-        float or array: semi-major axis in AU
+        float or array: semi-major axis in au
     """
 
     # convert inputs to array so they work with units
