@@ -1441,17 +1441,25 @@ def _format_rounded(value, decimal_places):
     return f"{rounded:.0f}"
 
 
-def _format_parameter(mode, low, high):
-    """Format a central value and asymmetric errors at the tighter precision."""
-    low_error = float(mode) - float(low)
-    high_error = float(high) - float(mode)
-    if (not np.isfinite([mode, low_error, high_error]).all() or
+def _format_parameter(center, low, high):
+    """Format a central value with asymmetric errors at the tighter precision.
+
+    ``center`` is a posterior median (with 16th/84th-percentile bounds) or a
+    posterior mode (with HDI bounds); ``low`` and ``high`` are the interval
+    limits, and the errors are their distances from ``center``.
+    """
+    low_error = float(center) - float(low)
+    high_error = float(high) - float(center)
+    if (not np.isfinite([center, low_error, high_error]).all() or
             low_error <= 0 or high_error <= 0):
-        raise ValueError("parameter mode and HDI must define two positive errors")
+        raise ValueError(
+            "parameter value and interval bounds must define two positive "
+            "errors"
+        )
     tighter_error = min(low_error, high_error)
     decimal_places = max(0, -int(np.floor(np.log10(tighter_error))))
     return (
-        f"{_format_rounded(mode, decimal_places)}"
+        f"{_format_rounded(center, decimal_places)}"
         f"^{{+{_format_rounded(high_error, decimal_places)}}}"
         f"_{{-{_format_rounded(low_error, decimal_places)}}}"
     )
