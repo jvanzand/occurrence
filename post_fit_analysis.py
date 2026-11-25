@@ -214,19 +214,20 @@ def _plot_companions_for_result(
     plt.style.use(str(Path(__file__).resolve().parent / "matplotlibrc"))
 
     parameter_configs = {
-        "mstar": ("Mstar", r"$M_{\star}$ [$M_{\odot}$]", "Blues"),
-        "mass": ("Mstar", r"$M_{\star}$ [$M_{\odot}$]", "Blues"),
-        "feh": ("feh", "[Fe/H]", "seismic"),
-        "metallicity": ("feh", "[Fe/H]", "seismic"),
-        "age": ("age", "Age [Gyr]", "Greens"),
+        "mstar": ("Mstar", r"$M_{\star}$ [$M_{\odot}$]"),
+        "mass": ("Mstar", r"$M_{\star}$ [$M_{\odot}$]"),
+        "feh": ("feh", "[Fe/H]"),
+        "metallicity": ("feh", "[Fe/H]"),
+        "age": ("age", "Age [Gyr]"),
     }
     parameter_key = re.sub(r"[^a-z]", "", str(stellar_parameter).lower())
     try:
-        column, colorbar_label, colormap = parameter_configs[parameter_key]
+        column, colorbar_label = parameter_configs[parameter_key]
     except KeyError:
         raise ValueError(
             "stellar_parameter must be one of 'Mstar', 'FeH', or 'Age'"
         )
+    colormap = pu.STELLAR_COLORS[column][0]
 
     supplied_path = Path(results_path)
     candidates = []
@@ -387,7 +388,7 @@ def _plot_companions_for_result(
                 age_max += 0.5
         else:
             age_min, age_max = 0.0, 1.0
-        age_norm = colors.Normalize(vmin=age_min, vmax=age_max)
+        age_norm = pu.stellar_color_norm("age", age_min, age_max)
         if colored.any():
             points = axis.scatter(
                 selected.loc[colored, "a_post_med"],
@@ -411,9 +412,12 @@ def _plot_companions_for_result(
                 color="black", marker="x", s=65, linewidths=1.5, zorder=111,
             )
     else:
+        column_values = selected[column].to_numpy(dtype=float)
         points = axis.scatter(
             selected["a_post_med"], selected["Mtrue_post_med"],
             c=selected[column], cmap=colormap, edgecolor="black", s=65,
+            norm=pu.stellar_color_norm(
+                column, np.nanmin(column_values), np.nanmax(column_values)),
             zorder=110,
         )
     # Match the catalog/completeness layout: completeness colorbar at right,
@@ -648,6 +652,7 @@ def plot_stellar_mass_feh_scatter(results_dir, sample_catalog, bins=20):
     """
     from matplotlib import pyplot as plt
     from matplotlib.lines import Line2D
+    from occurrence import plotting_utils as pu
     from matplotlib.patches import Patch
     from matplotlib.ticker import MaxNLocator
 
@@ -674,7 +679,7 @@ def plot_stellar_mass_feh_scatter(results_dir, sample_catalog, bins=20):
     high_mass, low_mass = _split_by_cut(mass, mass_cut)
     rich, poor = _split_by_cut(feh, feh_cut)
 
-    mass_colors = {"high": "tab:red", "low": "tab:blue"}
+    mass_colors = pu.MASS_SAMPLE_COLORS
     # Metallicity sample sets the opacity: metal-poor stars are fainter
     feh_alpha = {"rich": 0.9, "poor": 0.35}
     size = plt.rcParams["font.size"]

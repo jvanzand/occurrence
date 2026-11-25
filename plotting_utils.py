@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as ptch
 from matplotlib.ticker import FixedLocator, NullLocator, FormatStrFormatter, FuncFormatter
 from pathlib import Path
+import copy
 import itertools as itt
 
 
@@ -283,6 +284,40 @@ def expand_ylim_for_legend(axis, step=1.08, max_steps=25):
 X_LABELS = {"inj_au": "$a$ [au]", "inj_period": "$P$ [days]"}
 
 
+# Colors for stellar properties and detection probability. None uses red or
+# blue, which the occurrence models already use (sigmoid blue, log-Gaussian
+# tomato), and each diverging scale is centered on the value that divides the
+# high and low samples.
+_TEAL_GOLD = matplotlib.colors.LinearSegmentedColormap.from_list(
+    "teal_gold", ["#00504f", "#1f9a98", "#a9dcd7", "#f5f5f5",
+                  "#efd88a", "#cf9a1a", "#7a5200"])
+_MAGENTA_LIME = matplotlib.colors.LinearSegmentedColormap.from_list(
+    "magenta_lime", ["#7d0a63", "#c13fa0", "#eab3dc", "#f5f5f5",
+                     "#d3e38c", "#8aa31a", "#4a6000"])
+# Colormap and center value by catalog column (the age center is the 5 Gyr
+# division of the age experiments)
+STELLAR_COLORS = {
+    "Mstar": (plt.get_cmap("PuOr"), 1.0),
+    "feh": (_TEAL_GOLD, 0.0),
+    "age": (_MAGENTA_LIME, 5.0),
+}
+# High-mass (purple) and low-mass (orange) samples: the ends of the mass scale
+MASS_SAMPLE_COLORS = {"high": plt.get_cmap("PuOr")(0.85),
+                      "low": plt.get_cmap("PuOr")(0.15)}
+# Light gray: low detection probability is darker, but light enough to keep
+# the host-colored companion markers visible
+COMPLETENESS_CMAP = matplotlib.colors.ListedColormap(
+    plt.get_cmap("Greys_r")(np.linspace(0.42, 1, 256)))
+
+
+def stellar_color_norm(column, vmin, vmax):
+    """Return a color norm for a stellar column, centered on its split value."""
+    center = STELLAR_COLORS[column][1]
+    if vmin < center < vmax:
+        return matplotlib.colors.TwoSlopeNorm(center, vmin=vmin, vmax=vmax)
+    return matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+
+
 # Axis labels for the dimension-run completeness figures
 _DIMENSION_LABELS = {"a": "Semi-major axis [au]",
                      "m": r"Companion mass [$M_{\rm Jup}$]",
@@ -413,8 +448,8 @@ def completeness_plotter(xgrid, ygrid, zgrid, save_path, title, save_plot=True,
     fig = plt.figure(figsize=(7.5, 5.25))
     plt.subplots_adjust(bottom=0.18, left=0.22, right=0.95)
     
-    CS = plt.contourf(xgrid, ygrid, zgrid, 10, cmap=plt.cm.Reds_r, vmax=0.9, alpha=0.7)
-    fifty = plt.contour(xgrid, ygrid, zgrid, [0.5])
+    CS = plt.contourf(xgrid, ygrid, zgrid, 10, cmap=COMPLETENESS_CMAP, vmax=1.0, alpha=0.75)
+    fifty = plt.contour(xgrid, ygrid, zgrid, [0.5], colors='k', linewidths=2)
 
     
     ax = plt.gca()
@@ -647,17 +682,17 @@ def plot_catalog(tier1_dir, tier2_dir,
         ## Make space on top of plot for colorbar
         comp_fig.subplots_adjust(top=0.82, left=0.14, right=0.98, bottom=0.14)
         
-        star_param_dict = {'Mstar':['M$_{\star}$ (M$_{\odot}$)', 'Blues'],
-                           'feh':['[Fe/H]', 'seismic'],
-                           'age':['Age (Gyr)', 'Greens']}
+        star_param_dict = {'Mstar':['M$_{\star}$ (M$_{\odot}$)', 'Mstar'],
+                           'feh':['[Fe/H]', 'feh'],
+                           'age':['Age (Gyr)', 'age']}
         star_cmap_label, star_cmap = star_param_dict[star_param]
         
         ## Make colormap
         comp_host_names = [name.split('_')[0] for name in comp_names]
         star_sub_df = star_df[star_df['cps_identifier'].isin(comp_host_names)]
-        norm = matplotlib.colors.Normalize(vmin=star_sub_df[star_param].min(),
-                                           vmax=star_sub_df[star_param].max())
-        cmap = plt.get_cmap(star_cmap)
+        norm = stellar_color_norm(star_param, star_sub_df[star_param].min(),
+                                  star_sub_df[star_param].max())
+        cmap = copy.copy(STELLAR_COLORS[star_cmap][0])
         cmap.set_bad('gray')
         
         for cn in comp_names:
